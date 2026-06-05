@@ -18,7 +18,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { useAuth } from "@/context/AuthContext";
 import { useColors } from "@/hooks/useColors";
-import { supabase } from "@/lib/supabase";
+import { supabase, debugSupabaseUrl } from "@/lib/supabase";
 
 export default function LoginScreen() {
   const { session } = useAuth();
@@ -37,17 +37,21 @@ export default function LoginScreen() {
     return <Redirect href="/(tabs)/" />;
   }
 
+  const HEALTH_URL = "https://krbrmskfvpjuckbkegc.supabase.co/auth/v1/health";
+
   const handleTestConnection = async () => {
     setTestLoading(true);
     setTestResult(null);
     try {
-      const res = await fetch(
-        "https://krbrmskfvpjuckbkegc.supabase.co/auth/v1/health"
-      );
+      const res = await fetch(HEALTH_URL);
       const text = await res.text();
-      setTestResult(`✅ ${res.status} ${res.statusText}\n${text}`);
+      setTestResult(
+        `platform: ${Platform.OS}\nenv url: ${debugSupabaseUrl}\nfetch url: ${HEALTH_URL}\n\n✅ ${res.status} ${res.statusText}\n${text}`
+      );
     } catch (e: unknown) {
-      setTestResult(`❌ ${e instanceof Error ? e.message : String(e)}`);
+      setTestResult(
+        `platform: ${Platform.OS}\nenv url: ${debugSupabaseUrl}\nfetch url: ${HEALTH_URL}\n\n❌ ${e instanceof Error ? e.message : String(e)}`
+      );
     } finally {
       setTestLoading(false);
     }

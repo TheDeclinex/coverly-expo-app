@@ -19,3 +19,6 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
     detectSessionInUrl: false,
   },
 });
+
+// Exported for on-screen diagnostics only — not used for anything else
+export const debugSupabaseUrl: string = supabaseUrl;
