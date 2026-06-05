@@ -37,7 +37,7 @@ export default function LoginScreen() {
     return <Redirect href="/(tabs)/" />;
   }
 
-  const HEALTH_URL = "https://krbrmskfvpjuckbkegc.supabase.co/auth/v1/health";
+  const HEALTH_URL = "https://krbrmskfvpjukcbkbegc.supabase.co/auth/v1/health";
 
   const handleTestConnection = async () => {
     setTestLoading(true);
