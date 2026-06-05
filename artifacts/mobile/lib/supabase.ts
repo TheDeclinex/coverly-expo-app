@@ -18,6 +18,10 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
     persistSession: true,
     detectSessionInUrl: false,
   },
+  global: {
+    // Force React Native's native fetch — the bundled XHR polyfill fails on iOS
+    fetch: fetch.bind(globalThis),
+  },
 });
 
 // Diagnostics only — never log or display the full key
