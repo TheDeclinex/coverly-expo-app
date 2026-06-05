@@ -1,0 +1,70 @@
+I have built a working web app called Coverly using UI Bakery, and I am exploring whether it can be rebuilt as a proper native mobile app.
+
+I want you to create an Expo React Native app using TypeScript. This should be a real native mobile app prototype, not a WebView wrapper.
+
+Important context:
+Coverly is a home contents inventory app for insurance documentation. Users create properties, add rooms, scan or add household items, store photos/evidence, estimate replacement values, and eventually generate insurance-ready claim packs.
+
+For this first prototype, do not rebuild the whole product. Build a narrow proof-of-concept only.
+
+The first version should include:
+
+1. Supabase Auth login screen.
+2. Session persistence so the user stays logged in after closing/reopening the app.
+3. A simple home/properties screen after login.
+4. Load the logged-in user’s properties from Supabase.
+5. Tap a property to view its rooms.
+6. Tap a room to view inventory items.
+7. Show each item with:
+
+   * item name
+   * description
+   * category
+   * estimated replacement price
+   * quantity if available
+   * image/photo if available
+8. Simple mobile-first navigation:
+
+   * Properties → Rooms → Items → Item detail
+9. Clean simple UI using React Native components.
+10. Basic loading states and empty states.
+11. Basic error messages if Supabase queries fail.
+12. Keep the codebase structured and easy to extend later.
+
+Do not implement these yet:
+
+* AI scanning
+* camera upload
+* billing / RevenueCat
+* claims pack generation
+* admin console
+* complex offline mode
+* full UI Bakery feature parity
+
+Use placeholder Supabase queries first and ask me for the real table names, columns, and relationships before finalising the data layer.
+
+Assume my backend already exists in Supabase, including auth, database tables, storage, and server-side functions.
+
+Security requirements:
+
+* Use only the Supabase public URL and anon key in the mobile app.
+* Do not use or ask for the Supabase service role key.
+* Do not put OpenAI, Stripe, RevenueCat secret keys, or any admin credentials inside the app.
+* Any AI or private server logic should remain server-side.
+
+Technical preferences:
+
+* Expo
+* React Native
+* TypeScript
+* Supabase JS client
+* Expo Router or a clear navigation structure
+* Environment variables for Supabase config
+* Code written clearly for a non-developer founder to understand and continue iterating with AI assistance
+
+Before writing the full app, first give me:
+
+1. The proposed project structure.
+2. The main files you will create.
+3. Any Supabase schema details you need from me.
+4. The exact next step I should take.
