@@ -1,0 +1,123 @@
+The DEV Supabase native-spike backend is now ready.
+
+Use only this DEV Supabase project.
+
+I have created:
+
+* 1 test auth user: [jayvc2@gmail.com](mailto:jayvc2@gmail.com)
+* 1 sample property/file
+* 3 sample rooms
+* 6 sample items
+
+Use this exact schema:
+
+Top-level property/file table:
+
+* table: `inventory_files`
+* primary key: `id` text
+* owner column: `user_id` uuid
+* display fields:
+
+  * `name`
+  * `status`
+  * `contents_sum_insured`
+  * `created_by_email`
+  * `property_type`
+  * `property_cover_image_url`
+  * `created_date`
+  * `last_modified`
+
+Rooms table:
+
+* table: `inventory_rooms`
+* primary key: `id` uuid
+* property/file link: `file_id` text → `inventory_files.id`
+* owner column: `user_id` uuid
+* display fields:
+
+  * `name`
+  * `room_type`
+  * `sort_order`
+  * `cover_photo_url`
+  * `notes`
+  * `description`
+  * `archived_at`
+
+Items table:
+
+* table: `inventory_items`
+* primary key: `id` text
+* property/file link: `file_id` text → `inventory_files.id`
+* room link: `room_id` uuid → `inventory_rooms.id`
+* display fields:
+
+  * `name`
+  * `category`
+  * `confidence`
+  * `estimated_price`
+  * `unit_estimated_price`
+  * `quantity`
+  * `quantity_estimate`
+  * `valuation_basis`
+  * `description`
+  * `image_url`
+  * `photo_url`
+  * `notes`
+  * `brand_maker`
+  * `model_series`
+  * `condition_label`
+  * `purchase_source`
+  * `original_purchase_price`
+  * `purchase_year_approx`
+  * `web_listing_url`
+  * `web_listing_title`
+  * `web_listing_price`
+  * `web_listing_source`
+  * `sort_order`
+
+Query rules:
+
+* Properties screen: select from `inventory_files`; RLS should restrict results to the logged-in user.
+* Rooms screen: select from `inventory_rooms` where `file_id = selected inventory_files.id` and `archived_at is null`, ordered by `sort_order`.
+* Items screen: select from `inventory_items` where `room_id = selected inventory_rooms.id`, ordered by `sort_order`.
+* Item detail screen: select from `inventory_items` where `id = selected item id`.
+
+The app must remain read-only for this first version.
+
+Do not implement:
+
+* create/edit/delete
+* uploads
+* camera capture
+* AI scan
+* replacement price search
+* billing
+* claims pack
+* admin features
+* migrations
+* production integrations
+
+Use environment variables/secrets:
+
+* `EXPO_PUBLIC_SUPABASE_URL`
+* `EXPO_PUBLIC_SUPABASE_ANON_KEY`
+
+Do not ask for or use:
+
+* Supabase service role key
+* database password
+* JWT secret
+* OpenAI key
+* Stripe key
+* RevenueCat secret key
+
+Now build the first Expo React Native app proving this flow:
+
+Login → Properties → Rooms → Items → Item detail
+
+After building, tell me:
+
+1. What files were created.
+2. Where the Supabase environment variables go.
+3. How to run it.
+4. How to preview it on my phone.
