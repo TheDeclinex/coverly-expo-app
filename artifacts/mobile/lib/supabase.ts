@@ -20,5 +20,9 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   },
 });
 
-// Exported for on-screen diagnostics only — not used for anything else
+// Diagnostics only — never log or display the full key
 export const debugSupabaseUrl: string = supabaseUrl;
+export const debugAnonKeyExists: boolean = supabaseAnonKey.length > 0;
+export const debugAnonKeyPrefix: string = supabaseAnonKey.slice(0, 8);
+// Exported for use in authenticated fetch calls (e.g. test button)
+export const anonKey: string = supabaseAnonKey;

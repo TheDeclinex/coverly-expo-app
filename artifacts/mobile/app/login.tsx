@@ -18,7 +18,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { useAuth } from "@/context/AuthContext";
 import { useColors } from "@/hooks/useColors";
-import { supabase, debugSupabaseUrl } from "@/lib/supabase";
+import { supabase, debugSupabaseUrl, debugAnonKeyExists, debugAnonKeyPrefix, anonKey } from "@/lib/supabase";
 
 export default function LoginScreen() {
   const { session } = useAuth();
@@ -42,15 +42,21 @@ export default function LoginScreen() {
   const handleTestConnection = async () => {
     setTestLoading(true);
     setTestResult(null);
+    const keyDebug = `key set: ${debugAnonKeyExists}, prefix: ${debugAnonKeyPrefix}...`;
     try {
-      const res = await fetch(HEALTH_URL);
+      const res = await fetch(HEALTH_URL, {
+        headers: {
+          apikey: anonKey,
+          Authorization: `Bearer ${anonKey}`,
+        },
+      });
       const text = await res.text();
       setTestResult(
-        `platform: ${Platform.OS}\nenv url: ${debugSupabaseUrl}\nfetch url: ${HEALTH_URL}\n\n✅ ${res.status} ${res.statusText}\n${text}`
+        `platform: ${Platform.OS}\nurl: ${debugSupabaseUrl}\n${keyDebug}\n\n✅ ${res.status} ${res.statusText}\n${text}`
       );
     } catch (e: unknown) {
       setTestResult(
-        `platform: ${Platform.OS}\nenv url: ${debugSupabaseUrl}\nfetch url: ${HEALTH_URL}\n\n❌ ${e instanceof Error ? e.message : String(e)}`
+        `platform: ${Platform.OS}\nurl: ${debugSupabaseUrl}\n${keyDebug}\n\n❌ ${e instanceof Error ? e.message : String(e)}`
       );
     } finally {
       setTestLoading(false);
