@@ -30,10 +30,28 @@ export default function LoginScreen() {
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [testResult, setTestResult] = useState<string | null>(null);
+  const [testLoading, setTestLoading] = useState(false);
 
   if (session) {
     return <Redirect href="/(tabs)/" />;
   }
+
+  const handleTestConnection = async () => {
+    setTestLoading(true);
+    setTestResult(null);
+    try {
+      const res = await fetch(
+        "https://krbrmskfvpjuckbkegc.supabase.co/auth/v1/health"
+      );
+      const text = await res.text();
+      setTestResult(`✅ ${res.status} ${res.statusText}\n${text}`);
+    } catch (e: unknown) {
+      setTestResult(`❌ ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setTestLoading(false);
+    }
+  };
 
   const handleLogin = async () => {
     if (!email.trim() || !password) {
@@ -165,6 +183,26 @@ export default function LoginScreen() {
       fontFamily: "Inter_600SemiBold",
       color: colors.primaryForeground,
     },
+    testButton: {
+      borderWidth: 1,
+      height: 44,
+      alignItems: "center",
+      justifyContent: "center",
+      marginTop: 12,
+    },
+    testButtonText: {
+      fontSize: 14,
+      fontFamily: "Inter_400Regular",
+    },
+    testResult: {
+      marginTop: 12,
+      padding: 12,
+    },
+    testResultText: {
+      fontSize: 12,
+      fontFamily: "Inter_400Regular",
+      lineHeight: 18,
+    },
   });
 
   return (
@@ -259,6 +297,32 @@ export default function LoginScreen() {
                 <Text style={styles.loginButtonText}>Sign In</Text>
               )}
             </Pressable>
+
+            <Pressable
+              style={({ pressed }) => [
+                styles.testButton,
+                { borderColor: colors.border, borderRadius: colors.radius },
+                (testLoading || pressed) && { opacity: 0.6 },
+              ]}
+              onPress={handleTestConnection}
+              disabled={testLoading}
+            >
+              {testLoading ? (
+                <ActivityIndicator color={colors.mutedForeground} size="small" />
+              ) : (
+                <Text style={[styles.testButtonText, { color: colors.mutedForeground }]}>
+                  Test Supabase Connection
+                </Text>
+              )}
+            </Pressable>
+
+            {testResult && (
+              <View style={[styles.testResult, { backgroundColor: colors.muted, borderRadius: colors.radius }]}>
+                <Text style={[styles.testResultText, { color: colors.foreground }]}>
+                  {testResult}
+                </Text>
+              </View>
+            )}
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
