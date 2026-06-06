@@ -25,7 +25,7 @@ import { buildItemInsertPayload } from "@/lib/item-insert-helpers";
 import { supabase } from "@/lib/supabase";
 import type { InventoryFile, InventoryRoom } from "@/types";
 
-const ITEM_PHOTOS_BUCKET = "inventory-photos";
+const ITEM_PHOTOS_BUCKET = "item-photos";
 
 function FormField({
   label,
@@ -204,15 +204,17 @@ export default function AddItemScreen() {
     itemFileId: string
   ): Promise<{ url: string | null; uploadErrMsg: string | null }> => {
     try {
+      const userId = session?.user?.id ?? "anon";
       const response = await fetch(uri);
       const blob = await response.blob();
-      const ext = (uri.split(".").pop() ?? "jpg").split("?")[0];
-      const path = `${itemFileId}/${Date.now()}.${ext}`;
+      const filename = uri.split("/").pop()?.split("?")[0] ?? "";
+      const ext = filename.includes(".") ? (filename.split(".").pop()?.toLowerCase() ?? "jpeg") : "jpeg";
+      const path = `${userId}/${itemFileId}/${Date.now()}.${ext}`;
       const { data: uploadData, error: uploadError } = await supabase.storage
         .from(ITEM_PHOTOS_BUCKET)
         .upload(path, blob, { contentType: `image/${ext}`, upsert: false });
       if (uploadError) {
-        console.warn("[AddItem] Photo upload failed:", uploadError.message);
+        console.warn("[AddItem] Photo upload failed:", uploadError.message, "path:", path, "bucket:", ITEM_PHOTOS_BUCKET);
         return { url: null, uploadErrMsg: uploadError.message };
       }
       const { data: urlData } = supabase.storage

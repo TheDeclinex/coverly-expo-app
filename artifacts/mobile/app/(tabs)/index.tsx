@@ -298,18 +298,8 @@ export default function HomeScreen() {
     });
   };
 
-  const quickActions = [
-    {
-      icon: "plus-circle" as const,
-      label: "Add item",
-      onPress: () => navigateWithProperty("/(tabs)/add-item"),
-    },
-    {
-      icon: "zap" as const,
-      label: "Scan items",
-      onPress: () => navigateWithProperty("/(tabs)/scan"),
-    },
-  ];
+  const handleScanItems = () => navigateWithProperty("/(tabs)/scan");
+  const handleAddManually = () => navigateWithProperty("/(tabs)/add-item");
 
   const renderHeader = () => {
     if (!portfolio || !properties || properties.length === 0) return null;
@@ -363,25 +353,42 @@ export default function HomeScreen() {
         </View>
 
         <View style={{ flexDirection: "row", gap: 10 }}>
-          {quickActions.map((a) => (
-            <Pressable
-              key={a.label}
-              onPress={a.onPress}
-              style={({ pressed }) => [
-                styles.quickAction,
-                {
-                  backgroundColor: colors.primary,
-                  borderRadius: colors.radius,
-                  opacity: pressed ? 0.85 : 1,
-                },
-              ]}
-            >
-              <Feather name={a.icon} size={18} color={colors.primaryForeground} />
-              <Text style={[styles.quickActionText, { color: colors.primaryForeground }]}>
-                {a.label}
-              </Text>
-            </Pressable>
-          ))}
+          <Pressable
+            onPress={handleScanItems}
+            style={({ pressed }) => [
+              styles.quickAction,
+              {
+                backgroundColor: colors.primary,
+                borderRadius: colors.radius,
+                opacity: pressed ? 0.85 : 1,
+                flex: 2,
+              },
+            ]}
+          >
+            <Feather name="zap" size={18} color={colors.primaryForeground} />
+            <Text style={[styles.quickActionText, { color: colors.primaryForeground }]}>
+              Scan items
+            </Text>
+          </Pressable>
+          <Pressable
+            onPress={handleAddManually}
+            style={({ pressed }) => [
+              styles.quickAction,
+              {
+                backgroundColor: colors.secondary,
+                borderRadius: colors.radius,
+                borderWidth: 1,
+                borderColor: colors.border,
+                opacity: pressed ? 0.85 : 1,
+                flex: 1,
+              },
+            ]}
+          >
+            <Feather name="plus-circle" size={18} color={colors.foreground} />
+            <Text style={[styles.quickActionText, { color: colors.foreground }]}>
+              Add manually
+            </Text>
+          </Pressable>
         </View>
 
         <Text style={[styles.sectionHeading, { color: colors.foreground }]}>

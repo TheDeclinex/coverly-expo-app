@@ -125,7 +125,15 @@ export default function ItemsScreen() {
     enabled: !!session && !!id,
   });
 
-  const handleAddItem = async () => {
+  const handleScanRoom = async () => {
+    await Haptics.selectionAsync();
+    router.push({
+      pathname: "/(tabs)/scan",
+      params: { roomId: id, roomName: name, fileId: fileId ?? "" },
+    });
+  };
+
+  const handleAddManually = async () => {
     await Haptics.selectionAsync();
     router.push({
       pathname: "/(tabs)/add-item",
@@ -139,9 +147,14 @@ export default function ItemsScreen() {
         options={{
           title: name ?? "Items",
           headerRight: () => (
-            <Pressable onPress={handleAddItem} style={{ padding: 4 }} hitSlop={8}>
-              <Feather name="plus" size={22} color={colors.primary} />
-            </Pressable>
+            <View style={{ flexDirection: "row", gap: 4, alignItems: "center" }}>
+              <Pressable onPress={handleScanRoom} style={{ padding: 4 }} hitSlop={8}>
+                <Feather name="zap" size={20} color={colors.primary} />
+              </Pressable>
+              <Pressable onPress={handleAddManually} style={{ padding: 4 }} hitSlop={8}>
+                <Feather name="plus" size={22} color={colors.primary} />
+              </Pressable>
+            </View>
           ),
         }}
       />
@@ -183,24 +196,44 @@ export default function ItemsScreen() {
           />
           <View
             style={[
-              styles.fab,
-              {
-                bottom: insets.bottom + 20,
-                backgroundColor: colors.primary,
-              },
+              styles.fabRow,
+              { bottom: insets.bottom + 20 },
             ]}
           >
             <Pressable
-              onPress={handleAddItem}
+              onPress={handleScanRoom}
               style={({ pressed }) => [
-                styles.fabInner,
-                { opacity: pressed ? 0.85 : 1 },
+                styles.fabBtn,
+                {
+                  backgroundColor: colors.primary,
+                  opacity: pressed ? 0.85 : 1,
+                  flex: 1,
+                },
               ]}
-              hitSlop={8}
+              hitSlop={4}
             >
-              <Feather name="plus" size={24} color={colors.primaryForeground} />
+              <Feather name="zap" size={20} color={colors.primaryForeground} />
               <Text style={[styles.fabText, { color: colors.primaryForeground }]}>
-                Add item
+                Scan room
+              </Text>
+            </Pressable>
+            <Pressable
+              onPress={handleAddManually}
+              style={({ pressed }) => [
+                styles.fabBtn,
+                {
+                  backgroundColor: colors.secondary,
+                  borderWidth: 1,
+                  borderColor: colors.border,
+                  opacity: pressed ? 0.85 : 1,
+                  flex: 1,
+                },
+              ]}
+              hitSlop={4}
+            >
+              <Feather name="plus" size={20} color={colors.foreground} />
+              <Text style={[styles.fabText, { color: colors.foreground }]}>
+                Add manually
               </Text>
             </Pressable>
           </View>
@@ -245,23 +278,27 @@ const styles = StyleSheet.create({
   qty: { fontSize: 12, fontFamily: "Inter_400Regular" },
   price: { fontSize: 15, fontFamily: "Inter_600SemiBold", marginTop: 2 },
   chevron: { paddingRight: 12 },
-  fab: {
+  fabRow: {
     position: "absolute",
+    left: 20,
     right: 20,
-    borderRadius: 28,
-    overflow: "hidden",
+    flexDirection: "row",
+    gap: 10,
     elevation: 4,
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.18,
     shadowRadius: 6,
   },
-  fabInner: {
+  fabBtn: {
     flexDirection: "row",
     alignItems: "center",
+    justifyContent: "center",
     gap: 8,
-    paddingHorizontal: 20,
+    paddingHorizontal: 16,
     paddingVertical: 14,
+    borderRadius: 28,
+    overflow: "hidden",
   },
   fabText: { fontSize: 15, fontFamily: "Inter_600SemiBold" },
 });

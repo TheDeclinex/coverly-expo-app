@@ -28,7 +28,7 @@ import { buildItemUpdatePayload } from "@/lib/item-insert-helpers";
 import { supabase } from "@/lib/supabase";
 import type { InventoryItem, InventoryRoom } from "@/types";
 
-const ITEM_PHOTOS_BUCKET = "inventory-photos";
+const ITEM_PHOTOS_BUCKET = "item-photos";
 
 function FormField({
   label,
@@ -209,14 +209,15 @@ export default function EditItemScreen() {
     try {
       const { data: sessionData } = await supabase.auth.getSession();
       const accessToken = sessionData?.session?.access_token;
-      const userId = sessionData?.session?.user?.id ?? "none";
+      const userId = sessionData?.session?.user?.id ?? "anon";
       const email = sessionData?.session?.user?.email ?? "none";
       const hasToken = !!accessToken;
 
       const response = await fetch(uri);
       const blob = await response.blob();
-      const ext = (uri.split(".").pop() ?? "jpg").split("?")[0].toLowerCase();
-      const path = `${fileId}/${Date.now()}.${ext}`;
+      const filename = uri.split("/").pop()?.split("?")[0] ?? "";
+      const ext = filename.includes(".") ? (filename.split(".").pop()?.toLowerCase() ?? "jpeg") : "jpeg";
+      const path = `${userId}/${fileId}/${Date.now()}.${ext}`;
 
       const uploadDiag = {
         supabase_host: "krbrmskfvpjukcbkbegc.supabase.co",

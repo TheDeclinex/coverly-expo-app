@@ -414,7 +414,7 @@ export default function PropertyDetailScreen() {
           <Pressable
             onPress={() =>
               router.push({
-                pathname: "/(tabs)/add-item",
+                pathname: "/(tabs)/scan",
                 params: { fileId: id, fileName: name },
               })
             }
@@ -424,14 +424,37 @@ export default function PropertyDetailScreen() {
                 backgroundColor: colors.primary,
                 borderRadius: colors.radius,
                 opacity: pressed ? 0.85 : 1,
+                flex: 1,
               },
             ]}
           >
-            <Feather name="plus" size={16} color={colors.primaryForeground} />
-            <Text
-              style={[styles.actionBtnText, { color: colors.primaryForeground }]}
-            >
-              Add item
+            <Feather name="zap" size={16} color={colors.primaryForeground} />
+            <Text style={[styles.actionBtnText, { color: colors.primaryForeground }]}>
+              Scan items
+            </Text>
+          </Pressable>
+          <Pressable
+            onPress={() =>
+              router.push({
+                pathname: "/(tabs)/add-item",
+                params: { fileId: id, fileName: name },
+              })
+            }
+            style={({ pressed }) => [
+              styles.actionBtn,
+              {
+                backgroundColor: colors.secondary,
+                borderRadius: colors.radius,
+                borderWidth: 1,
+                borderColor: colors.border,
+                opacity: pressed ? 0.85 : 1,
+                flex: 1,
+              },
+            ]}
+          >
+            <Feather name="plus" size={16} color={colors.foreground} />
+            <Text style={[styles.actionBtnText, { color: colors.foreground }]}>
+              Add manually
             </Text>
           </Pressable>
         </View>

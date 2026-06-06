@@ -76,8 +76,8 @@ const SCAN_MODES: ScanModeCard[] = [
 ];
 
 export default function ScanScreen() {
-  const { fileId: paramFileId, roomId: paramRoomId } =
-    useLocalSearchParams<{ fileId?: string; roomId?: string }>();
+  const { fileId: paramFileId, roomId: paramRoomId, fileName: paramFileName, roomName: paramRoomName } =
+    useLocalSearchParams<{ fileId?: string; roomId?: string; fileName?: string; roomName?: string }>();
   const { session } = useAuth();
   const colors = useColors();
   const insets = useSafeAreaInsets();
@@ -574,50 +574,30 @@ export default function ScanScreen() {
               LOCATION
             </Text>
 
-            {!paramFileId && (
+            {paramFileId ? (
               <View style={{ gap: 6 }}>
-                <Text
-                  style={{
-                    fontSize: 12,
-                    fontFamily: "Inter_500Medium",
-                    color: colors.mutedForeground,
-                  }}
-                >
+                <Text style={{ fontSize: 12, fontFamily: "Inter_500Medium", color: colors.mutedForeground }}>
                   Property
                 </Text>
-                <ScrollView
-                  horizontal
-                  showsHorizontalScrollIndicator={false}
-                  contentContainerStyle={{ gap: 8 }}
-                >
+                <View style={[styles.chip, { backgroundColor: colors.primary, borderRadius: 20, alignSelf: "flex-start" }]}>
+                  <Text style={{ fontSize: 13, fontFamily: "Inter_500Medium", color: colors.primaryForeground }}>
+                    {paramFileName ?? paramFileId}
+                  </Text>
+                </View>
+              </View>
+            ) : (
+              <View style={{ gap: 6 }}>
+                <Text style={{ fontSize: 12, fontFamily: "Inter_500Medium", color: colors.mutedForeground }}>
+                  Property
+                </Text>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
                   {(properties ?? []).map((p) => (
                     <Pressable
                       key={p.id}
-                      onPress={() => {
-                        setSelectedFileId(p.id);
-                        setSelectedRoomId("");
-                      }}
-                      style={[
-                        styles.chip,
-                        {
-                          backgroundColor:
-                            selectedFileId === p.id
-                              ? colors.primary
-                              : colors.secondary,
-                          borderRadius: 20,
-                        },
-                      ]}
+                      onPress={() => { setSelectedFileId(p.id); setSelectedRoomId(""); }}
+                      style={[styles.chip, { backgroundColor: selectedFileId === p.id ? colors.primary : colors.secondary, borderRadius: 20 }]}
                     >
-                      <Text
-                        style={{
-                          fontSize: 13,
-                          fontFamily: "Inter_500Medium",
-                          color:
-                            selectedFileId === p.id
-                              ? colors.primaryForeground
-                              : colors.foreground,
-                        }}
-                      >
+                      <Text style={{ fontSize: 13, fontFamily: "Inter_500Medium", color: selectedFileId === p.id ? colors.primaryForeground : colors.foreground }}>
                         {p.name}
                       </Text>
                     </Pressable>
@@ -626,53 +606,38 @@ export default function ScanScreen() {
               </View>
             )}
 
-            {selectedFileId && !paramRoomId && (
-              <View style={{ gap: 6 }}>
-                <Text
-                  style={{
-                    fontSize: 12,
-                    fontFamily: "Inter_500Medium",
-                    color: colors.mutedForeground,
-                  }}
-                >
-                  Room
-                </Text>
-                <ScrollView
-                  horizontal
-                  showsHorizontalScrollIndicator={false}
-                  contentContainerStyle={{ gap: 8 }}
-                >
-                  {(rooms ?? []).map((r) => (
-                    <Pressable
-                      key={r.id}
-                      onPress={() => setSelectedRoomId(r.id)}
-                      style={[
-                        styles.chip,
-                        {
-                          backgroundColor:
-                            selectedRoomId === r.id
-                              ? colors.primary
-                              : colors.secondary,
-                          borderRadius: 20,
-                        },
-                      ]}
-                    >
-                      <Text
-                        style={{
-                          fontSize: 13,
-                          fontFamily: "Inter_500Medium",
-                          color:
-                            selectedRoomId === r.id
-                              ? colors.primaryForeground
-                              : colors.foreground,
-                        }}
+            {selectedFileId && (
+              paramRoomId ? (
+                <View style={{ gap: 6 }}>
+                  <Text style={{ fontSize: 12, fontFamily: "Inter_500Medium", color: colors.mutedForeground }}>
+                    Room
+                  </Text>
+                  <View style={[styles.chip, { backgroundColor: colors.primary, borderRadius: 20, alignSelf: "flex-start" }]}>
+                    <Text style={{ fontSize: 13, fontFamily: "Inter_500Medium", color: colors.primaryForeground }}>
+                      {paramRoomName ?? paramRoomId}
+                    </Text>
+                  </View>
+                </View>
+              ) : (
+                <View style={{ gap: 6 }}>
+                  <Text style={{ fontSize: 12, fontFamily: "Inter_500Medium", color: colors.mutedForeground }}>
+                    Room
+                  </Text>
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
+                    {(rooms ?? []).map((r) => (
+                      <Pressable
+                        key={r.id}
+                        onPress={() => setSelectedRoomId(r.id)}
+                        style={[styles.chip, { backgroundColor: selectedRoomId === r.id ? colors.primary : colors.secondary, borderRadius: 20 }]}
                       >
-                        {r.name}
-                      </Text>
-                    </Pressable>
-                  ))}
-                </ScrollView>
-              </View>
+                        <Text style={{ fontSize: 13, fontFamily: "Inter_500Medium", color: selectedRoomId === r.id ? colors.primaryForeground : colors.foreground }}>
+                          {r.name}
+                        </Text>
+                      </Pressable>
+                    ))}
+                  </ScrollView>
+                </View>
+              )
             )}
           </View>
         )}

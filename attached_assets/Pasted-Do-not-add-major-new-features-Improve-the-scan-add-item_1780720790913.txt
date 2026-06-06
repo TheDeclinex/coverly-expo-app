@@ -1,0 +1,123 @@
+Do not add major new features.
+
+Improve the scan/add item action hierarchy and routing across the existing Coverly mobile app.
+
+Current issue:
+Scan is currently only prominent on the Home screen, but scanning is the primary function of the app. Manual Add Item is secondary. Anywhere the user can manually add an item, they should also be able to scan items.
+
+Do not rebuild navigation.
+Do not change database schema.
+Do not change item save logic.
+Do not add real AI scan endpoint yet.
+Do not break the existing Add Item, Edit Item, photo upload, or item save flows.
+
+Tasks:
+
+1. Rename manual add wording
+   Change user-facing button text from:
+
+* “Add item”
+
+to clearer manual wording:
+
+* “Add manually”
+  or
+* “Add item manually”
+
+Use short button text where space is limited:
+
+* Primary button: “Scan items”
+* Secondary button: “Add manually”
+
+2. Update Home dashboard actions
+   Keep both actions, but make the hierarchy clear:
+
+* Primary: Scan items
+* Secondary: Add manually
+
+If possible, visually prioritise Scan items over Add manually.
+
+3. Update Property detail screen
+   Where the current property page shows only “Add item”, change this to show both:
+
+* Scan items
+* Add manually
+
+Behaviour:
+
+* Scan items should open the scan screen with the current property/file pre-selected.
+* Add manually should open the manual add screen with the current property/file pre-selected.
+* If the property has one room, preselect it.
+* If multiple rooms exist, let the user choose room on the destination screen.
+
+4. Update Room item list screen
+   Where the room page has “Add item”, change this to show both:
+
+* Scan room
+* Add manually
+
+Behaviour:
+
+* Scan room should open the scan screen with both current property/file and current room pre-selected.
+* Add manually should open the manual add screen with both current property/file and current room pre-selected.
+* Do not make the user reselect property/room when launched from a room.
+
+5. Update scan screen route params
+   Ensure the Scan screen accepts optional params:
+
+* fileId
+* roomId
+* fileName
+* roomName
+
+If provided:
+
+* preselect that property/room
+* hide or reduce unnecessary picker friction
+* keep picker available if the user needs to change room
+
+6. Update manual add route params
+   Ensure Add Item accepts optional params:
+
+* fileId
+* roomId
+* fileName
+* roomName
+
+If provided:
+
+* preselect property/room
+* hide or reduce unnecessary picker friction
+* keep picker available if needed
+
+7. Button labels by context
+   Use:
+
+* Home: “Scan items” and “Add manually”
+* Property: “Scan items” and “Add manually”
+* Room: “Scan room” and “Add manually”
+
+8. Keep design consistent
+   Use existing Coverly styling:
+
+* teal/blue primary button for Scan
+* secondary/outlined or less prominent button for Add manually
+* clean spacing
+* large mobile tap targets
+* no heavy animations
+
+9. Do not break existing functionality
+   Confirm:
+
+* Add manually still saves items
+* Add manually still uploads photos
+* Scan scaffold still opens
+* Property/room preselection works
+* Existing item edit/move/photo flows still work
+* TypeScript passes
+
+Final response should list:
+
+* files changed
+* routes updated
+* whether scan/add preselection works from Home, Property, and Room screens
