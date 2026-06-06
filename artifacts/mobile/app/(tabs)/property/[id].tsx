@@ -280,15 +280,18 @@ function InsightCard({
         );
       }
       if (growth.valueAdded > 0) {
-        parts.push(`+${formatCurrency(growth.valueAdded)}`);
+        parts.push(`${formatCurrency(growth.valueAdded)}`);
       }
       if (parts.length === 0) {
-        return `No new items recorded in the last ${period}m`;
+        return `No new items in the last ${period}m — keep going to grow your record`;
       }
-      return `${parts.join(" · ")} added in the last ${period}m`;
+      return `${parts.join(" and ")} documented in the last ${period}m`;
     }
     const count = items.length;
-    return `${count} item${count === 1 ? "" : "s"} documented`;
+    if (count === 0) {
+      return "Start scanning or adding items to build your record";
+    }
+    return `You've recorded ${count} item${count === 1 ? "" : "s"} in this property`;
   }, [growth, period, items]);
 
   return (
@@ -298,7 +301,7 @@ function InsightCard({
         setCardWidth(e.nativeEvent.layout.width - styles.insightCard.padding * 2)
       }
     >
-      <Text style={styles.insightLabel}>RECORDED CONTENTS VALUE</Text>
+      <Text style={styles.insightLabel}>YOUR INVENTORY SO FAR</Text>
       <Text style={styles.insightValue} numberOfLines={1} adjustsFontSizeToFit>
         {formatCurrency(totalValue || null)}
       </Text>
@@ -1089,7 +1092,7 @@ export default function PropertyDetailScreen() {
             <Text
               style={[styles.sectionLabel, { color: colors.mutedForeground, marginBottom: 10 }]}
             >
-              CLAIM READINESS
+              HOW COMPLETE IS YOUR RECORD?
             </Text>
             <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 14 }}>
               <View style={styles.claimStat}>
@@ -1147,7 +1150,7 @@ export default function PropertyDetailScreen() {
             <Text
               style={[styles.sectionLabel, { color: colors.mutedForeground, marginBottom: 12 }]}
             >
-              COVERAGE DETAIL
+              COVERAGE OVERVIEW
             </Text>
             <View style={{ flexDirection: "row", alignItems: "center", gap: 16 }}>
               <Pressable

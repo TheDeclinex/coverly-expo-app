@@ -1,0 +1,131 @@
+Use Planner mode first. Do not edit files until I approve the plan.
+
+Goal:
+Review and refine the Home and Property screens so they feel more friendly, welcoming, and human — not just functional dashboards.
+
+Current issue:
+The app structure is improving, but the top of the screens still feels a bit clinical and data-first.
+
+Examples:
+
+* Home screen opens straight into stats and actions without a welcome/header feel.
+* Property screen is stronger than before, but the tone is still a little raw and numerical rather than progress-oriented and reassuring.
+
+Design objective:
+Make the app feel more like a calm, modern Coverly experience:
+
+* warm but still clean
+* helpful but not chatty
+* progress-oriented
+* friendly and insurance-ready
+* mobile-first
+
+Do not change backend logic.
+Do not change database schema.
+Do not touch item save/photo upload/RLS logic.
+Do not change navigation structure.
+Do not add new features.
+
+Please inspect the current Home and Property screens and propose a plan for making them more friendly.
+
+Planning tasks:
+
+1. Home screen review
+   Review the top section of the Home screen and propose improvements so it feels less clinical.
+
+Desired direction:
+
+* add a welcome/header area above the portfolio summary
+* include a friendly message such as:
+
+  * “Welcome back”
+  * “Continue building your home inventory”
+  * or similar Coverly-friendly copy
+* keep it compact
+* do not make the screen feel crowded
+* preserve the strong scan-first action hierarchy
+
+Suggested Home structure:
+
+* welcome/header area
+* portfolio summary card
+* scan/add action row
+* properties list
+
+2. Property screen review
+   Review the top section of the Property screen and make the tone more human and progress-oriented.
+
+Desired direction:
+
+* keep the compact stats strip
+* keep the insight card near the top
+* keep Rooms visible reasonably early
+* make the insight card feel more like progress and documentation, not just raw data
+
+Examples of better tone:
+
+* “You’ve documented so far”
+* “Recorded so far”
+* “Your home inventory so far”
+
+The supporting text beneath should be clearer and friendlier:
+
+* “+10 items added in the last 3 months”
+* “Keep going to build a fuller record of this property”
+* similar concise, useful tone
+
+3. Copy/tone review
+   Please review current headings and labels on Home and Property and suggest improved copy where needed.
+
+Focus on:
+
+* warmth
+* clarity
+* calm reassurance
+* not sounding too technical
+* not sounding like finance software
+
+Avoid:
+
+* overly corporate language
+* overly generic dashboard labels
+* too much text
+* forced cheerfulness
+
+4. Visual friendliness
+   Without changing the agreed Coverly palette, propose small layout/styling refinements that make the screens feel more welcoming:
+
+* spacing
+* card balance
+* section headings
+* helper text
+* action placement
+* softer visual rhythm
+
+5. Keep structure practical
+   Important:
+
+* Home should still get quickly to actions and properties
+* Property should still keep rooms visible reasonably early
+* Do not reintroduce a huge top-heavy dashboard
+
+6. Output required
+   Provide:
+
+* files you would change
+* proposed Home layout
+* proposed Property layout
+* suggested copy changes
+* any small styling refinements
+* risks
+* acceptance criteria
+
+Acceptance criteria after eventual execution:
+
+* Home screen feels more welcoming and less clinical
+* Property screen feels more progress-oriented and human
+* scan remains visually primary
+* add manually remains secondary
+* rooms are still visible early on the Property screen
+* Coverly palette remains consistent
+* TypeScript passes

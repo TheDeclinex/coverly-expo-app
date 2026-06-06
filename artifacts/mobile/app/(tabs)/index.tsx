@@ -280,6 +280,16 @@ export default function HomeScreen() {
     if (!portfolio || !properties || properties.length === 0) return null;
     return (
       <View style={{ gap: 12, paddingHorizontal: 16, paddingTop: 16 }}>
+        {/* Welcome header */}
+        <View style={{ paddingBottom: 2 }}>
+          <Text style={{ fontSize: 17, fontFamily: "Inter_600SemiBold", color: "#172A27" }}>
+            Welcome back
+          </Text>
+          <Text style={{ fontSize: 13, fontFamily: "Inter_400Regular", color: "#64736F", marginTop: 2 }}>
+            Continue building your home inventory
+          </Text>
+        </View>
+
         <View
           style={[
             styles.statsCard,
@@ -287,7 +297,7 @@ export default function HomeScreen() {
           ]}
         >
           <Text style={[styles.sectionLabel, { color: colors.mutedForeground }]}>
-            PORTFOLIO SUMMARY
+            YOUR HOME INVENTORY
           </Text>
           <View style={styles.statsRow}>
             <View style={styles.statCell}>
