@@ -1,0 +1,112 @@
+Use Planner mode first. Do not edit files until I approve the plan.
+
+Goal:
+Tighten the Coverly mobile dashboard/property layout so it feels premium but remains practical on a phone. The current property page has too much dashboard/header content before the Rooms list, so the first room card appears too low on screen.
+
+Do not change backend logic.
+Do not change database schema.
+Do not touch item save/photo upload/RLS logic.
+Do not change navigation structure.
+Do not add new features.
+
+Current issue:
+The new Coverly colour palette is good directionally, but the Property screen is too top-heavy:
+
+* large summary card
+* radial chart
+* coverage bar
+* readiness row
+* value by room
+* items by room
+* action buttons
+* only then Rooms
+
+This pushes actual rooms/items too far down the page.
+
+Design objective:
+Make the app feel more like a practical mobile inventory tool:
+
+* Scan is primary
+* Rooms/items are easy to reach
+* Dashboard insights are useful but not dominant
+* The UI should feel modern, calm, premium, and Coverly-branded
+
+Planning task:
+Inspect the current files and propose a layout plan before changing code.
+
+Please plan changes for:
+
+1. Property screen information hierarchy
+   Recommended direction:
+
+* keep a compact property summary at the top
+* keep Scan items / Add manually immediately visible
+* make Rooms visible much earlier
+* move detailed insights lower down or into a compact/collapsible “Insights” section
+
+2. Property summary card
+   Make it more compact:
+
+* property value
+* item count
+* room count
+* recorded cover percent
+* simple coverage bar
+  Consider reducing or removing the radial chart from the top card if it costs too much vertical space.
+
+3. Insights section
+   Move these below the Rooms heading/list or into a collapsed/expandable section:
+
+* value by room
+* items by room
+* readiness stats
+* radial coverage visual if still useful
+
+4. Home screen action buttons
+   Improve button layout:
+
+* Scan items should remain primary
+* Add manually should remain secondary
+* avoid awkward text wrapping if possible
+* keep the modern dark green / teal / slate / off-white Coverly palette
+
+5. Room screen action hierarchy
+   Confirm Room screen shows:
+
+* Scan room as primary
+* Add manually as secondary
+  without crowding the item list.
+
+6. UI Bakery reference
+   If I provide a screenshot of the current UI Bakery Coverly layout, use it as a visual density/style reference only.
+   Do not copy desktop/web layout literally.
+   Adapt it for native mobile.
+
+7. Preserve current working logic
+   Do not touch:
+
+* Add Item save
+* Edit Item save
+* Move item
+* Photo upload
+* Supabase/RLS
+* Scan backend scaffold logic
+
+Plan output required:
+
+* files you would change
+* what layout changes you would make on each screen
+* whether radial chart stays, shrinks, or moves
+* whether insights become lower-page or collapsible
+* risks
+* acceptance criteria
+
+Acceptance criteria after eventual execution:
+
+* first room card appears much sooner on Property screen
+* Scan items remains primary
+* Add manually remains secondary
+* Property screen feels less top-heavy
+* value/readiness insights are still available
+* Coverly palette remains consistent
+* TypeScript passes

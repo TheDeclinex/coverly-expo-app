@@ -26,38 +26,6 @@ import { formatCurrency, getItemTotalValue } from "@/lib/inventory-mappers";
 import { supabase } from "@/lib/supabase";
 import type { InventoryFile, InventoryItem } from "@/types";
 
-function MiniBar({
-  value,
-  max,
-  color,
-}: {
-  value: number;
-  max: number;
-  color: string;
-}) {
-  const pct = max > 0 ? Math.min(value / max, 1) : 0;
-  return (
-    <View style={miniBarStyles.track}>
-      <View
-        style={[
-          miniBarStyles.fill,
-          { width: `${pct * 100}%` as any, backgroundColor: color },
-        ]}
-      />
-    </View>
-  );
-}
-const miniBarStyles = StyleSheet.create({
-  track: {
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: "#E2E8F0",
-    overflow: "hidden",
-    flex: 1,
-  },
-  fill: { height: 6, borderRadius: 3 },
-});
-
 function coverageColor(percent: number): string {
   if (percent >= 90) return "#B91C1C";
   if (percent >= 70) return "#D97706";

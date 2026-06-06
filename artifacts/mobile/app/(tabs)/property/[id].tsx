@@ -19,14 +19,19 @@ import {
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import Svg, { Circle } from "react-native-svg";
+import Svg, { Circle, Line, Polyline } from "react-native-svg";
 
 import { EmptyState } from "@/components/EmptyState";
 import { ErrorState } from "@/components/ErrorState";
 import { LoadingState } from "@/components/LoadingState";
 import { useAuth } from "@/context/AuthContext";
 import { useColors } from "@/hooks/useColors";
-import { calcPropertyStats, type RoomStat } from "@/lib/dashboard-stats";
+import {
+  buildSparklinePoints,
+  calcPeriodGrowth,
+  calcPropertyStats,
+  type RoomStat,
+} from "@/lib/dashboard-stats";
 import { formatCurrency } from "@/lib/inventory-mappers";
 import { supabase } from "@/lib/supabase";
 import type { InventoryFile, InventoryItem, InventoryRoom } from "@/types";
@@ -36,6 +41,10 @@ const BRAND_AMBER = "#D97706";
 const BRAND_DANGER = "#B91C1C";
 const BRAND_BORDER = "#DDE7E3";
 const BRAND_DARK = "#085041";
+const BRAND_DARK_DEEP = "#0F6E56";
+
+type Period = 1 | 3 | 6 | 12;
+const PERIODS: Period[] = [1, 3, 6, 12];
 
 function coverageColor(percent: number): string {
   if (percent >= 90) return BRAND_DANGER;
@@ -64,10 +73,281 @@ function roomIcon(roomType: string | null): string {
   return ROOM_ICONS[key] ?? "square";
 }
 
+// ─── Sparkline ────────────────────────────────────────────────────────────────
+
+function SparkLine({
+  points,
+  width,
+  height = 36,
+}: {
+  points: { x: number; y: number }[];
+  width: number;
+  height?: number;
+}) {
+  if (width <= 0) return null;
+  const pad = 6;
+  const w = width - pad * 2;
+  const h = height - pad * 2;
+
+  if (points.length < 2) {
+    return (
+      <Svg width={width} height={height}>
+        <Line
+          x1={pad}
+          y1={height / 2}
+          x2={width - pad}
+          y2={height / 2}
+          stroke="rgba(255,255,255,0.3)"
+          strokeWidth={1.5}
+          strokeDasharray="4 4"
+        />
+      </Svg>
+    );
+  }
+
+  const pts = points
+    .map(
+      (p) =>
+        `${(pad + p.x * w).toFixed(1)},${(pad + (1 - p.y) * h).toFixed(1)}`
+    )
+    .join(" ");
+
+  return (
+    <Svg width={width} height={height}>
+      <Polyline
+        points={pts}
+        fill="none"
+        stroke="rgba(255,255,255,0.85)"
+        strokeWidth={2}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </Svg>
+  );
+}
+
+// ─── Compact summary card ─────────────────────────────────────────────────────
+
+function CompactSummary({
+  stats,
+  colors,
+  onEditCover,
+}: {
+  stats: ReturnType<typeof calcPropertyStats>;
+  colors: ReturnType<typeof import("@/hooks/useColors").useColors>;
+  onEditCover: () => void;
+}) {
+  const coverColor =
+    stats.coveragePercent != null
+      ? coverageColor(stats.coveragePercent)
+      : colors.mutedForeground;
+
+  return (
+    <View
+      style={[
+        styles.summaryCard,
+        {
+          backgroundColor: colors.card,
+          borderColor: colors.border,
+          borderRadius: colors.radius,
+        },
+      ]}
+    >
+      <View style={styles.summaryRow}>
+        <View style={{ flex: 1.4 }}>
+          <Text
+            style={[styles.summaryBigValue, { color: colors.foreground }]}
+            numberOfLines={1}
+            adjustsFontSizeToFit
+          >
+            {formatCurrency(stats.totalValue || null)}
+          </Text>
+          <Text
+            style={[styles.summarySmallLabel, { color: colors.mutedForeground }]}
+          >
+            Inventory value
+          </Text>
+        </View>
+
+        <View style={[styles.summaryDivider, { backgroundColor: colors.border }]} />
+
+        <View style={styles.summaryMetricCell}>
+          <Text style={[styles.summaryMetricValue, { color: colors.foreground }]}>
+            {stats.itemCount}
+          </Text>
+          <Text style={[styles.summarySmallLabel, { color: colors.mutedForeground }]}>
+            Items
+          </Text>
+        </View>
+
+        <View style={[styles.summaryDivider, { backgroundColor: colors.border }]} />
+
+        <View style={styles.summaryMetricCell}>
+          <Text style={[styles.summaryMetricValue, { color: colors.foreground }]}>
+            {stats.roomCount}
+          </Text>
+          <Text style={[styles.summarySmallLabel, { color: colors.mutedForeground }]}>
+            Rooms
+          </Text>
+        </View>
+
+        <View style={[styles.summaryDivider, { backgroundColor: colors.border }]} />
+
+        <Pressable
+          onPress={onEditCover}
+          style={styles.summaryMetricCell}
+          hitSlop={8}
+        >
+          {stats.coveragePercent != null ? (
+            <>
+              <Text style={[styles.summaryMetricValue, { color: coverColor }]}>
+                {Math.round(stats.coveragePercent)}%
+              </Text>
+              <Text
+                style={[styles.summarySmallLabel, { color: colors.mutedForeground }]}
+              >
+                of cover
+              </Text>
+            </>
+          ) : (
+            <>
+              <Feather name="shield" size={16} color={colors.primary} />
+              <Text
+                style={[styles.summarySmallLabel, { color: colors.primary }]}
+              >
+                Set cover
+              </Text>
+            </>
+          )}
+        </Pressable>
+      </View>
+
+      {stats.coveragePercent != null && (
+        <View style={{ marginTop: 10 }}>
+          <View
+            style={{
+              height: 4,
+              borderRadius: 2,
+              backgroundColor: colors.border,
+              overflow: "hidden",
+            }}
+          >
+            <View
+              style={{
+                height: 4,
+                borderRadius: 2,
+                width: `${Math.min(stats.coveragePercent, 100)}%` as any,
+                backgroundColor: coverColor,
+              }}
+            />
+          </View>
+        </View>
+      )}
+    </View>
+  );
+}
+
+// ─── Insight card ─────────────────────────────────────────────────────────────
+
+function InsightCard({
+  items,
+  totalValue,
+  colors,
+}: {
+  items: InventoryItem[];
+  totalValue: number;
+  colors: ReturnType<typeof import("@/hooks/useColors").useColors>;
+}) {
+  const [period, setPeriod] = useState<Period>(3);
+  const [cardWidth, setCardWidth] = useState(0);
+
+  const growth = useMemo(
+    () => calcPeriodGrowth(items, period),
+    [items, period]
+  );
+
+  const sparkPoints = useMemo(
+    () => buildSparklinePoints(items, 12),
+    [items]
+  );
+
+  const insightText = useMemo(() => {
+    if (growth !== null) {
+      const parts: string[] = [];
+      if (growth.itemsAdded > 0) {
+        parts.push(
+          `+${growth.itemsAdded} item${growth.itemsAdded === 1 ? "" : "s"}`
+        );
+      }
+      if (growth.valueAdded > 0) {
+        parts.push(`+${formatCurrency(growth.valueAdded)}`);
+      }
+      if (parts.length === 0) {
+        return `No new items recorded in the last ${period}m`;
+      }
+      return `${parts.join(" · ")} added in the last ${period}m`;
+    }
+    const count = items.length;
+    return `${count} item${count === 1 ? "" : "s"} documented`;
+  }, [growth, period, items]);
+
+  return (
+    <View
+      style={[styles.insightCard, { borderRadius: colors.radius + 2 }]}
+      onLayout={(e) =>
+        setCardWidth(e.nativeEvent.layout.width - styles.insightCard.padding * 2)
+      }
+    >
+      <Text style={styles.insightLabel}>RECORDED CONTENTS VALUE</Text>
+      <Text style={styles.insightValue} numberOfLines={1} adjustsFontSizeToFit>
+        {formatCurrency(totalValue || null)}
+      </Text>
+
+      <View style={styles.periodRow}>
+        {PERIODS.map((p) => {
+          const selected = p === period;
+          return (
+            <Pressable
+              key={p}
+              onPress={() => setPeriod(p)}
+              style={({ pressed }) => [
+                styles.periodChip,
+                selected ? styles.periodChipSelected : styles.periodChipIdle,
+                { opacity: pressed ? 0.75 : 1 },
+              ]}
+            >
+              <Text
+                style={[
+                  styles.periodChipText,
+                  selected
+                    ? styles.periodChipTextSelected
+                    : styles.periodChipTextIdle,
+                ]}
+              >
+                {p}m
+              </Text>
+            </Pressable>
+          );
+        })}
+      </View>
+
+      {cardWidth > 0 && (
+        <View style={{ marginTop: 8, marginHorizontal: -2 }}>
+          <SparkLine points={sparkPoints} width={cardWidth + 4} height={34} />
+        </View>
+      )}
+
+      <Text style={styles.insightSubtext}>{insightText}</Text>
+    </View>
+  );
+}
+
+// ─── Radial coverage arc ──────────────────────────────────────────────────────
+
 function RadialCoverage({
   percent,
-  size = 88,
-  strokeWidth = 9,
+  size = 80,
+  strokeWidth = 8,
 }: {
   percent: number;
   size?: number;
@@ -112,7 +392,7 @@ function RadialCoverage({
       </Svg>
       <Text
         style={{
-          fontSize: 14,
+          fontSize: 13,
           fontFamily: "Inter_700Bold",
           color: stroke,
           textAlign: "center",
@@ -134,6 +414,8 @@ function RadialCoverage({
   );
 }
 
+// ─── Coverage bar ─────────────────────────────────────────────────────────────
+
 function CoverageBar({
   percent,
   colors,
@@ -145,11 +427,11 @@ function CoverageBar({
   const fill = coverageColor(percent);
   const label =
     percent >= 100
-      ? "Recorded cover value reached — review with your insurer if needed"
+      ? "Recorded cover value reached — review with your insurer"
       : percent >= 90
-        ? "Approaching recorded cover value — review with your insurer if needed"
+        ? "Approaching recorded cover value"
         : percent >= 70
-          ? "Moderate usage of recorded cover value"
+          ? "Moderate usage of recorded cover"
           : `${Math.round(percent)}% of recorded cover value`;
 
   return (
@@ -162,7 +444,7 @@ function CoverageBar({
             color: colors.mutedForeground,
           }}
         >
-          Recorded contents value vs cover
+          Contents value vs recorded cover
         </Text>
         <Text
           style={{
@@ -204,6 +486,8 @@ function CoverageBar({
   );
 }
 
+// ─── Room distribution bars ───────────────────────────────────────────────────
+
 function RoomBarsSection({
   roomStats,
   colors,
@@ -214,25 +498,22 @@ function RoomBarsSection({
   if (roomStats.length === 0) return null;
   const top = roomStats.slice(0, 8);
   const maxValue = Math.max(...top.map((r) => r.totalValue), 1);
-  const maxCount = Math.max(...top.map((r) => r.itemCount), 1);
+  const topByCount = [...top].sort((a, b) => b.itemCount - a.itemCount);
+  const maxCount = Math.max(...topByCount.map((r) => r.itemCount), 1);
 
   return (
     <View
       style={[
-        styles.statsCard,
+        styles.footerCard,
         {
           backgroundColor: colors.card,
           borderColor: colors.border,
           borderRadius: colors.radius,
-          gap: 0,
         },
       ]}
     >
       <Text
-        style={[
-          styles.sectionLabel,
-          { color: colors.mutedForeground, marginBottom: 10 },
-        ]}
+        style={[styles.sectionLabel, { color: colors.mutedForeground, marginBottom: 10 }]}
       >
         VALUE BY ROOM
       </Text>
@@ -244,9 +525,7 @@ function RoomBarsSection({
           >
             {rs.room.name}
           </Text>
-          <View
-            style={[styles.barTrack, { backgroundColor: colors.border }]}
-          >
+          <View style={[styles.barTrack, { backgroundColor: colors.border }]}>
             <View
               style={[
                 styles.barFill,
@@ -257,9 +536,7 @@ function RoomBarsSection({
               ]}
             />
           </View>
-          <Text
-            style={[styles.barMeta, { color: colors.mutedForeground }]}
-          >
+          <Text style={[styles.barMeta, { color: colors.mutedForeground }]}>
             {formatCurrency(rs.totalValue || null)}
           </Text>
         </View>
@@ -274,14 +551,11 @@ function RoomBarsSection({
       />
 
       <Text
-        style={[
-          styles.sectionLabel,
-          { color: colors.mutedForeground, marginBottom: 10 },
-        ]}
+        style={[styles.sectionLabel, { color: colors.mutedForeground, marginBottom: 10 }]}
       >
         ITEMS BY ROOM
       </Text>
-      {top.map((rs) => (
+      {topByCount.map((rs) => (
         <View key={`${rs.room.id}-cnt`} style={styles.barRow}>
           <Text
             style={[styles.barLabel, { color: colors.foreground }]}
@@ -289,9 +563,7 @@ function RoomBarsSection({
           >
             {rs.room.name}
           </Text>
-          <View
-            style={[styles.barTrack, { backgroundColor: colors.border }]}
-          >
+          <View style={[styles.barTrack, { backgroundColor: colors.border }]}>
             <View
               style={[
                 styles.barFill,
@@ -302,9 +574,7 @@ function RoomBarsSection({
               ]}
             />
           </View>
-          <Text
-            style={[styles.barMeta, { color: colors.mutedForeground }]}
-          >
+          <Text style={[styles.barMeta, { color: colors.mutedForeground }]}>
             {rs.itemCount} {rs.itemCount === 1 ? "item" : "items"}
           </Text>
         </View>
@@ -312,6 +582,8 @@ function RoomBarsSection({
     </View>
   );
 }
+
+// ─── Room card ────────────────────────────────────────────────────────────────
 
 function RoomCard({
   item,
@@ -379,11 +651,7 @@ function RoomCard({
           >
             {item.name}
           </Text>
-          <Feather
-            name="chevron-right"
-            size={16}
-            color={colors.mutedForeground}
-          />
+          <Feather name="chevron-right" size={16} color={colors.mutedForeground} />
         </View>
         <View style={styles.cardMeta}>
           <Text style={[styles.metaText, { color: colors.mutedForeground }]}>
@@ -393,13 +661,7 @@ function RoomCard({
             {formatCurrency(totalValue || null)}
           </Text>
         </View>
-        <View
-          style={{
-            flexDirection: "row",
-            alignItems: "center",
-            marginTop: 6,
-          }}
-        >
+        <View style={{ flexDirection: "row", alignItems: "center", marginTop: 6 }}>
           <View
             style={{
               flex: 1,
@@ -424,6 +686,8 @@ function RoomCard({
   );
 }
 
+// ─── Cover amount modal ───────────────────────────────────────────────────────
+
 function CoverAmountModal({
   visible,
   current,
@@ -438,14 +702,13 @@ function CoverAmountModal({
   colors: ReturnType<typeof import("@/hooks/useColors").useColors>;
 }) {
   const insets = useSafeAreaInsets();
-  const [raw, setRaw] = useState(
-    current != null ? String(current) : ""
-  );
+  const [raw, setRaw] = useState(current != null ? String(current) : "");
   const [saving, setSaving] = useState(false);
 
   const handleSave = async () => {
     const trimmed = raw.trim();
-    const parsed = trimmed === "" ? null : parseFloat(trimmed.replace(/,/g, ""));
+    const parsed =
+      trimmed === "" ? null : parseFloat(trimmed.replace(/,/g, ""));
     if (trimmed !== "" && (isNaN(parsed!) || parsed! < 0)) {
       Alert.alert("Invalid amount", "Please enter a valid positive number.");
       return;
@@ -592,7 +855,10 @@ function CoverAmountModal({
               })}
             >
               {saving ? (
-                <ActivityIndicator size="small" color={colors.primaryForeground} />
+                <ActivityIndicator
+                  size="small"
+                  color={colors.primaryForeground}
+                />
               ) : (
                 <Text
                   style={{
@@ -611,6 +877,8 @@ function CoverAmountModal({
     </Modal>
   );
 }
+
+// ─── Main screen ──────────────────────────────────────────────────────────────
 
 export default function PropertyDetailScreen() {
   const { id, name } = useLocalSearchParams<{ id: string; name: string }>();
@@ -656,6 +924,28 @@ export default function PropertyDetailScreen() {
     enabled: !!session && !!id,
   });
 
+  // Optional scan_date query — silently ignored if the column doesn't exist yet
+  const { data: scanDateMap } = useQuery({
+    queryKey: ["item-scan-dates", id, session?.user.id],
+    queryFn: async () => {
+      try {
+        const { data, error } = await supabase
+          .from("inventory_items")
+          .select("id, scan_date")
+          .eq("file_id", id);
+        if (error) return {} as Record<string, string | null>;
+        const map: Record<string, string | null> = {};
+        for (const row of data ?? []) {
+          map[(row as any).id] = (row as any).scan_date ?? null;
+        }
+        return map;
+      } catch {
+        return {} as Record<string, string | null>;
+      }
+    },
+    enabled: !!session && !!id,
+  });
+
   const { data: property } = useQuery({
     queryKey: ["property", id, session?.user.id],
     queryFn: async () => {
@@ -669,6 +959,13 @@ export default function PropertyDetailScreen() {
     },
     enabled: !!session && !!id,
   });
+
+  // Merge scan dates into items for the insight card
+  const itemsWithDates = useMemo<InventoryItem[]>(() => {
+    if (!items) return [];
+    if (!scanDateMap) return items;
+    return items.map((i) => ({ ...i, scan_date: scanDateMap[i.id] ?? null }));
+  }, [items, scanDateMap]);
 
   const stats = useMemo(() => {
     if (!property || !rooms || !items) return null;
@@ -695,245 +992,22 @@ export default function PropertyDetailScreen() {
   const renderHeader = () => {
     if (!stats) return null;
     return (
-      <View style={{ gap: 12, paddingHorizontal: 16, paddingTop: 16 }}>
-        {/* SUMMARY CARD */}
-        <View
-          style={[
-            styles.statsCard,
-            {
-              backgroundColor: colors.card,
-              borderColor: colors.border,
-              borderRadius: colors.radius,
-            },
-          ]}
-        >
-          <Text
-            style={[styles.sectionLabel, { color: colors.mutedForeground }]}
-          >
-            PROPERTY SUMMARY
-          </Text>
+      <View style={{ gap: 10, paddingHorizontal: 16, paddingTop: 14 }}>
+        {/* 1 — Compact summary */}
+        <CompactSummary
+          stats={stats}
+          colors={colors}
+          onEditCover={() => setCoverModalVisible(true)}
+        />
 
-          <View
-            style={{
-              flexDirection: "row",
-              alignItems: "center",
-              gap: 16,
-              marginTop: 4,
-            }}
-          >
-            {/* Stats column */}
-            <View style={{ flex: 1, gap: 10 }}>
-              <View>
-                <Text style={[styles.bigValue, { color: colors.foreground }]}>
-                  {formatCurrency(stats.totalValue || null)}
-                </Text>
-                <Text
-                  style={[styles.bigLabel, { color: colors.mutedForeground }]}
-                >
-                  Recorded contents value
-                </Text>
-              </View>
-              <View style={{ flexDirection: "row", gap: 20 }}>
-                <View>
-                  <Text
-                    style={[styles.midValue, { color: colors.foreground }]}
-                  >
-                    {stats.itemCount}
-                  </Text>
-                  <Text
-                    style={[styles.bigLabel, { color: colors.mutedForeground }]}
-                  >
-                    Items
-                  </Text>
-                </View>
-                <View>
-                  <Text
-                    style={[styles.midValue, { color: colors.foreground }]}
-                  >
-                    {stats.roomCount}
-                  </Text>
-                  <Text
-                    style={[styles.bigLabel, { color: colors.mutedForeground }]}
-                  >
-                    Rooms
-                  </Text>
-                </View>
-              </View>
-            </View>
+        {/* 2 — Insight card */}
+        <InsightCard
+          items={itemsWithDates}
+          totalValue={stats.totalValue}
+          colors={colors}
+        />
 
-            {/* Radial coverage arc or set-cover CTA */}
-            {stats.coveragePercent != null ? (
-              <Pressable
-                onPress={() => setCoverModalVisible(true)}
-                style={{ alignItems: "center" }}
-                hitSlop={8}
-              >
-                <RadialCoverage percent={stats.coveragePercent} />
-                <View
-                  style={{
-                    flexDirection: "row",
-                    alignItems: "center",
-                    gap: 3,
-                    marginTop: 4,
-                  }}
-                >
-                  <Feather
-                    name="edit-2"
-                    size={10}
-                    color={colors.mutedForeground}
-                  />
-                  <Text
-                    style={{
-                      fontSize: 10,
-                      fontFamily: "Inter_400Regular",
-                      color: colors.mutedForeground,
-                    }}
-                  >
-                    Edit cover
-                  </Text>
-                </View>
-              </Pressable>
-            ) : (
-              <Pressable
-                onPress={() => setCoverModalVisible(true)}
-                style={({ pressed }) => ({
-                  alignItems: "center",
-                  justifyContent: "center",
-                  width: 88,
-                  height: 88,
-                  borderRadius: 44,
-                  borderWidth: 2,
-                  borderColor: colors.border,
-                  borderStyle: "dashed",
-                  gap: 4,
-                  opacity: pressed ? 0.7 : 1,
-                })}
-              >
-                <Feather name="shield" size={20} color={colors.mutedForeground} />
-                <Text
-                  style={{
-                    fontSize: 9,
-                    fontFamily: "Inter_500Medium",
-                    color: colors.mutedForeground,
-                    textAlign: "center",
-                    lineHeight: 12,
-                  }}
-                >
-                  Set{"\n"}cover
-                </Text>
-              </Pressable>
-            )}
-          </View>
-
-          {stats.coveragePercent != null && (
-            <View style={{ marginTop: 14 }}>
-              <CoverageBar percent={stats.coveragePercent} colors={colors} />
-            </View>
-          )}
-
-          {stats.coveragePercent == null && (
-            <Pressable
-              onPress={() => setCoverModalVisible(true)}
-              style={({ pressed }) => ({
-                marginTop: 10,
-                paddingVertical: 10,
-                paddingHorizontal: 14,
-                borderRadius: colors.radius,
-                borderWidth: 1,
-                borderColor: colors.border,
-                flexDirection: "row",
-                alignItems: "center",
-                gap: 8,
-                opacity: pressed ? 0.7 : 1,
-              })}
-            >
-              <Feather name="shield" size={14} color={colors.primary} />
-              <View style={{ flex: 1 }}>
-                <Text
-                  style={{
-                    fontSize: 13,
-                    fontFamily: "Inter_600SemiBold",
-                    color: colors.foreground,
-                  }}
-                >
-                  Set your contents cover amount
-                </Text>
-                <Text
-                  style={{
-                    fontSize: 11,
-                    fontFamily: "Inter_400Regular",
-                    color: colors.mutedForeground,
-                    marginTop: 1,
-                  }}
-                >
-                  Unlocks the coverage arc and bar
-                </Text>
-              </View>
-              <Feather name="chevron-right" size={16} color={colors.mutedForeground} />
-            </Pressable>
-          )}
-
-          {stats.itemCount > 0 && (
-            <View style={styles.claimRow}>
-              <View style={styles.claimStat}>
-                <Feather
-                  name="camera"
-                  size={14}
-                  color={
-                    stats.photoPercent >= 80
-                      ? colors.success
-                      : colors.mutedForeground
-                  }
-                />
-                <Text
-                  style={[styles.claimText, { color: colors.mutedForeground }]}
-                >
-                  {Math.round(stats.photoPercent)}% photos
-                </Text>
-              </View>
-              <View style={styles.claimStat}>
-                <Feather
-                  name="tag"
-                  size={14}
-                  color={
-                    stats.valuePercent >= 80
-                      ? colors.success
-                      : colors.mutedForeground
-                  }
-                />
-                <Text
-                  style={[styles.claimText, { color: colors.mutedForeground }]}
-                >
-                  {Math.round(stats.valuePercent)}% valued
-                </Text>
-              </View>
-              {stats.itemsNeedingReview > 0 && (
-                <View style={styles.claimStat}>
-                  <Feather
-                    name="alert-circle"
-                    size={14}
-                    color={colors.warning}
-                  />
-                  <Text
-                    style={[
-                      styles.claimText,
-                      { color: colors.mutedForeground },
-                    ]}
-                  >
-                    {stats.itemsNeedingReview} need review
-                  </Text>
-                </View>
-              )}
-            </View>
-          )}
-        </View>
-
-        {/* ROOM DISTRIBUTION BARS */}
-        {stats.roomStats.length > 0 && (
-          <RoomBarsSection roomStats={stats.roomStats} colors={colors} />
-        )}
-
-        {/* ACTION BUTTONS */}
+        {/* 3 — Action buttons */}
         <View style={{ flexDirection: "row", gap: 10 }}>
           <Pressable
             onPress={() =>
@@ -953,9 +1027,7 @@ export default function PropertyDetailScreen() {
             ]}
           >
             <Feather name="zap" size={16} color={colors.primaryForeground} />
-            <Text
-              style={[styles.actionBtnText, { color: colors.primaryForeground }]}
-            >
+            <Text style={[styles.actionBtnText, { color: colors.primaryForeground }]}>
               Scan items
             </Text>
           </Pressable>
@@ -985,9 +1057,131 @@ export default function PropertyDetailScreen() {
           </Pressable>
         </View>
 
+        {/* 4 — Rooms heading */}
         <Text style={[styles.sectionHeading, { color: colors.foreground }]}>
           Rooms
         </Text>
+      </View>
+    );
+  };
+
+  const renderFooter = () => {
+    if (!stats) return null;
+    return (
+      <View style={{ paddingHorizontal: 16, paddingTop: 4, gap: 10, paddingBottom: 8 }}>
+        {/* Room distribution bars */}
+        {stats.roomStats.length > 0 && (
+          <RoomBarsSection roomStats={stats.roomStats} colors={colors} />
+        )}
+
+        {/* Claim readiness */}
+        {stats.itemCount > 0 && (
+          <View
+            style={[
+              styles.footerCard,
+              {
+                backgroundColor: colors.card,
+                borderColor: colors.border,
+                borderRadius: colors.radius,
+              },
+            ]}
+          >
+            <Text
+              style={[styles.sectionLabel, { color: colors.mutedForeground, marginBottom: 10 }]}
+            >
+              CLAIM READINESS
+            </Text>
+            <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 14 }}>
+              <View style={styles.claimStat}>
+                <Feather
+                  name="camera"
+                  size={14}
+                  color={
+                    stats.photoPercent >= 80
+                      ? colors.success
+                      : colors.mutedForeground
+                  }
+                />
+                <Text style={[styles.claimText, { color: colors.mutedForeground }]}>
+                  {Math.round(stats.photoPercent)}% have photos
+                </Text>
+              </View>
+              <View style={styles.claimStat}>
+                <Feather
+                  name="tag"
+                  size={14}
+                  color={
+                    stats.valuePercent >= 80
+                      ? colors.success
+                      : colors.mutedForeground
+                  }
+                />
+                <Text style={[styles.claimText, { color: colors.mutedForeground }]}>
+                  {Math.round(stats.valuePercent)}% valued
+                </Text>
+              </View>
+              {stats.itemsNeedingReview > 0 && (
+                <View style={styles.claimStat}>
+                  <Feather name="alert-circle" size={14} color={colors.warning} />
+                  <Text style={[styles.claimText, { color: colors.mutedForeground }]}>
+                    {stats.itemsNeedingReview} need review
+                  </Text>
+                </View>
+              )}
+            </View>
+          </View>
+        )}
+
+        {/* Coverage detail */}
+        {stats.coveragePercent != null && (
+          <View
+            style={[
+              styles.footerCard,
+              {
+                backgroundColor: colors.card,
+                borderColor: colors.border,
+                borderRadius: colors.radius,
+              },
+            ]}
+          >
+            <Text
+              style={[styles.sectionLabel, { color: colors.mutedForeground, marginBottom: 12 }]}
+            >
+              COVERAGE DETAIL
+            </Text>
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 16 }}>
+              <Pressable
+                onPress={() => setCoverModalVisible(true)}
+                hitSlop={8}
+                style={{ alignItems: "center" }}
+              >
+                <RadialCoverage percent={stats.coveragePercent} size={80} />
+                <View
+                  style={{
+                    flexDirection: "row",
+                    alignItems: "center",
+                    gap: 3,
+                    marginTop: 4,
+                  }}
+                >
+                  <Feather name="edit-2" size={10} color={colors.mutedForeground} />
+                  <Text
+                    style={{
+                      fontSize: 10,
+                      fontFamily: "Inter_400Regular",
+                      color: colors.mutedForeground,
+                    }}
+                  >
+                    Edit cover
+                  </Text>
+                </View>
+              </Pressable>
+              <View style={{ flex: 1 }}>
+                <CoverageBar percent={stats.coveragePercent} colors={colors} />
+              </View>
+            </View>
+          </View>
+        )}
       </View>
     );
   };
@@ -1005,7 +1199,7 @@ export default function PropertyDetailScreen() {
         />
       ) : (
         <FlatList
-          data={stats ? stats.roomStats.map((rs) => rs) : []}
+          data={stats ? stats.roomStats : []}
           keyExtractor={(rs) => rs.room.id}
           renderItem={({ item: rs }) => (
             <View style={{ paddingHorizontal: 16, marginBottom: 10 }}>
@@ -1019,6 +1213,7 @@ export default function PropertyDetailScreen() {
             </View>
           )}
           ListHeaderComponent={renderHeader}
+          ListFooterComponent={renderFooter}
           contentContainerStyle={{
             paddingBottom: insets.bottom + 24,
             ...(Platform.OS === "web" ? { paddingTop: 0 } : {}),
@@ -1031,7 +1226,7 @@ export default function PropertyDetailScreen() {
             />
           }
           ListEmptyComponent={
-            <View style={{ paddingHorizontal: 16, paddingTop: 16 }}>
+            <View style={{ paddingHorizontal: 16, paddingTop: 8 }}>
               <EmptyState
                 icon="layers"
                 title="No rooms found"
@@ -1052,68 +1247,97 @@ export default function PropertyDetailScreen() {
   );
 }
 
+// ─── Styles ───────────────────────────────────────────────────────────────────
+
 const styles = StyleSheet.create({
-  statsCard: {
+  // Summary card
+  summaryCard: {
     borderWidth: 1,
-    padding: 16,
-    gap: 4,
+    padding: 14,
   },
-  sectionLabel: {
-    fontSize: 11,
-    fontFamily: "Inter_600SemiBold",
-    letterSpacing: 0.8,
-  },
-  sectionHeading: {
-    fontSize: 18,
-    fontFamily: "Inter_700Bold",
-    marginTop: 4,
-    marginBottom: 2,
-  },
-  statsRow: {
+  summaryRow: {
     flexDirection: "row",
     alignItems: "center",
   },
-  statCell: {
-    flex: 1,
-    alignItems: "center",
-    gap: 2,
-  },
-  statDivider: {
-    width: 1,
-    height: 36,
-    marginHorizontal: 4,
-  },
-  bigValue: {
-    fontSize: 22,
+  summaryBigValue: {
+    fontSize: 19,
     fontFamily: "Inter_700Bold",
   },
-  midValue: {
-    fontSize: 17,
-    fontFamily: "Inter_700Bold",
-  },
-  bigLabel: {
-    fontSize: 11,
+  summarySmallLabel: {
+    fontSize: 10,
     fontFamily: "Inter_400Regular",
     marginTop: 1,
   },
-  claimRow: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 12,
-    marginTop: 12,
-    paddingTop: 12,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: BRAND_BORDER,
+  summaryDivider: {
+    width: StyleSheet.hairlineWidth,
+    height: 32,
+    marginHorizontal: 12,
   },
-  claimStat: {
-    flexDirection: "row",
+  summaryMetricCell: {
     alignItems: "center",
-    gap: 4,
+    gap: 2,
   },
-  claimText: {
+  summaryMetricValue: {
+    fontSize: 16,
+    fontFamily: "Inter_700Bold",
+  },
+
+  // Insight card
+  insightCard: {
+    backgroundColor: BRAND_DARK,
+    padding: 16,
+    gap: 0,
+  },
+  insightLabel: {
+    fontSize: 10,
+    fontFamily: "Inter_600SemiBold",
+    letterSpacing: 0.9,
+    color: "rgba(255,255,255,0.55)",
+  },
+  insightValue: {
+    fontSize: 28,
+    fontFamily: "Inter_700Bold",
+    color: "#FFFFFF",
+    marginTop: 2,
+  },
+  insightSubtext: {
     fontSize: 12,
     fontFamily: "Inter_400Regular",
+    color: "rgba(255,255,255,0.7)",
+    marginTop: 6,
   },
+  periodRow: {
+    flexDirection: "row",
+    gap: 6,
+    marginTop: 10,
+  },
+  periodChip: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 20,
+    borderWidth: 1,
+  },
+  periodChipSelected: {
+    backgroundColor: "rgba(255,255,255,0.15)",
+    borderColor: "rgba(255,255,255,0.45)",
+  },
+  periodChipIdle: {
+    backgroundColor: "transparent",
+    borderColor: "rgba(255,255,255,0.2)",
+  },
+  periodChipText: {
+    fontSize: 12,
+  },
+  periodChipTextSelected: {
+    fontFamily: "Inter_600SemiBold",
+    color: "#FFFFFF",
+  },
+  periodChipTextIdle: {
+    fontFamily: "Inter_400Regular",
+    color: "rgba(255,255,255,0.7)",
+  },
+
+  // Action buttons
   actionBtn: {
     flexDirection: "row",
     alignItems: "center",
@@ -1125,6 +1349,60 @@ const styles = StyleSheet.create({
   actionBtnText: {
     fontSize: 14,
     fontFamily: "Inter_600SemiBold",
+  },
+
+  // Section heading
+  sectionHeading: {
+    fontSize: 18,
+    fontFamily: "Inter_700Bold",
+    marginTop: 2,
+    marginBottom: 2,
+  },
+
+  // Room card
+  card: {
+    borderWidth: 1,
+    overflow: "hidden",
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  cardLeft: {},
+  roomThumb: { width: 72, height: 72 },
+  roomThumbPlaceholder: {
+    width: 72,
+    height: 72,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  cardBody: { flex: 1, padding: 12, gap: 2 },
+  cardRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  cardName: {
+    fontSize: 15,
+    fontFamily: "Inter_600SemiBold",
+    flex: 1,
+    marginRight: 4,
+  },
+  cardMeta: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+  },
+  metaText: { fontSize: 12, fontFamily: "Inter_400Regular" },
+  metaValue: { fontSize: 13, fontFamily: "Inter_600SemiBold" },
+
+  // Footer cards
+  footerCard: {
+    borderWidth: 1,
+    padding: 14,
+  },
+  sectionLabel: {
+    fontSize: 11,
+    fontFamily: "Inter_600SemiBold",
+    letterSpacing: 0.8,
   },
   barRow: {
     flexDirection: "row",
@@ -1143,60 +1421,22 @@ const styles = StyleSheet.create({
     borderRadius: 3,
     overflow: "hidden",
   },
-  barFill: {
-    height: 6,
-    borderRadius: 3,
-  },
+  barFill: { height: 6, borderRadius: 3 },
   barMeta: {
     width: 62,
     fontSize: 11,
     fontFamily: "Inter_400Regular",
     textAlign: "right",
   },
-  card: {
-    borderWidth: 1,
-    overflow: "hidden",
+
+  // Claim readiness
+  claimStat: {
     flexDirection: "row",
     alignItems: "center",
+    gap: 4,
   },
-  cardLeft: {},
-  roomThumb: {
-    width: 72,
-    height: 72,
-  },
-  roomThumbPlaceholder: {
-    width: 72,
-    height: 72,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  cardBody: {
-    flex: 1,
-    padding: 12,
-    gap: 2,
-  },
-  cardRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-  },
-  cardName: {
-    fontSize: 15,
-    fontFamily: "Inter_600SemiBold",
-    flex: 1,
-    marginRight: 4,
-  },
-  cardMeta: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-  },
-  metaText: {
+  claimText: {
     fontSize: 12,
     fontFamily: "Inter_400Regular",
-  },
-  metaValue: {
-    fontSize: 13,
-    fontFamily: "Inter_600SemiBold",
   },
 });

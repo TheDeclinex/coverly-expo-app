@@ -106,3 +106,83 @@ export function calcPortfolioStats(
     totalItems: items.length,
   };
 }
+
+export interface PeriodGrowth {
+  valueAdded: number;
+  itemsAdded: number;
+}
+
+/**
+ * Calculate value and item count added within the last N months using scan_date.
+ *
+ * TODO: Requires inventory_items.scan_date column to be populated.
+ * True historical valuation snapshots would require a future value_history table.
+ * Returns null if no items have a scan_date value.
+ */
+export function calcPeriodGrowth(
+  items: InventoryItem[],
+  months: 1 | 3 | 6 | 12
+): PeriodGrowth | null {
+  const datedItems = items.filter((i) => i.scan_date != null);
+  if (datedItems.length === 0) return null;
+
+  const cutoff = new Date();
+  cutoff.setMonth(cutoff.getMonth() - months);
+
+  const newItems = datedItems.filter(
+    (i) => new Date(i.scan_date!) >= cutoff
+  );
+
+  return {
+    valueAdded: newItems.reduce((s, i) => s + getItemTotalValue(i), 0),
+    itemsAdded: newItems.length,
+  };
+}
+
+/**
+ * Build normalised {x, y} sparkline points for cumulative value over the last N months.
+ *
+ * TODO: Requires inventory_items.scan_date column. Returns [] if unavailable.
+ */
+export function buildSparklinePoints(
+  items: InventoryItem[],
+  months: number
+): { x: number; y: number }[] {
+  const datedItems = items
+    .filter((i) => i.scan_date != null)
+    .map((i) => ({
+      date: new Date(i.scan_date!),
+      value: getItemTotalValue(i),
+    }))
+    .sort((a, b) => a.date.getTime() - b.date.getTime());
+
+  if (datedItems.length < 2) return [];
+
+  const buckets = new Map<string, number>();
+  for (let m = months - 1; m >= 0; m--) {
+    const d = new Date();
+    d.setMonth(d.getMonth() - m);
+    const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+    buckets.set(key, 0);
+  }
+
+  for (const item of datedItems) {
+    const key = `${item.date.getFullYear()}-${String(item.date.getMonth() + 1).padStart(2, "0")}`;
+    if (buckets.has(key)) {
+      buckets.set(key, (buckets.get(key) ?? 0) + item.value);
+    }
+  }
+
+  const monthKeys = Array.from(buckets.keys()).sort();
+  let cumulative = 0;
+  const cumulativeValues = monthKeys.map((k) => {
+    cumulative += buckets.get(k) ?? 0;
+    return cumulative;
+  });
+
+  const maxVal = Math.max(...cumulativeValues, 1);
+  return cumulativeValues.map((v, i) => ({
+    x: monthKeys.length > 1 ? i / (monthKeys.length - 1) : 0.5,
+    y: v / maxVal,
+  }));
+}

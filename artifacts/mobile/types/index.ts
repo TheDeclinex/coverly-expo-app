@@ -50,4 +50,6 @@ export interface InventoryItem {
   purchase_year_approx: string | null;
   image_pin: unknown | null;
   attachments: unknown | null;
+  // Optional — populated only if inventory_items.scan_date column exists in DB
+  scan_date?: string | null;
 }

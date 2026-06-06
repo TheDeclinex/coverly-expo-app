@@ -1,0 +1,129 @@
+Use Planner mode first. Do not edit files until I approve the plan.
+
+Goal:
+Adjust the Coverly mobile property/dashboard layout to better match the UI Bakery mobile reference screenshots.
+
+Current issue:
+The previous plan moved too many insights below the Rooms list. That makes the screen practical, but the top of the property page loses the strong Coverly dashboard/insight feel.
+
+New direction:
+The property page should have some meaningful insights near the top, like the UI Bakery mobile version, but still avoid pushing Rooms too far down.
+
+Use the provided UI Bakery mobile screenshots as a visual density and hierarchy reference, not a literal copy.
+
+Do not change backend schema.
+Do not touch item save/photo upload/RLS logic.
+Do not change navigation structure.
+Do not add claim pack, billing, offline sync, or real AI scan endpoint.
+
+Desired property screen hierarchy:
+
+1. Compact property identity / summary card
+
+* property name
+* property type if available
+* total inventory value
+* item count
+* room count
+* recorded cover amount / cover percentage
+* compact inventory vs recorded cover bar
+
+2. Compact top insight card
+   This should be inspired by the UI Bakery card style.
+   It should show:
+
+* “Total estimated value” or “Recorded contents value”
+* large value figure
+* selected growth period, e.g. 1m / 3m / 6m / 12m
+* simple sparkline or lightweight trend line
+* value added in selected period
+* items added in selected period
+* short positive/neutral insight text, e.g. “12 items added in the last 3 months”
+
+Important:
+Growth over time should be based on inventory_items.scan_date for now.
+Use estimated_price * quantity or the app’s existing item total value helper.
+If scan_date is missing, safely fallback or ignore that item for period growth.
+Do not invent historical valuation snapshots.
+Add a TODO comment noting that true historical valuation changes would require a future value history/snapshot table.
+
+3. Scan/add action row
+
+* Primary: “Scan items”
+* Secondary: “Add manually”
+  Keep scan dominant.
+
+4. Rooms list
+   Rooms should still appear reasonably high on screen.
+   The first room card should be visible or close to visible on a normal iPhone-sized viewport.
+   Do not make the top insight card too tall.
+
+5. Lower insights section
+   Below Rooms, show deeper analytics:
+
+* value by room bars
+* items by room bars
+* readiness stats
+* optional radial coverage chart if it fits better here
+
+Design style:
+Use the agreed Coverly palette:
+
+* Primary dark green #085041
+* Deep green #0F6E56
+* Main teal #1D9E75
+* Soft off-white #F5F8F6
+* Very pale green tint #E1F5EE
+* White cards #FFFFFF
+* Deep slate text #172A27
+* Muted slate text #64736F
+* Slate green #314B45
+* Soft border #DDE7E3
+* Warning amber #D97706
+* Danger #B91C1C
+
+Avoid:
+
+* bright blue primary buttons
+* bright aqua
+* soft mint as dominant colour
+* huge dashboard blocks that push rooms far below the fold
+* generic app-builder styling
+
+Planning task:
+Inspect current files and propose a plan for:
+
+1. property/[id].tsx layout changes
+2. any reusable compact insight card component
+3. growth period selector logic, 1 / 3 / 6 / 12 months
+4. sparkline/lightweight trend approach without heavy chart libraries
+5. where value-by-room and items-by-room should live
+6. how to keep Rooms visible early
+7. risks and acceptance criteria
+
+Important:
+Do not install heavy chart libraries.
+If a sparkline can be done with simple SVG and react-native-svg is already installed, use it.
+If not, use a lightweight View-based mini trend or simple line placeholder.
+Do not spend time on complex charting.
+
+Plan output required:
+
+* files to change
+* proposed top-of-screen layout
+* exact growth calculation approach
+* whether any new component is needed
+* whether any dependency is needed
+* risks
+* acceptance criteria
+
+Acceptance criteria after eventual execution:
+
+* property page has useful insight content near the top
+* first room card is still visible or close to visible without excessive scrolling
+* scan action remains primary
+* growth period selector supports 1m / 3m / 6m / 12m
+* growth is calculated from item scan_date / added date, not invented
+* value-by-room and items-by-room remain available
+* Coverly palette remains consistent
+* TypeScript passes
