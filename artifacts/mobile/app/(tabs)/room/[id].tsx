@@ -30,6 +30,66 @@ import { supabase } from "@/lib/supabase";
 import type { InventoryItem, InventoryRoom } from "@/types";
 
 const COVER_H = 200;
+const TEAL = "#1D9E75";
+
+/** Maps category key → Feather icon name */
+const CATEGORY_ICONS: Record<string, keyof typeof Feather.glyphMap> = {
+  electronics: "monitor",
+  furniture: "home",
+  appliances: "tool",
+  decor: "sun",
+  jewellery: "star",
+  jewelry: "star",
+  clothing: "scissors",
+  kitchen: "coffee",
+  outdoor: "compass",
+  garden: "sun",
+  lighting: "zap",
+  art: "star",
+  sport: "activity",
+  tools: "tool",
+  automotive: "truck",
+};
+
+/** Maps category key → colored dot */
+const CATEGORY_COLORS: Record<string, string> = {
+  electronics: "#1D9E75",
+  furniture: "#8B5CF6",
+  appliances: "#3B82F6",
+  decor: "#14B8A6",
+  jewellery: "#EC4899",
+  jewelry: "#EC4899",
+  clothing: "#F59E0B",
+  kitchen: "#F97316",
+  outdoor: "#22C55E",
+  garden: "#16A34A",
+  lighting: "#EAB308",
+  art: "#F472B6",
+  sport: "#06B6D4",
+  tools: "#64748B",
+  automotive: "#78716C",
+};
+
+function categoryIcon(cat: string | null): keyof typeof Feather.glyphMap {
+  if (!cat) return "package";
+  const key = cat.toLowerCase().split(/[\s&]/)[0];
+  return CATEGORY_ICONS[key] ?? "package";
+}
+
+function categoryDotColor(cat: string | null): string {
+  if (!cat) return "#94a3b8";
+  const key = cat.toLowerCase().split(/[\s&]/)[0];
+  return CATEGORY_COLORS[key] ?? "#94a3b8";
+}
+
+function valuationLabel(item: InventoryItem): string | null {
+  const src = ((item.price_source_type ?? item.valuation_basis ?? "") as string).toLowerCase();
+  if (src.includes("user") || src.includes("manual")) return "User added";
+  if (src.includes("listing") || src.includes("link")) return "Listing linked";
+  if (src.includes("ai") || src.includes("scan")) return "AI identified";
+  if (item.estimated_price != null || item.unit_estimated_price != null) return "Estimated";
+  return null;
+}
 
 const ROOM_ICONS: Record<string, string> = {
   kitchen: "coffee",
@@ -59,7 +119,7 @@ function ItemCard({
   item: InventoryItem;
   colors: ReturnType<typeof import("@/hooks/useColors").useColors>;
 }) {
-  const imageUri = item.image_url ?? item.photo_url;
+  const imageUri = item.image_url ?? item.photo_url ?? null;
 
   const rawPin = item.image_pin as Record<string, unknown> | null | undefined;
   const pin =
@@ -67,7 +127,14 @@ function ItemCard({
       ? { x: rawPin.x, y: rawPin.y }
       : null;
 
-  const handlePress = async () => {
+  const totalValue =
+    (item.estimated_price ?? item.unit_estimated_price ?? 0) *
+    (item.quantity ?? 1);
+  const valLabel = valuationLabel(item);
+  const dotColor = categoryDotColor(item.category);
+  const placeholderIcon = categoryIcon(item.category);
+
+  const goToDetail = async () => {
     await Haptics.selectionAsync();
     router.push({
       pathname: "/(tabs)/item/[id]",
@@ -75,60 +142,160 @@ function ItemCard({
     });
   };
 
+  const goToEdit = async () => {
+    await Haptics.selectionAsync();
+    router.push({
+      pathname: "/(tabs)/edit-item/[id]",
+      params: { id: item.id },
+    });
+  };
+
   return (
-    <Pressable
-      onPress={handlePress}
-      style={({ pressed }) => [
+    <View
+      style={[
         styles.card,
         {
           backgroundColor: colors.card,
           borderRadius: colors.radius,
           borderColor: colors.border,
-          opacity: pressed ? 0.92 : 1,
         },
       ]}
     >
-      <ExpandableImage
-        uri={imageUri}
-        style={styles.cardImage}
-        contentFit="cover"
-        placeholderIcon="package"
-        placeholderIconSize={22}
-        placeholderIconColor={colors.mutedForeground}
-        placeholderBackgroundColor={colors.muted}
-        pin={pin}
-      />
-      <View style={styles.cardBody}>
-        <Text
-          style={[styles.cardName, { color: colors.foreground }]}
-          numberOfLines={2}
-        >
-          {item.name}
-        </Text>
-        <View style={styles.cardMeta}>
-          {item.category && (
-            <View style={[styles.badge, { backgroundColor: colors.accent, borderRadius: 6 }]}>
-              <Text style={[styles.badgeText, { color: colors.accentForeground }]}>
-                {item.category}
+      {/* ── Summary row ── */}
+      <Pressable
+        onPress={goToDetail}
+        style={({ pressed }) => [
+          styles.cardSummary,
+          { opacity: pressed ? 0.88 : 1 },
+        ]}
+      >
+        {/* Thumbnail */}
+        <View style={[styles.thumbWrap, { borderColor: TEAL }]}>
+          <ExpandableImage
+            uri={imageUri}
+            style={styles.thumb}
+            contentFit="cover"
+            placeholderIcon={placeholderIcon}
+            placeholderIconSize={26}
+            placeholderIconColor={TEAL}
+            placeholderBackgroundColor={colors.muted}
+            pin={pin}
+          />
+        </View>
+
+        {/* Text block */}
+        <View style={styles.cardBody}>
+          <Text
+            style={[styles.cardName, { color: colors.foreground }]}
+            numberOfLines={2}
+          >
+            {item.name}
+          </Text>
+
+          {/* Category chip */}
+          <View style={styles.chipRow}>
+            <View style={[styles.dot, { backgroundColor: dotColor }]} />
+            <Text
+              style={[styles.chipText, { color: colors.mutedForeground }]}
+              numberOfLines={1}
+            >
+              {item.category ?? "General items"}
+            </Text>
+            {item.quantity != null && item.quantity > 1 && (
+              <Text style={[styles.qty, { color: colors.mutedForeground }]}>
+                {" "}
+                ×{item.quantity}
               </Text>
+            )}
+          </View>
+
+          {/* Price + valuation */}
+          {totalValue > 0 && (
+            <View style={styles.priceRow}>
+              <Text style={[styles.price, { color: colors.foreground }]}>
+                {formatCurrency(totalValue)}
+              </Text>
+              {valLabel && (
+                <Text
+                  style={[styles.valLabel, { color: colors.mutedForeground }]}
+                >
+                  {valLabel}
+                </Text>
+              )}
             </View>
           )}
-          {item.quantity != null && item.quantity > 1 && (
-            <Text style={[styles.qty, { color: colors.mutedForeground }]}>
-              ×{item.quantity}
-            </Text>
-          )}
         </View>
-        {item.estimated_price != null && (
-          <Text style={[styles.price, { color: colors.primary }]}>
-            {formatCurrency(item.estimated_price)}
+
+        <Feather
+          name="chevron-right"
+          size={16}
+          color={colors.mutedForeground}
+          style={{ marginLeft: 2 }}
+        />
+      </Pressable>
+
+      {/* ── Divider ── */}
+      <View style={[styles.divider, { backgroundColor: colors.border }]} />
+
+      {/* ── Actions ── */}
+      <View style={styles.actions}>
+        {/* Primary: Find replacement price */}
+        <Pressable
+          onPress={goToDetail}
+          style={({ pressed }) => [
+            styles.findPriceBtn,
+            { borderColor: TEAL, opacity: pressed ? 0.75 : 1 },
+          ]}
+        >
+          <Feather name="search" size={13} color={TEAL} />
+          <Text style={[styles.findPriceTxt, { color: TEAL }]}>
+            Find replacement price
           </Text>
-        )}
+        </Pressable>
+
+        {/* Secondary: Edit + View details */}
+        <View style={styles.secondaryRow}>
+          <Pressable
+            onPress={goToEdit}
+            style={({ pressed }) => [
+              styles.secondaryBtn,
+              {
+                borderColor: colors.border,
+                backgroundColor: colors.secondary,
+                opacity: pressed ? 0.75 : 1,
+              },
+            ]}
+          >
+            <Feather name="edit-2" size={13} color={colors.foreground} />
+            <Text style={[styles.secondaryTxt, { color: colors.foreground }]}>
+              Edit
+            </Text>
+          </Pressable>
+
+          <Pressable
+            onPress={goToDetail}
+            style={({ pressed }) => [
+              styles.secondaryBtn,
+              {
+                borderColor: colors.border,
+                backgroundColor: colors.secondary,
+                flex: 1,
+                opacity: pressed ? 0.75 : 1,
+              },
+            ]}
+          >
+            <Text style={[styles.secondaryTxt, { color: colors.foreground }]}>
+              View details
+            </Text>
+            <Feather
+              name="chevron-right"
+              size={13}
+              color={colors.mutedForeground}
+            />
+          </Pressable>
+        </View>
       </View>
-      <View style={styles.chevron}>
-        <Feather name="chevron-right" size={18} color={colors.mutedForeground} />
-      </View>
-    </Pressable>
+    </View>
   );
 }
 
@@ -397,40 +564,76 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   list: {
-    padding: 16,
-    paddingTop: 12,
+    padding: 12,
+    paddingTop: 10,
+    gap: 10,
   },
+  /* ── Card shell ── */
   card: {
-    flexDirection: "row",
     borderWidth: 1,
     overflow: "hidden",
-    marginBottom: 10,
-    alignItems: "center",
+    // shadow
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.07,
+    shadowRadius: 4,
+    elevation: 2,
   },
-  cardImage: { width: 72, height: 72 },
-  cardImagePlaceholder: {
-    width: 72,
-    height: 72,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  cardBody: { flex: 1, padding: 12, gap: 4 },
-  cardName: { fontSize: 15, fontFamily: "Inter_600SemiBold", lineHeight: 20 },
-  cardMeta: {
+  /* ── Summary row ── */
+  cardSummary: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 8,
-    flexWrap: "wrap",
+    padding: 12,
+    gap: 12,
   },
-  badge: { paddingHorizontal: 7, paddingVertical: 2 },
-  badgeText: {
-    fontSize: 11,
-    fontFamily: "Inter_500Medium",
-    textTransform: "capitalize",
+  thumbWrap: {
+    width: 76,
+    height: 76,
+    borderRadius: 10,
+    borderWidth: 2,
+    overflow: "hidden",
   },
+  thumb: { width: "100%", height: "100%" },
+  cardBody: { flex: 1, gap: 3 },
+  cardName: { fontSize: 15, fontFamily: "Inter_600SemiBold", lineHeight: 20 },
+  chipRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    flexWrap: "nowrap",
+  },
+  dot: { width: 8, height: 8, borderRadius: 4 },
+  chipText: { fontSize: 12, fontFamily: "Inter_400Regular", flexShrink: 1 },
   qty: { fontSize: 12, fontFamily: "Inter_400Regular" },
-  price: { fontSize: 14, fontFamily: "Inter_700Bold" },
-  chevron: { paddingRight: 12 },
+  priceRow: { flexDirection: "row", alignItems: "baseline", gap: 6 },
+  price: { fontSize: 15, fontFamily: "Inter_700Bold" },
+  valLabel: { fontSize: 11, fontFamily: "Inter_400Regular" },
+  /* ── Divider ── */
+  divider: { height: StyleSheet.hairlineWidth, marginHorizontal: 12 },
+  /* ── Actions ── */
+  actions: { padding: 10, gap: 8 },
+  findPriceBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    borderWidth: 1.5,
+    borderRadius: 10,
+    paddingVertical: 9,
+  },
+  findPriceTxt: { fontSize: 13, fontFamily: "Inter_600SemiBold" },
+  secondaryRow: { flexDirection: "row", gap: 8 },
+  secondaryBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 5,
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingVertical: 7,
+    paddingHorizontal: 12,
+  },
+  secondaryTxt: { fontSize: 12, fontFamily: "Inter_500Medium" },
   fabRow: {
     position: "absolute",
     left: 16,

@@ -1,0 +1,91 @@
+Please improve the Expo/React Native item cards so they feel more like the current Coverly UI Bakery item cards and less like default out-of-the-box list cards.
+
+Planner mode recommendation:
+Use Planner briefly first. Inspect the current room item list/card components, item detail components, thumbnail/image helpers, pin rendering logic, category chip styling, replacement price flow, and the existing UI Bakery-inspired screens if any. Then make a targeted visual/card component polish pass.
+
+Goal:
+The current Replit item cards are functional but feel too plain and generic. The UI Bakery Coverly cards feel more alive, branded, and useful. Bring the native item cards closer to that standard while keeping the app mobile-native and performant.
+
+Reference direction from existing Coverly/UI Bakery cards:
+
+* Use real item thumbnails where available.
+* Thumbnail should have a refined rounded rectangle shape.
+* Add a Coverly teal border/accent around thumbnails when useful.
+* Show pin marker overlay on the thumbnail when pin data exists.
+* Show item name clearly with stronger hierarchy.
+* Show item price/value clearly.
+* Show category as a small coloured pill/chip, not just plain text.
+* Show valuation/source status where available, for example:
+
+  * Estimated
+  * User added
+  * Listing linked
+  * AI identified
+* Include useful item actions where appropriate, especially:
+
+  * Find replacement price
+  * Attach
+  * Edit
+  * Verify
+  * View details
+* Cards should feel richer and more branded, not like default React Native cards.
+
+Specific changes:
+
+1. Replace the plain item list card style with a richer Coverly item card.
+2. Keep the cards clean, but add more visual hierarchy:
+
+   * rounded card container
+   * subtle shadow/elevation
+   * soft border
+   * thumbnail area
+   * category chip
+   * price/value area
+   * chevron/detail affordance
+3. Use existing Coverly theme tokens where possible.
+4. Avoid overusing bright green. Use restrained teal/mint accents similar to the existing Coverly app.
+5. If an item has no image, show a better category-aware placeholder instead of a generic cheap-looking cube:
+
+   * Electronics: device/monitor icon
+   * Furniture: sofa/chair icon
+   * Appliances: appliance icon
+   * Decor: decor/home icon
+   * Jewellery: gem icon
+   * Generic fallback: refined package/home icon
+6. If a real image exists, use it instead of the placeholder.
+7. Pins must display on thumbnails where pin data exists.
+8. Tapping a thumbnail should open the expanded image viewer with the correct image and pin overlay.
+9. Do not break scan review pin rendering.
+10. Do not change item save logic, Supabase schema, auth logic, RLS, routes, or storage buckets.
+
+Room item list behaviour:
+
+* The room list should still be easy to scan quickly.
+* Cards should not become too tall unless action buttons are needed.
+* Important info should be visible without opening item detail:
+
+  * item name
+  * category
+  * value
+  * image/placeholder
+  * pin if available
+  * replacement price/listing status if available
+
+Action buttons:
+
+* Do not overcrowd every card if space is tight.
+* Prefer a clean primary action such as "Find replacement price" when no listing is linked.
+* Secondary actions can be compact buttons or only shown where already supported.
+* Keep "View details" or chevron behaviour consistent.
+
+Acceptance criteria:
+
+* Native item cards feel clearly more polished and Coverly-branded.
+* Cards look closer in quality and richness to the UI Bakery item cards.
+* Real thumbnails display where available.
+* Placeholder icons look intentional and category-aware.
+* Pins display on thumbnails where pin data exists.
+* Expanded image view still works and shows pins.
+* Item values, categories, and status labels are easy to read.
+* Existing room/item navigation still works.
+* TypeScript passes.
