@@ -6,51 +6,26 @@ import { Pressable, View } from "react-native";
 import type { StyleProp, ViewStyle } from "react-native";
 
 import { ImageViewerModal } from "@/components/ImageViewerModal";
-import { ItemPinMarker, PIN_MARKER_RADIUS } from "@/components/ItemPinMarker";
+import { ItemPinMarker, PIN_MARKER_SIZE } from "@/components/ItemPinMarker";
 
 interface ExpandableImageProps {
   uri: string | null | undefined;
-  /** Size/layout style applied to both the image container and the placeholder. */
   style?: StyleProp<ViewStyle>;
   contentFit?: ImageContentFit;
-  /** Feather icon name to show when uri is null/empty. Defaults to "image". */
   placeholderIcon?: keyof typeof Feather.glyphMap;
-  /** Icon size for placeholder. Defaults to 22. */
   placeholderIconSize?: number;
-  /** Icon color for placeholder. */
   placeholderIconColor?: string;
-  /** Background color for placeholder container. */
   placeholderBackgroundColor?: string;
-  /**
-   * Full list of image URIs to show in the lightbox. When provided the
-   * lightbox opens at `initialPhotoIndex` and the user can swipe through all
-   * photos. When omitted only `uri` is shown.
-   */
   allUris?: string[];
-  /**
-   * Index within `allUris` that this image corresponds to. Defaults to 0.
-   * Only used when `allUris` is provided.
-   */
   initialPhotoIndex?: number;
   /**
-   * Optional pin marker to show over the image. Coordinates must be
-   * normalized 0–1 (as stored in inventory_items.image_pin).
-   * Shown on both the thumbnail and the expanded lightbox view.
+   * Pin marker in 0–1 normalised coords (as stored in inventory_items.image_pin).
+   * The TIP of the pin-drop marker aligns with this coordinate.
    */
   pin?: { x: number; y: number } | null;
   pinColor?: string;
 }
 
-/**
- * Drop-in replacement for expo-image's <Image> that adds a tap-to-fullscreen
- * lightbox when a URI is present.
- *
- * Pass `allUris` to enable swipe-through of multiple photos in the lightbox.
- * Pass `pin` (normalized 0–1 coords) to show an AI-location pin marker on
- * both the thumbnail and in the expanded lightbox.
- * When uri is null/undefined the component renders a non-interactive placeholder
- * icon — no tap target is added.
- */
 export function ExpandableImage({
   uri,
   style,
@@ -70,11 +45,9 @@ export function ExpandableImage({
   const lightboxUris: string[] =
     allUris && allUris.length > 0 ? allUris : uri ? [uri] : [];
 
+  const { w: pinW, h: pinH } = PIN_MARKER_SIZE.sm;
   const hasPin =
     !!pin && isFinite(pin.x) && isFinite(pin.y) && dims.w > 0 && dims.h > 0;
-
-  // Radius of the "sm" marker for center-anchoring
-  const r = PIN_MARKER_RADIUS.sm;
 
   if (!uri) {
     return (
@@ -118,9 +91,9 @@ export function ExpandableImage({
             pointerEvents="none"
             style={{
               position: "absolute",
-              // Center the marker over the pin point
-              left: pin!.x * dims.w - r,
-              top: pin!.y * dims.h - r,
+              // Tip-anchor: centre horizontally, tip at pin.y
+              left: pin!.x * dims.w - pinW / 2,
+              top: pin!.y * dims.h - pinH,
             }}
           >
             <ItemPinMarker size="sm" color={pinColor} />

@@ -15,7 +15,7 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import { ItemPinMarker, PIN_MARKER_RADIUS } from "@/components/ItemPinMarker";
+import { ItemPinMarker, PIN_MARKER_SIZE } from "@/components/ItemPinMarker";
 
 const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get("window");
 
@@ -25,13 +25,11 @@ interface ImageViewerModalProps {
   visible: boolean;
   onClose: () => void;
   /**
-   * Optional pin to overlay on one photo. Coordinates are 0–1 (normalized),
-   * matching what is stored in inventory_items.image_pin.
-   * Position is computed accurately from the natural image dimensions using
-   * the expo-image onLoad event so it accounts for contentFit="contain" letterboxing.
+   * Pin in 0–1 normalised coords (as stored in inventory_items.image_pin).
+   * Letterbox offsets are computed from the natural image size via onLoad so
+   * the TIP of the pin-drop lands precisely on the item, even in contain mode.
    */
   pin?: { x: number; y: number } | null;
-  /** Which URI index the pin belongs to. Defaults to initialIndex. */
   pinPhotoIndex?: number;
   pinColor?: string;
 }
@@ -51,28 +49,29 @@ function ImagePage({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
 
-  // Radius of the "lg" marker for center-anchoring
-  const r = PIN_MARKER_RADIUS.lg;
+  const { w: pinW, h: pinH } = PIN_MARKER_SIZE.lg;
 
   /**
-   * Compute the screen position of the pin for contentFit="contain".
-   * The image is letterboxed — we calculate the actual rendered rect first,
-   * then place the circular marker so its center aligns with the pin point.
+   * Pin position for contentFit="contain" with letterboxing.
+   * We need the natural image dimensions (from onLoad) to compute the
+   * rendered rect and apply the correct letterbox offsets.
+   *
+   * Tip-anchor: centre of SVG horizontally, bottom (tip) at pin coordinate.
+   *   left = ox + pin.x * rw - pinW / 2
+   *   top  = oy + pin.y * rh - pinH
    */
   const pinPos = useMemo(() => {
     if (!pin || !imgSize) return null;
-    // Scale to fit the screen while keeping the full image visible
     const scale = Math.min(SCREEN_W / imgSize.w, SCREEN_H / imgSize.h);
-    const rw = imgSize.w * scale;   // rendered image width
-    const rh = imgSize.h * scale;   // rendered image height
-    const ox = (SCREEN_W - rw) / 2; // horizontal letterbox offset
-    const oy = (SCREEN_H - rh) / 2; // vertical letterbox offset
+    const rw = imgSize.w * scale;
+    const rh = imgSize.h * scale;
+    const ox = (SCREEN_W - rw) / 2;
+    const oy = (SCREEN_H - rh) / 2;
     return {
-      // Center of circular marker at the pin point
-      left: ox + pin.x * rw - r,
-      top: oy + pin.y * rh - r,
+      left: ox + pin.x * rw - pinW / 2,
+      top: oy + pin.y * rh - pinH,
     };
-  }, [pin, imgSize, r]);
+  }, [pin, imgSize, pinW, pinH]);
 
   return (
     <Pressable style={styles.page} onPress={onClose}>
@@ -116,15 +115,6 @@ function ImagePage({
   );
 }
 
-/**
- * Full-screen lightbox modal for viewing one or more images.
- * When multiple URIs are provided the user can swipe left/right or tap the
- * arrow buttons to navigate. Dot indicators show position in the set.
- * Single-photo usage hides all navigation UI.
- *
- * Pass `pin` + `pinPhotoIndex` to show a position marker on a specific photo.
- * Pin coordinates must be normalized 0–1 (as stored in inventory_items.image_pin).
- */
 export function ImageViewerModal({
   uris,
   initialIndex = 0,
@@ -202,7 +192,7 @@ export function ImageViewerModal({
           <>
             <Pressable
               onPress={() => scrollToIndex(currentIndex - 1)}
-              style={[styles.arrowBtn, styles.arrowLeft, { top: "50%" }]}
+              style={[styles.arrowBtn, styles.arrowLeft]}
               hitSlop={12}
               disabled={currentIndex === 0}
             >
@@ -216,7 +206,7 @@ export function ImageViewerModal({
             </Pressable>
             <Pressable
               onPress={() => scrollToIndex(currentIndex + 1)}
-              style={[styles.arrowBtn, styles.arrowRight, { top: "50%" }]}
+              style={[styles.arrowBtn, styles.arrowRight]}
               hitSlop={12}
               disabled={currentIndex === uris.length - 1}
             >
@@ -302,13 +292,14 @@ const styles = StyleSheet.create({
   },
   arrowBtn: {
     position: "absolute",
+    top: "50%",
+    marginTop: -20,
     width: 40,
     height: 40,
     borderRadius: 20,
     backgroundColor: "rgba(0,0,0,0.40)",
     alignItems: "center",
     justifyContent: "center",
-    marginTop: -20,
   },
   arrowLeft: {
     left: 12,
