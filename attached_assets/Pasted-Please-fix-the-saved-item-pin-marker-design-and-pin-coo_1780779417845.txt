@@ -1,0 +1,94 @@
+Please fix the saved item pin marker design and pin coordinate accuracy.
+
+Current state:
+
+* The expanded image/lightbox now displays the image, which is good.
+* However, I do not like the current map-pin design.
+* More importantly, the pins are not accurate. They do not appear to line up with the actual item location in the photo.
+
+This task has two parts: pin design and pin coordinate mapping.
+
+1. Pin design
+   Replace the current map/location pin with a cleaner Coverly item marker.
+
+Preferred design:
+
+* Use a small circular locator marker, not a map pin.
+* It should look like an AI/item identification marker rather than a Google Maps location pin.
+* Suggested style:
+
+  * outer white ring/halo
+  * Coverly teal/aqua inner circle or ring
+  * small white centre dot
+  * subtle shadow
+* It should be visible on dark, light, and busy images.
+* Keep it compact so it does not cover the item.
+* Use the same marker style on thumbnails, expanded image/lightbox, and any saved item image view.
+* Do not use the current large map-pin/drop icon.
+
+2. Pin coordinate accuracy
+   The current pin placement is wrong. Please inspect and fix the coordinate mapping.
+
+Important:
+
+* Find the scan review screen where pins are currently accurate.
+* Reuse the same pin overlay logic from scan review if possible.
+* If scan review uses a different component, extract shared pin coordinate logic into one helper/component and use it everywhere.
+
+The pin must be positioned relative to the actual displayed image, not just the outer modal/container.
+
+For `contentFit="contain"`:
+
+* Calculate the actual rendered image width/height inside the container.
+* Calculate the x/y offset caused by letterboxing.
+* Place the pin at:
+  renderedImageLeft + normalizedX * renderedImageWidth
+  renderedImageTop + normalizedY * renderedImageHeight
+
+For `contentFit="cover"` thumbnails:
+
+* Account for image cropping.
+* Either:
+
+  * calculate cover scale/crop offsets correctly, or
+  * use `contain` for thumbnails where pin accuracy matters.
+* Do not place pins based only on the card/thumbnail container size if the image has been cropped.
+
+Also verify:
+
+* Whether stored pin coordinates are 0–1 normalized values, percentages, or pixel values.
+* Whether the pin represents the item centre or marker tip.
+* Whether the AI scan saved coordinates against the resized scan image or the original image.
+* Normalize this once and use a consistent format internally.
+
+Required behaviour:
+
+* Pins should appear in the same relative item location as they did on scan review.
+* The thumbnail pin and expanded lightbox pin should point to the same item location.
+* The pin should remain accurate across different image aspect ratios.
+* The pin should remain accurate when the image is shown full-screen with `contain`.
+* The pin should remain accurate on small thumbnails.
+* Do not hard-code offsets.
+* Do not manually tweak this for one image only.
+
+Debugging suggestion:
+
+* Temporarily log/display the source image dimensions, container dimensions, rendered image rect, normalized pin x/y, and final screen x/y while testing.
+* Remove or hide debug output after the fix.
+
+Do not change:
+
+* Stored pin data unless absolutely necessary.
+* Item save logic unless the saved pin format is proven wrong.
+* Supabase schema, auth, RLS, routes, or storage buckets.
+* Scan review behaviour, except to share the same correct pin component.
+
+Acceptance criteria:
+
+* Pin marker design is a small circular Coverly locator marker, not a map pin.
+* Pins are visibly easier to see.
+* Pins line up accurately with the item in expanded image view.
+* Pins line up accurately on thumbnails.
+* Pin placement matches the scan review positioning.
+* Works across portrait, landscape, cropped, and contained images.
+* TypeScript passes.
