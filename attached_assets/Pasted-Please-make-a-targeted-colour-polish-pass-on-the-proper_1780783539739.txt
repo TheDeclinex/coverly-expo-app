@@ -1,0 +1,60 @@
+Please make a targeted colour polish pass on the property screen.
+
+Current issue:
+The green used in the property cover placeholder and primary buttons is too dark and forest-green. It feels heavy and a bit like a bank/security app. Coverly should feel more modern, fresh, and tech-friendly, closer to teal/aqua.
+
+Do not redesign the screen. Keep the current layout and structure.
+
+Colour direction:
+
+* Shift the dark green areas toward a lighter Coverly teal / blue-green.
+* Avoid black-green or forest-green.
+* Keep enough contrast for accessibility.
+* Use existing theme tokens if available, but update/extend them if the current primary is too dark.
+
+Suggested palette direction:
+
+* Primary teal: #0F8F83
+* Deep teal: #0B6F66
+* Bright/accent teal: #14A99A
+* Soft teal surface: #E6F6F3
+* Mint background: #F2FAF8
+* Dark text: #102A2A
+
+Specific updates:
+
+1. Property cover placeholder
+
+* Replace the solid very dark green background with a lighter premium teal treatment.
+* Prefer a subtle teal gradient, for example:
+  #0B6F66 to #14A99A
+  or a softer teal/mint variant.
+* Keep the circular camera/cover-photo treatment, but make it feel lighter and more modern.
+* Maintain readable white or near-white text.
+
+2. Primary buttons
+
+* Update "Scan items" and other main primary buttons from dark forest green to Coverly teal.
+* Keep hover/pressed/disabled states if they exist.
+* Ensure button text remains high contrast.
+
+3. Accent consistency
+
+* Update related accent lines/progress bars only if needed so the screen feels consistent.
+* Do not make every element bright teal; keep hierarchy restrained.
+* Keep cards white/soft and readable.
+
+4. Stability
+
+* Do not change functionality.
+* Do not change Supabase schema, auth, RLS, routes, storage, image upload, or navigation.
+* Do not break property photo upload/save.
+* TypeScript must pass.
+
+Acceptance criteria:
+
+* The screen feels lighter, fresher, and more Coverly teal.
+* The cover placeholder no longer feels like a dark green block.
+* Primary buttons feel premium and mobile-native.
+* Contrast remains accessible.
+* No app behaviour changes.

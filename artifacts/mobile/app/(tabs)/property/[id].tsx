@@ -2,6 +2,7 @@ import { Feather } from "@expo/vector-icons";
 import { Image } from "expo-image";
 import * as Haptics from "expo-haptics";
 import * as ImagePicker from "expo-image-picker";
+import { LinearGradient } from "expo-linear-gradient";
 import { Stack, router, useLocalSearchParams } from "expo-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import React, { useMemo, useState } from "react";
@@ -42,8 +43,8 @@ const BRAND_TEAL = "#1D9E75";
 const BRAND_AMBER = "#D97706";
 const BRAND_DANGER = "#B91C1C";
 const BRAND_BORDER = "#DDE7E3";
-const BRAND_DARK = "#085041";
-const BRAND_DARK_DEEP = "#0F6E56";
+const BRAND_DARK = "#0B6F66";
+const BRAND_DARK_DEEP = "#0A5C55";
 
 type Period = 1 | 3 | 6 | 12;
 const PERIODS: Period[] = [1, 3, 6, 12];
@@ -1060,18 +1061,23 @@ export default function PropertyDetailScreen() {
               contentFit="cover"
             />
           ) : (
-            /* Designed placeholder — dark teal, icon badge, CTA */
+            /* Designed placeholder — gradient teal, icon badge, CTA */
             <Pressable
               onPress={handlePickPropertyCover}
               disabled={coverPhotoUploading}
               style={{
                 flex: 1,
-                backgroundColor: "#085041",
                 alignItems: "center",
                 justifyContent: "center",
                 gap: 12,
               }}
             >
+              <LinearGradient
+                colors={["#0B6F66", "#14A99A"]}
+                start={{ x: 0, y: 1 }}
+                end={{ x: 1, y: 0 }}
+                style={StyleSheet.absoluteFill}
+              />
               {/* Subtle concentric rings for depth */}
               <View
                 style={{
