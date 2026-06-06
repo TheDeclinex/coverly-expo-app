@@ -1,0 +1,82 @@
+We need to improve the AI scan loading animation in the Coverly Expo/React Native mobile app.
+
+Context:
+- Coverly is a home contents inventory app.
+- Users take/upload room photos, then AI scans the image to identify items.
+- The current scan loading state is too plain/subtle.
+- I want this to feel premium, modern, and clearly AI-powered.
+- You have creative freedom to design the best scanner/loading animation you think fits the product.
+- Do not just make a basic spinner.
+- Do not overuse green/teal. There is already a lot of green in the app, so explore a fresher visual treatment that still feels polished and appropriate.
+
+Important:
+- This is UI-only.
+- Do not change Supabase logic.
+- Do not change AI scan functions.
+- Do not change item save logic.
+- Do not change credits/entitlements.
+- Do not change navigation/result flow.
+- Preserve existing production naming conventions and app structure.
+- Avoid introducing new dependencies unless there is already an animation library in the project.
+- Prefer React Native Animated, or existing project animation utilities if already present.
+
+Task:
+Find the screen/component used when a user scans a photo and the scan is in progress.
+
+When the scan is running, replace or enhance the current loading state with a more impressive scanner animation.
+
+Creative direction:
+Come up with your best idea for Coverly. It could use any combination of:
+- abstract animated AI blob
+- particle wave
+- flowing energy field
+- moving scan line
+- morphing geometric shape
+- glowing analysis frame
+- item-detection style overlays
+- pulsing neural/AI effect
+- subtle glass/premium effect
+
+The design should feel:
+- premium
+- calm
+- trustworthy
+- AI-powered
+- not gimmicky
+- suitable for an insurance/home inventory product
+
+Functional requirements:
+1. The selected image/photo should remain visible while scanning.
+2. The animation should visually connect to the photo being scanned.
+3. The user should clearly understand that Coverly is analysing the image.
+4. Add short status text such as:
+   - “Analysing photo…”
+   - “Detecting contents…”
+   - “Finding item details…”
+   - “Preparing results…”
+5. The animation should start immediately after the scan begins.
+6. The animation should stop cleanly when scan results load or the user leaves the screen.
+7. Keep the scan button disabled while scanning, but make its loading state more legible.
+8. Keep the layout responsive on small phone screens.
+9. Do not create excess blank scroll space.
+10. Keep performance lightweight for lower-end Android devices.
+
+Implementation guidance:
+- First inspect the existing scan screen and loading state.
+- Then choose one strong animation concept and implement it cleanly.
+- If useful, create a reusable component such as:
+  - `AiScanAnimation`
+  - `ScanningPhotoOverlay`
+  - `AiScanningPreview`
+- Keep styling aligned with Coverly’s existing visual direction, but do not force the existing green/teal palette.
+- Try a more distinctive animation treatment that gives the scan screen its own premium identity.
+
+Acceptance criteria:
+- Normal scan screen looks unchanged before scanning.
+- When scanning starts, the user sees a clearly improved animated AI scanner state.
+- The selected photo remains visible.
+- The scan result flow still works exactly as before.
+- No API/database/schema changes.
+- No entitlement or billing changes.
+- No new production conventions unless absolutely necessary.
+- TypeScript passes.

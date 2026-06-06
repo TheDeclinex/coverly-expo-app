@@ -17,6 +17,7 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+import { AiScanningOverlay } from "@/components/AiScanningOverlay";
 import { EmptyState } from "@/components/EmptyState";
 import { useAuth } from "@/context/AuthContext";
 import { useColors } from "@/hooks/useColors";
@@ -583,6 +584,16 @@ export default function ScanScreen() {
     selectedFileId &&
     selectedRoomId &&
     (selectedMode === "video_room" || images.length > 0);
+
+  // ── Scanning overlay — full screen while AI processes ─────────────────────
+  if (isScanning) {
+    return (
+      <>
+        <Stack.Screen options={{ title: "Scanning…", headerShown: false }} />
+        <AiScanningOverlay images={images} />
+      </>
+    );
+  }
 
   return (
     <>
