@@ -71,11 +71,25 @@ serve(async (req) => {
 
     const now = new Date().toISOString();
 
+    // Resolve next file_number for this user.
+    // file_number is a bigint NOT NULL per-user sequential integer.
+    // Using the service role client so RLS doesn't filter results — we scope
+    // the query manually to the verified user_id.
+    const { data: maxRow } = await adminClient
+      .from('inventory_files')
+      .select('file_number')
+      .eq('user_id', user.id)
+      .order('file_number', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    const nextFileNumber = ((maxRow as { file_number?: number } | null)?.file_number ?? 0) + 1;
+
     const { data, error: insertError } = await adminClient
       .from('inventory_files')
       .insert({
         id: crypto.randomUUID(),
         user_id: user.id,
+        file_number: nextFileNumber,
         name,
         status: typeof body.status === 'string' ? body.status : 'active',
         property_type: typeof body.property_type === 'string' ? body.property_type : null,

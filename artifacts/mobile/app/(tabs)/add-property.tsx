@@ -116,9 +116,21 @@ export default function AddPropertyScreen() {
     // address is not yet persisted — inventory_files has no dedicated address column
     void address;
 
+    // Resolve next file_number for this user.
+    // file_number is a bigint NOT NULL per-user sequential integer.
+    // We fetch the current max scoped to the authenticated user (RLS ensures
+    // this only sees their own rows) and increment by 1.
+    const { data: maxRow } = await supabase
+      .from("inventory_files")
+      .select("file_number")
+      .order("file_number", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    const nextFileNumber = ((maxRow as { file_number?: number } | null)?.file_number ?? 0) + 1;
+
     // Generate a UUID client-side for the id column.
     // inventory_files.id may have no server default (like inventory_items.id),
-    // so we always supply one. A UUID string is valid for both text and uuid column types.
+    // so we always supply one.
     const newId = "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
       const r = (Math.random() * 16) | 0;
       const v = c === "x" ? r : (r & 0x3) | 0x8;
@@ -130,6 +142,7 @@ export default function AddPropertyScreen() {
       .insert({
         id: newId,
         user_id: session.user.id,
+        file_number: nextFileNumber,
         name: name.trim(),
         status: "active",
         property_type: propertyType ?? null,

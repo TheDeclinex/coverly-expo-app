@@ -1,0 +1,50 @@
+Creating a new property now passes RLS, but fails with:
+
+"null value in column "file_number" of relation "inventory_files" violates not-null constraint"
+
+Please fix the create-property insert payload.
+
+Important:
+This means the insert is now reaching the table correctly, but the required `file_number` column is missing.
+
+Before editing, inspect:
+
+* The actual `inventory_files` table fields/types.
+* Existing rows in `inventory_files` to understand the format and meaning of `file_number`.
+* Any existing UI Bakery/web app logic or previous app logic that creates inventory_files/properties.
+* Any TypeScript model/types for inventory files/properties.
+
+Do not guess blindly if an existing pattern already exists.
+
+Required fix:
+
+* Include a valid `file_number` value when creating a new property.
+* Follow the existing production convention if one exists.
+* If `file_number` is a per-user sequential number, calculate the next value from the authenticated user's existing inventory_files rows.
+* If it is a global/generated reference, follow the existing format used by current records.
+* Do not make `file_number` nullable just to bypass the error unless we explicitly decide the database model should change.
+* Do not disable RLS.
+* Do not use a service-role key client-side.
+* Do not create a duplicate property table.
+
+Expected behaviour:
+
+* New property insert includes all required fields:
+
+  * id
+  * user_id
+  * file_number
+  * name/property name
+  * status
+  * property type/address/cover amount fields if they exist
+  * timestamps if required and not database-defaulted
+* After creating the property, the app selects/navigates to the new property.
+* Existing users and existing properties continue to work.
+
+Acceptance criteria:
+
+* Creating a new property no longer errors on `file_number`.
+* The generated `file_number` matches the existing app/database convention.
+* Multiple properties can be created by one user.
+* Rooms/items remain scoped to the selected property.
+* TypeScript passes.

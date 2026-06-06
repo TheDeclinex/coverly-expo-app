@@ -1,6 +1,8 @@
 export interface InventoryFile {
   id: string;
   user_id: string;
+  /** Per-user sequential bigint reference number. NOT NULL in the database. */
+  file_number: number;
   name: string;
   status: string | null;
   contents_sum_insured: number | null;

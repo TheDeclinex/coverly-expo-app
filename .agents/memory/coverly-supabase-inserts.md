@@ -5,18 +5,22 @@ description: RLS policy gaps and id-generation rules for inventory_files and inv
 
 ## inventory_files
 
-- `id` column: generate UUID client-side before insert (may have no server default). Use inline Math.random() UUID v4 generator — expo-crypto not needed.
-- `user_id` column: must set to `session.user.id`.
-- **INSERT RLS policy is missing** from the live Supabase project. All authenticated INSERTs fail with "new row violates row-level security policy" until this SQL is run in the Supabase SQL Editor:
+Required columns for INSERT (all confirmed from live DB errors):
+- `id`: generate UUID client-side (no server default). Use inline Math.random() UUID v4 generator.
+- `user_id`: `session.user.id`
+- `file_number`: **bigint NOT NULL**, per-user sequential integer. Query `MAX(file_number)` for the current user (RLS auto-scopes to their rows) and use `max + 1` (default to 1 if user has no properties).
+- `name`, `status`: required non-null strings
+
+**INSERT RLS policy was missing** — add via SQL Editor:
   ```sql
   CREATE POLICY "authenticated users can insert their own files"
     ON public.inventory_files FOR INSERT TO authenticated
     WITH CHECK (user_id = auth.uid());
   ```
 - Migration file: `supabase/migrations/add_inventory_files_insert_policy.sql`
-- Edge function alternative also at: `supabase/functions/create-property/index.ts`
+- Edge function alternative: `supabase/functions/create-property/index.ts`
 
-**Why:** The table was originally populated via Supabase dashboard (service role bypasses RLS). No INSERT policy was ever created for client-side mobile inserts.
+**Why:** Table was originally populated via Supabase dashboard (service role bypasses RLS). `file_number` and `id` have no server defaults — must be supplied client-side.
 
 ## inventory_items
 
