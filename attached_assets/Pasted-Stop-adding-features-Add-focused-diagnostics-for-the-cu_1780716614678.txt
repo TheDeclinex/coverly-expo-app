@@ -1,0 +1,53 @@
+Stop adding features.
+
+Add focused diagnostics for the current inventory_items RLS insert failure.
+
+Current state:
+
+* There is only one Supabase auth user.
+* The logged-in app user is [jayvc2@gmail.com](mailto:jayvc2@gmail.com).
+* The inventory_files.user_id is already set to that user's auth UID.
+* Add Item still fails with:
+  new row violates row-level security policy for table "inventory_items" (42501)
+
+Therefore the likely issue is that the Add Item insert payload is sending the wrong file_id value, missing file_id, or using a room that does not belong to the selected file.
+
+Do not change schema.
+Do not disable RLS.
+Do not add features.
+
+Tasks:
+
+1. On Add Item save, before insert, fetch:
+
+   * session.user.email
+   * session.user.id
+   * selected file/property id
+   * selected file/property name
+   * selected room id
+   * selected room name
+   * selected room.file_id
+   * insert payload.file_id
+   * insert payload.room_id
+   * inventory_files.user_id for insert payload.file_id
+   * whether inventory_files.user_id === session.user.id
+   * whether selected room.file_id === insert payload.file_id
+
+2. Show these values in the inline red error/debug panel if save fails.
+   IDs are okay to show.
+   Do not show API keys or secrets.
+
+3. Console.log the same values under a clear label:
+   [AddItem RLS debug]
+
+4. If insert payload.file_id is missing or does not equal selected file/property id, fix the mapping.
+
+5. If selected room.file_id does not equal insert payload.file_id, fix the room/property selection logic.
+
+6. If inventory_files.user_id === session.user.id is true and room.file_id matches payload.file_id, but insert still fails, report the exact RLS policy/policies currently defined on inventory_items in this Supabase project.
+
+Acceptance:
+
+* The Add Item failure screen shows the exact file_id, room_id, session user id, inventory_files.user_id, and match booleans.
+* If the mismatch is in app mapping, fix it.
+* TypeScript passes.

@@ -152,6 +152,20 @@ export default function AddItemScreen() {
     enabled: !!session && !!selectedFileId,
   });
 
+  const { data: selectedFile } = useQuery({
+    queryKey: ["file-detail", selectedFileId, session?.user.id],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("inventory_files")
+        .select("id, name, user_id")
+        .eq("id", selectedFileId)
+        .single();
+      if (error) throw error;
+      return data as Pick<InventoryFile, "id" | "name" | "user_id">;
+    },
+    enabled: !!session && !!selectedFileId,
+  });
+
   const pickPhoto = async () => {
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (status !== "granted") {
@@ -261,7 +275,28 @@ export default function AddItemScreen() {
       imageUrl: uploadedPhotoUrl,
     });
 
-    console.log("[AddItem] Insert payload keys:", Object.keys(payload));
+    // --- RLS diagnostics ---
+    const selectedRoom = rooms?.find((r) => r.id === selectedRoomId);
+    const diag = {
+      session_email: session?.user?.email ?? "n/a",
+      session_user_id: session?.user?.id ?? "n/a",
+      selected_file_id: selectedFileId,
+      selected_file_name: selectedFile?.name ?? "n/a",
+      selected_file_user_id: selectedFile?.user_id ?? "n/a",
+      selected_room_id: selectedRoomId,
+      selected_room_name: selectedRoom?.name ?? destRoomName ?? "n/a",
+      selected_room_file_id: selectedRoom?.file_id ?? "n/a",
+      payload_file_id: payload.file_id,
+      payload_room_id: payload.room_id,
+      file_user_matches_session:
+        selectedFile?.user_id === session?.user?.id ? "YES" : "NO",
+      room_file_matches_payload:
+        selectedRoom?.file_id === payload.file_id ? "YES" : "NO",
+    };
+    const diagStr = Object.entries(diag)
+      .map(([k, v]) => `${k}: ${v}`)
+      .join("\n");
+    console.log("[AddItem RLS debug]\n" + diagStr);
 
     const { error } = await supabase.from("inventory_items").insert(payload);
 
@@ -269,9 +304,14 @@ export default function AddItemScreen() {
 
     if (error) {
       console.error("[AddItem] Insert failed:", error.message, error.code);
+      const diagText = Object.entries(diag)
+        .map(([k, v]) => `${k}: ${v}`)
+        .join("\n");
       setErrorMsg(
         `Save failed: ${error.message}` +
-          (error.code ? ` (${error.code})` : "")
+          (error.code ? ` (${error.code})` : "") +
+          "\n\n--- RLS debug ---\n" +
+          diagText
       );
       return;
     }
