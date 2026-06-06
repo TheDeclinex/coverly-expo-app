@@ -28,7 +28,7 @@ export function needsReview(item: InventoryItem): boolean {
 
 export function formatCurrency(value: number | null | undefined): string {
   if (value === null || value === undefined) return "—";
-  return `£${value.toLocaleString("en-GB", {
+  return `$${value.toLocaleString("en-US", {
     minimumFractionDigits: 0,
     maximumFractionDigits: 0,
   })}`;
@@ -36,7 +36,7 @@ export function formatCurrency(value: number | null | undefined): string {
 
 export function formatCurrencyFull(value: number | null | undefined): string {
   if (value === null || value === undefined) return "—";
-  return `£${value.toLocaleString("en-GB", {
+  return `$${value.toLocaleString("en-US", {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   })}`;

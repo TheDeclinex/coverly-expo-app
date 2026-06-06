@@ -446,7 +446,7 @@ export default function AddItemScreen() {
 
             <View style={{ flexDirection: "row", gap: 12 }}>
               <View style={{ flex: 2 }}>
-                <FormField label="Estimated value (£)" colors={colors}>
+                <FormField label="Estimated value ($)" colors={colors}>
                   <StyledInput
                     value={estimatedPrice}
                     onChangeText={setEstimatedPrice}
