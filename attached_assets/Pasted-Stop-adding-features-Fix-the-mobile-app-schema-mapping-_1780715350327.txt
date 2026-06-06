@@ -1,0 +1,139 @@
+Stop adding features.
+
+Fix the mobile app schema mapping using the real Coverly production schema below.
+
+Do not change the database schema.
+Do not add user_id to inventory_items.
+Do not add claim pack, billing, full AI scan, offline sync, or new UI features.
+
+Real schema facts:
+
+inventory_files:
+
+* id text NOT NULL
+* user_id uuid NOT NULL
+* name text NOT NULL
+* contents_sum_insured numeric nullable
+* property_cover_image_url text nullable
+
+inventory_rooms:
+
+* id uuid NOT NULL default gen_random_uuid()
+* file_id text NOT NULL
+* user_id uuid nullable
+* name text NOT NULL
+* cover_photo_url text nullable
+
+inventory_items:
+
+* id text NOT NULL, no default
+* file_id text NOT NULL
+* name text NOT NULL
+* quantity integer NOT NULL default 1
+* room_id uuid nullable
+* room text nullable
+* category text nullable
+* confidence numeric nullable
+* estimated_price numeric nullable default 0
+* unit_estimated_price numeric nullable
+* quantity_estimate text nullable
+* valuation_basis text nullable
+* price_source_type text nullable default estimated_gpt
+* image_url text nullable
+* photo_url text nullable
+* notes text nullable
+* description text nullable
+* image_pin jsonb nullable
+* attachments jsonb nullable
+* brand_maker text nullable
+* model_series text nullable
+* condition_label text nullable
+* purchase_source text nullable
+* original_purchase_price numeric nullable
+* purchase_year_approx text nullable
+
+Critical:
+inventory_items does not have user_id.
+The ownership path is through inventory_items.file_id → inventory_files.id → inventory_files.user_id.
+Therefore item inserts must include file_id and should not include user_id.
+
+Tasks:
+
+1. Update lib/item-insert-helpers.ts
+   Create a single DB payload builder for item inserts.
+   It must map app/model fields to real DB columns only.
+
+Insert payload must include:
+
+* id: generated text id, because inventory_items.id has no default
+* file_id: selected property/file id
+* room_id: selected room id, if selected
+* room: selected room name, if available
+* name
+* description
+* notes if available
+* category
+* estimated_price
+* unit_estimated_price
+* quantity
+* valuation_basis
+* price_source_type
+* photo_url and/or image_url only if available
+
+Insert payload must never include:
+
+* user_id
+* property_id
+* replacementPrice
+* estimatedPrice
+* photoUrl
+* imageUrl
+* title
+* any unknown column
+
+2. Fix Add Item save
+
+* Use the corrected payload builder.
+* Ensure selected property/file id is passed as file_id.
+* Ensure selected room id is passed as room_id.
+* Ensure name and quantity are set.
+* Ensure id is generated as text.
+* Show inline error banners, not Alert.alert.
+* Show diagnostic payload keys only, not values/secrets.
+
+3. Fix Edit Item save
+
+* Update only real inventory_items columns.
+* Do not include user_id.
+* Do not include id unless required.
+* Do not include unknown camelCase model fields.
+
+4. Fix Move Item between rooms
+
+* Update the existing item row.
+* Set room_id to the new room id.
+* Set room to the new room name if available.
+* Do not delete/recreate the item.
+
+5. Fix scan scaffold save path
+
+* Any detected item save must use the same corrected insert helper.
+* Do not build the real AI endpoint yet.
+
+6. Storage
+
+* Change the photo bucket constant from item-photos to inventory-photos.
+* Photo upload failure must not block item save.
+* If photo upload fails, show a warning but still insert the item without photo.
+
+Acceptance:
+
+1. TypeScript passes.
+2. Add item without photo saves successfully.
+3. New item appears in the correct room.
+4. Refresh still shows the item.
+5. Add item with photo still saves the item even if upload fails.
+6. Edit item works.
+7. Move item between rooms works.
+8. Scan scaffold does not crash.
+9. Final response lists exact inventory_items insert payload keys and update payload keys.

@@ -26,16 +26,20 @@ export interface ScanInput {
 export interface ScanDetectedItem {
   name: string;
   description?: string | null;
+  notes?: string | null;
   category?: string | null;
   estimatedPrice?: number | null;
+  unitEstimatedPrice?: number | null;
   quantity?: number | null;
   brandMaker?: string | null;
   modelSeries?: string | null;
   conditionLabel?: string | null;
   confidence?: string | null;
   valuationBasis?: string | null;
+  priceSourceType?: string | null;
   /** Supabase storage URL after upload, or null */
   imageUrl?: string | null;
+  photoUrl?: string | null;
   /** Source image URI (local, used for preview before upload) */
   sourceImageUri?: string | null;
 }

@@ -24,11 +24,11 @@ import { LoadingState } from "@/components/LoadingState";
 import { useAuth } from "@/context/AuthContext";
 import { useColors } from "@/hooks/useColors";
 import { getItemPhoto } from "@/lib/inventory-mappers";
+import { buildItemUpdatePayload } from "@/lib/item-insert-helpers";
 import { supabase } from "@/lib/supabase";
 import type { InventoryItem, InventoryRoom } from "@/types";
 
-// TODO: Confirm bucket name — check Supabase dashboard → Storage → Buckets
-const ITEM_PHOTOS_BUCKET = "item-photos";
+const ITEM_PHOTOS_BUCKET = "inventory-photos";
 
 function FormField({
   label,
@@ -116,6 +116,7 @@ export default function EditItemScreen() {
   const [existingPhotoUrl, setExistingPhotoUrl] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [hydrated, setHydrated] = useState(false);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   const {
     data: item,
@@ -125,12 +126,12 @@ export default function EditItemScreen() {
   } = useQuery({
     queryKey: ["item", id, session?.user.id],
     queryFn: async () => {
-      const { data, error } = await supabase
+      const { data, error: queryError } = await supabase
         .from("inventory_items")
         .select("*")
         .eq("id", id)
         .single();
-      if (error) throw error;
+      if (queryError) throw queryError;
       return data as InventoryItem;
     },
     enabled: !!session && !!id,
@@ -141,7 +142,9 @@ export default function EditItemScreen() {
       setName(item.name ?? "");
       setDescription(item.description ?? "");
       setCategory(item.category ?? "");
-      setEstimatedPrice(item.estimated_price != null ? String(item.estimated_price) : "");
+      setEstimatedPrice(
+        item.estimated_price != null ? String(item.estimated_price) : ""
+      );
       setQuantity(item.quantity != null ? String(item.quantity) : "1");
       setSelectedRoomId(item.room_id ?? "");
       const photo = getItemPhoto(item);
@@ -168,7 +171,7 @@ export default function EditItemScreen() {
   const pickPhoto = async () => {
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (status !== "granted") {
-      Alert.alert("Permission needed", "Allow photo library access to add photos.");
+      Alert.alert("Permission needed", "Allow photo library access.");
       return;
     }
     const result = await ImagePicker.launchImageLibraryAsync({
@@ -185,7 +188,7 @@ export default function EditItemScreen() {
   const takePhoto = async () => {
     const { status } = await ImagePicker.requestCameraPermissionsAsync();
     if (status !== "granted") {
-      Alert.alert("Permission needed", "Allow camera access to take photos.");
+      Alert.alert("Permission needed", "Allow camera access.");
       return;
     }
     const result = await ImagePicker.launchCameraAsync({
@@ -198,11 +201,14 @@ export default function EditItemScreen() {
     }
   };
 
-  const uploadPhoto = async (uri: string, fileId: string): Promise<string | null> => {
+  const uploadPhoto = async (
+    uri: string,
+    fileId: string
+  ): Promise<string | null> => {
     try {
       const response = await fetch(uri);
       const blob = await response.blob();
-      const ext = uri.split(".").pop() ?? "jpg";
+      const ext = (uri.split(".").pop() ?? "jpg").split("?")[0];
       const path = `${fileId}/${Date.now()}.${ext}`;
       const { data: uploadData, error: uploadError } = await supabase.storage
         .from(ITEM_PHOTOS_BUCKET)
@@ -222,21 +228,21 @@ export default function EditItemScreen() {
   };
 
   const handleSave = async () => {
+    setErrorMsg(null);
+
     if (!name.trim()) {
-      Alert.alert("Name required", "Please enter an item name.");
+      setErrorMsg("Item name is required.");
       return;
     }
     if (!selectedRoomId) {
-      Alert.alert("Room required", "Please select a room.");
+      setErrorMsg("Please select a room.");
       return;
     }
 
     setSaving(true);
-    await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
 
     try {
       let uploadedPhotoUrl: string | null = existingPhotoUrl;
-
       if (photoUri && item?.file_id) {
         const uploaded = await uploadPhoto(photoUri, item.file_id);
         if (uploaded) uploadedPhotoUrl = uploaded;
@@ -246,37 +252,50 @@ export default function EditItemScreen() {
         ? parseFloat(estimatedPrice.replace(/[^0-9.]/g, "")) || null
         : null;
       const qty = parseInt(quantity, 10) || 1;
+      const destRoomName =
+        rooms?.find((r) => r.id === selectedRoomId)?.name ?? null;
 
-      const updates: Partial<InventoryItem> = {
-        name: name.trim(),
-        description: description.trim() || null,
-        category: category.trim() || null,
-        estimated_price: price,
+      const updates = buildItemUpdatePayload({
+        roomId: selectedRoomId,
+        roomName: destRoomName,
+        name,
+        description,
+        category,
+        estimatedPrice: price,
         quantity: qty,
-        room_id: selectedRoomId,
-        image_url: uploadedPhotoUrl,
-      };
+        imageUrl: uploadedPhotoUrl,
+      });
+
+      console.log("[EditItem] Update payload keys:", Object.keys(updates));
 
       const { error } = await supabase
         .from("inventory_items")
         .update(updates)
         .eq("id", id);
 
-      if (error) throw error;
+      if (error) {
+        console.error("[EditItem] Update failed:", error.message);
+        setErrorMsg(
+          `Save failed: ${error.message}` +
+            (error.code ? ` (${error.code})` : "")
+        );
+        return;
+      }
 
-      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      console.log("[EditItem] Update succeeded — navigating back");
 
       queryClient.invalidateQueries({ queryKey: ["item", id] });
       queryClient.invalidateQueries({ queryKey: ["items", item?.room_id] });
       queryClient.invalidateQueries({ queryKey: ["items", selectedRoomId] });
       queryClient.invalidateQueries({ queryKey: ["all-items"] });
-      queryClient.invalidateQueries({ queryKey: ["property-items", item?.file_id] });
+      queryClient.invalidateQueries({
+        queryKey: ["property-items", item?.file_id],
+      });
 
       router.back();
     } catch (err) {
-      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-      Alert.alert(
-        "Save failed",
+      console.error("[EditItem] Unexpected error:", err);
+      setErrorMsg(
         err instanceof Error ? err.message : "Could not save changes."
       );
     } finally {
@@ -300,27 +319,7 @@ export default function EditItemScreen() {
 
   return (
     <>
-      <Stack.Screen
-        options={{
-          title: "Edit Item",
-          headerRight: () =>
-            saving ? (
-              <ActivityIndicator color={colors.primary} />
-            ) : (
-              <Pressable onPress={handleSave} hitSlop={8} style={{ padding: 4 }}>
-                <Text
-                  style={{
-                    fontSize: 16,
-                    fontFamily: "Inter_600SemiBold",
-                    color: colors.primary,
-                  }}
-                >
-                  Save
-                </Text>
-              </Pressable>
-            ),
-        }}
-      />
+      <Stack.Screen options={{ title: "Edit Item" }} />
       <KeyboardAvoidingView
         style={{ flex: 1 }}
         behavior={Platform.OS === "ios" ? "padding" : undefined}
@@ -332,6 +331,7 @@ export default function EditItemScreen() {
           ]}
           keyboardShouldPersistTaps="handled"
         >
+          {/* ITEM DETAILS */}
           <View style={styles.section}>
             <Text style={[styles.sectionTitle, { color: colors.mutedForeground }]}>
               ITEM DETAILS
@@ -340,7 +340,10 @@ export default function EditItemScreen() {
             <FormField label="Name" required colors={colors}>
               <StyledInput
                 value={name}
-                onChangeText={setName}
+                onChangeText={(t) => {
+                  setName(t);
+                  setErrorMsg(null);
+                }}
                 placeholder="Item name"
                 colors={colors}
               />
@@ -391,6 +394,7 @@ export default function EditItemScreen() {
             </View>
           </View>
 
+          {/* MOVE TO ROOM */}
           <View style={styles.section}>
             <Text style={[styles.sectionTitle, { color: colors.mutedForeground }]}>
               MOVE TO ROOM
@@ -407,10 +411,14 @@ export default function EditItemScreen() {
               >
                 <Feather name="move" size={14} color={colors.accentForeground} />
                 <Text
-                  style={[styles.moveNoticeText, { color: colors.accentForeground }]}
+                  style={[
+                    styles.moveNoticeText,
+                    { color: colors.accentForeground },
+                  ]}
                 >
                   Item will be moved to{" "}
-                  {rooms?.find((r) => r.id === selectedRoomId)?.name ?? "new room"}
+                  {rooms?.find((r) => r.id === selectedRoomId)?.name ??
+                    "new room"}
                 </Text>
               </View>
             )}
@@ -422,12 +430,17 @@ export default function EditItemScreen() {
               {(rooms ?? []).map((r) => (
                 <Pressable
                   key={r.id}
-                  onPress={() => setSelectedRoomId(r.id)}
+                  onPress={() => {
+                    setSelectedRoomId(r.id);
+                    setErrorMsg(null);
+                  }}
                   style={[
                     styles.chip,
                     {
                       backgroundColor:
-                        selectedRoomId === r.id ? colors.primary : colors.secondary,
+                        selectedRoomId === r.id
+                          ? colors.primary
+                          : colors.secondary,
                       borderRadius: 20,
                     },
                   ]}
@@ -450,6 +463,7 @@ export default function EditItemScreen() {
             </ScrollView>
           </View>
 
+          {/* PHOTO */}
           <View style={styles.section}>
             <Text style={[styles.sectionTitle, { color: colors.mutedForeground }]}>
               PHOTO
@@ -459,7 +473,10 @@ export default function EditItemScreen() {
               <View style={{ gap: 10 }}>
                 <Image
                   source={{ uri: displayPhoto }}
-                  style={[styles.photoPreview, { borderRadius: colors.radius }]}
+                  style={[
+                    styles.photoPreview,
+                    { borderRadius: colors.radius },
+                  ]}
                   contentFit="cover"
                 />
                 <View style={{ flexDirection: "row", gap: 10 }}>
@@ -475,7 +492,12 @@ export default function EditItemScreen() {
                     ]}
                   >
                     <Feather name="image" size={14} color={colors.primary} />
-                    <Text style={[styles.photoActionText, { color: colors.primary }]}>
+                    <Text
+                      style={[
+                        styles.photoActionText,
+                        { color: colors.primary },
+                      ]}
+                    >
                       Change
                     </Text>
                   </Pressable>
@@ -495,7 +517,10 @@ export default function EditItemScreen() {
                   >
                     <Feather name="x" size={14} color={colors.destructive} />
                     <Text
-                      style={[styles.photoActionText, { color: colors.destructive }]}
+                      style={[
+                        styles.photoActionText,
+                        { color: colors.destructive },
+                      ]}
                     >
                       Remove
                     </Text>
@@ -517,7 +542,13 @@ export default function EditItemScreen() {
                   ]}
                 >
                   <Feather name="camera" size={20} color={colors.primary} />
-                  <Text style={[styles.photoBtnText, { color: colors.primary }]}>
+                  <Text
+                    style={{
+                      fontSize: 14,
+                      fontFamily: "Inter_500Medium",
+                      color: colors.primary,
+                    }}
+                  >
                     Camera
                   </Text>
                 </Pressable>
@@ -534,7 +565,13 @@ export default function EditItemScreen() {
                   ]}
                 >
                   <Feather name="image" size={20} color={colors.primary} />
-                  <Text style={[styles.photoBtnText, { color: colors.primary }]}>
+                  <Text
+                    style={{
+                      fontSize: 14,
+                      fontFamily: "Inter_500Medium",
+                      color: colors.primary,
+                    }}
+                  >
                     Library
                   </Text>
                 </Pressable>
@@ -542,6 +579,33 @@ export default function EditItemScreen() {
             )}
           </View>
 
+          {/* INLINE ERROR BANNER */}
+          {errorMsg ? (
+            <View
+              style={[
+                styles.errorBanner,
+                {
+                  backgroundColor: colors.card,
+                  borderColor: colors.destructive,
+                  borderRadius: colors.radius,
+                },
+              ]}
+            >
+              <Feather name="alert-circle" size={14} color={colors.destructive} />
+              <Text
+                style={{
+                  fontSize: 13,
+                  fontFamily: "Inter_500Medium",
+                  color: colors.destructive,
+                  flex: 1,
+                }}
+              >
+                {errorMsg}
+              </Text>
+            </View>
+          ) : null}
+
+          {/* SAVE BUTTON */}
           <Pressable
             onPress={handleSave}
             disabled={saving}
@@ -558,9 +622,17 @@ export default function EditItemScreen() {
               <ActivityIndicator color={colors.primaryForeground} />
             ) : (
               <>
-                <Feather name="check" size={18} color={colors.primaryForeground} />
+                <Feather
+                  name="check"
+                  size={18}
+                  color={colors.primaryForeground}
+                />
                 <Text
-                  style={[styles.saveBtnText, { color: colors.primaryForeground }]}
+                  style={{
+                    fontSize: 16,
+                    fontFamily: "Inter_600SemiBold",
+                    color: colors.primaryForeground,
+                  }}
                 >
                   Save changes
                 </Text>
@@ -583,22 +655,18 @@ const styles = StyleSheet.create({
   },
   chip: { paddingHorizontal: 14, paddingVertical: 8 },
   chipText: { fontSize: 13, fontFamily: "Inter_500Medium" },
-  moveNotice: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-    padding: 10,
-  },
-  moveNoticeText: { fontSize: 13, fontFamily: "Inter_500Medium", flex: 1 },
   photoPreview: { width: "100%", height: 200 },
   photoActionBtn: {
     flexDirection: "row",
     alignItems: "center",
     gap: 6,
     paddingHorizontal: 14,
-    paddingVertical: 8,
+    paddingVertical: 10,
   },
-  photoActionText: { fontSize: 13, fontFamily: "Inter_500Medium" },
+  photoActionText: {
+    fontSize: 14,
+    fontFamily: "Inter_500Medium",
+  },
   photoBtn: {
     flex: 1,
     flexDirection: "row",
@@ -608,7 +676,24 @@ const styles = StyleSheet.create({
     paddingVertical: 16,
     borderWidth: 1,
   },
-  photoBtnText: { fontSize: 14, fontFamily: "Inter_500Medium" },
+  moveNotice: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    padding: 12,
+  },
+  moveNoticeText: {
+    fontSize: 13,
+    fontFamily: "Inter_500Medium",
+    flex: 1,
+  },
+  errorBanner: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 8,
+    padding: 12,
+    borderWidth: 1,
+  },
   saveBtn: {
     flexDirection: "row",
     alignItems: "center",
@@ -617,5 +702,4 @@ const styles = StyleSheet.create({
     paddingVertical: 15,
     marginTop: 4,
   },
-  saveBtnText: { fontSize: 16, fontFamily: "Inter_600SemiBold" },
 });

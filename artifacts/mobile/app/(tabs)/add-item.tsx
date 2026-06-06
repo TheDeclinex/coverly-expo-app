@@ -25,7 +25,7 @@ import { buildItemInsertPayload } from "@/lib/item-insert-helpers";
 import { supabase } from "@/lib/supabase";
 import type { InventoryFile, InventoryRoom } from "@/types";
 
-const ITEM_PHOTOS_BUCKET = "item-photos";
+const ITEM_PHOTOS_BUCKET = "inventory-photos";
 
 function FormField({
   label,
@@ -215,7 +215,6 @@ export default function AddItemScreen() {
     setErrorMsg(null);
     setPhotoWarning(null);
 
-    // --- Inline validation (no Alert — works in web iframe too) ---
     if (!name.trim()) {
       setErrorMsg("Item name is required.");
       return;
@@ -235,12 +234,6 @@ export default function AddItemScreen() {
 
     setSaving(true);
 
-    try {
-      await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    } catch (_) {
-      // Haptics not available on web — ignore
-    }
-
     let uploadedPhotoUrl: string | null = null;
     if (photoUri) {
       uploadedPhotoUrl = await uploadPhoto(photoUri, selectedFileId);
@@ -253,18 +246,13 @@ export default function AddItemScreen() {
       ? parseFloat(estimatedPrice.replace(/[^0-9.]/g, "")) || null
       : null;
     const qty = parseInt(quantity, 10) || 1;
-
-    console.log("[AddItem] Inserting into inventory_items", {
-      fileId: selectedFileId,
-      roomId: selectedRoomId,
-      userId: session.user.id ? "present" : "MISSING",
-      name: name.trim(),
-    });
+    const destRoomName =
+      rooms?.find((r) => r.id === selectedRoomId)?.name ?? roomName ?? null;
 
     const payload = buildItemInsertPayload({
       fileId: selectedFileId,
       roomId: selectedRoomId,
-      userId: session.user.id,
+      roomName: destRoomName,
       name,
       description: description || null,
       category: category || null,
@@ -273,15 +261,14 @@ export default function AddItemScreen() {
       imageUrl: uploadedPhotoUrl,
     });
 
+    console.log("[AddItem] Insert payload keys:", Object.keys(payload));
+
     const { error } = await supabase.from("inventory_items").insert(payload);
 
     setSaving(false);
 
     if (error) {
       console.error("[AddItem] Insert failed:", error.message, error.code);
-      try {
-        await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-      } catch (_) {}
       setErrorMsg(
         `Save failed: ${error.message}` +
           (error.code ? ` (${error.code})` : "")
@@ -291,23 +278,17 @@ export default function AddItemScreen() {
 
     console.log("[AddItem] Insert succeeded — navigating to room", selectedRoomId);
 
-    try {
-      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    } catch (_) {}
-
     queryClient.invalidateQueries({ queryKey: ["items", selectedRoomId] });
     queryClient.invalidateQueries({ queryKey: ["all-items"] });
-    queryClient.invalidateQueries({ queryKey: ["property-items", selectedFileId] });
+    queryClient.invalidateQueries({
+      queryKey: ["property-items", selectedFileId],
+    });
 
-    const destRoomName =
-      rooms?.find((r) => r.id === selectedRoomId)?.name ?? roomName ?? "Room";
-
-    // Always navigate immediately — no Alert wrapper
     router.replace({
       pathname: "/(tabs)/room/[id]",
       params: {
         id: selectedRoomId,
-        name: destRoomName,
+        name: destRoomName ?? "Room",
         fileId: selectedFileId,
       },
     });
@@ -630,7 +611,11 @@ export default function AddItemScreen() {
                 },
               ]}
             >
-              <Feather name="alert-triangle" size={14} color={colors.warning ?? "#f59e0b"} />
+              <Feather
+                name="alert-triangle"
+                size={14}
+                color={colors.warning ?? "#f59e0b"}
+              />
               <Text
                 style={{
                   fontSize: 13,
@@ -687,7 +672,11 @@ export default function AddItemScreen() {
               <ActivityIndicator color={colors.primaryForeground} />
             ) : (
               <>
-                <Feather name="check" size={18} color={colors.primaryForeground} />
+                <Feather
+                  name="check"
+                  size={18}
+                  color={colors.primaryForeground}
+                />
                 <Text
                   style={{
                     fontSize: 16,

@@ -91,6 +91,7 @@ export default function ScanScreen() {
   const [detectedItems, setDetectedItems] = useState<ScanDetectedItem[]>([]);
   const [scanError, setScanError] = useState<string | null>(null);
   const [savingIds, setSavingIds] = useState<Set<number>>(new Set());
+  const [scanSaveError, setScanSaveError] = useState<string | null>(null);
 
   const { data: properties } = useQuery({
     queryKey: ["properties", session?.user.id],
@@ -157,7 +158,7 @@ export default function ScanScreen() {
 
   const handleStartScan = async () => {
     if (!selectedMode) {
-      Alert.alert("Select a scan type", "Choose a scan mode above.");
+      setScanError("Select a scan type above.");
       return;
     }
     const input = {
@@ -168,11 +169,10 @@ export default function ScanScreen() {
     };
     const validationError = validateScanInput(input);
     if (validationError) {
-      Alert.alert("Cannot start scan", validationError);
+      setScanError(validationError);
       return;
     }
 
-    await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     setScanStatus("scanning");
     setScanError(null);
 
@@ -180,11 +180,9 @@ export default function ScanScreen() {
 
     if (result.status === "not_configured") {
       setScanStatus("idle");
-      setScanError(result.errorMessage ?? null);
-      Alert.alert(
-        "AI scan not yet available",
-        "The scan service is not configured yet. Your photos and item data are ready — connect the Supabase Edge Function to enable AI processing.",
-        [{ text: "OK" }]
+      setScanError(
+        result.errorMessage ??
+          "AI scan not configured yet. Connect a Supabase Edge Function to enable scanning."
       );
       return;
     }
@@ -200,25 +198,32 @@ export default function ScanScreen() {
   };
 
   const handleSaveItem = async (item: ScanDetectedItem, index: number) => {
-    if (!session?.user.id || !selectedFileId || !selectedRoomId) return;
+    if (!selectedFileId || !selectedRoomId) return;
     setSavingIds((prev) => new Set(prev).add(index));
-    await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    setScanSaveError(null);
+
+    const destRoomName =
+      rooms?.find((r) => r.id === selectedRoomId)?.name ?? null;
 
     const payload = buildItemInsertPayload({
       fileId: selectedFileId,
       roomId: selectedRoomId,
-      userId: session.user.id,
+      roomName: destRoomName,
       name: item.name,
       description: item.description,
+      notes: item.notes,
       category: item.category,
       estimatedPrice: item.estimatedPrice,
+      unitEstimatedPrice: item.unitEstimatedPrice,
       quantity: item.quantity,
       imageUrl: item.imageUrl,
+      photoUrl: item.photoUrl,
       brandMaker: item.brandMaker,
       modelSeries: item.modelSeries,
       conditionLabel: item.conditionLabel,
       confidence: item.confidence,
       valuationBasis: item.valuationBasis,
+      priceSourceType: item.priceSourceType,
     });
 
     const { error } = await supabase.from("inventory_items").insert(payload);
@@ -230,9 +235,9 @@ export default function ScanScreen() {
     });
 
     if (error) {
-      Alert.alert("Save failed", error.message);
+      console.error("[Scan] Save item failed:", error.message);
+      setScanSaveError(error.message);
     } else {
-      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       queryClient.invalidateQueries({ queryKey: ["items", selectedRoomId] });
       queryClient.invalidateQueries({ queryKey: ["all-items"] });
       queryClient.invalidateQueries({
@@ -243,26 +248,33 @@ export default function ScanScreen() {
   };
 
   const handleSaveAll = async () => {
-    if (!session?.user.id || !selectedFileId || !selectedRoomId) return;
-    await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    if (!selectedFileId || !selectedRoomId) return;
     setScanStatus("saving");
+    setScanSaveError(null);
+
+    const destRoomName =
+      rooms?.find((r) => r.id === selectedRoomId)?.name ?? null;
 
     const payloads = detectedItems.map((item) =>
       buildItemInsertPayload({
         fileId: selectedFileId,
         roomId: selectedRoomId,
-        userId: session.user.id!,
+        roomName: destRoomName,
         name: item.name,
         description: item.description,
+        notes: item.notes,
         category: item.category,
         estimatedPrice: item.estimatedPrice,
+        unitEstimatedPrice: item.unitEstimatedPrice,
         quantity: item.quantity,
         imageUrl: item.imageUrl,
+        photoUrl: item.photoUrl,
         brandMaker: item.brandMaker,
         modelSeries: item.modelSeries,
         conditionLabel: item.conditionLabel,
         confidence: item.confidence,
         valuationBasis: item.valuationBasis,
+        priceSourceType: item.priceSourceType,
       })
     );
 
@@ -270,14 +282,16 @@ export default function ScanScreen() {
 
     if (error) {
       setScanStatus("reviewing");
-      Alert.alert("Save failed", error.message);
+      console.error("[Scan] Save all failed:", error.message);
+      setScanSaveError(error.message);
       return;
     }
 
-    await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     queryClient.invalidateQueries({ queryKey: ["items", selectedRoomId] });
     queryClient.invalidateQueries({ queryKey: ["all-items"] });
-    queryClient.invalidateQueries({ queryKey: ["property-items", selectedFileId] });
+    queryClient.invalidateQueries({
+      queryKey: ["property-items", selectedFileId],
+    });
     setScanStatus("done");
     setDetectedItems([]);
 

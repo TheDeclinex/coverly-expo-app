@@ -265,25 +265,7 @@ export default function ItemDetailScreen() {
               </Section>
             )}
 
-            {(item.web_listing_title || item.web_listing_price) && (
-              <Section title="WEB LISTING" colors={colors}>
-                <DetailRow
-                  label="Title"
-                  value={item.web_listing_title}
-                  colors={colors}
-                />
-                <DetailRow
-                  label="Listed price"
-                  value={formatCurrencyFull(item.web_listing_price)}
-                  colors={colors}
-                />
-                <DetailRow
-                  label="Source"
-                  value={item.web_listing_source}
-                  colors={colors}
-                />
-              </Section>
-            )}
+            {/* WEB LISTING section removed — inventory_items no longer has web_listing_* columns */}
 
             {item.notes && (
               <Section title="NOTES" colors={colors}>

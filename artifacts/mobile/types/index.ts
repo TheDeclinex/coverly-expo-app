@@ -27,8 +27,8 @@ export interface InventoryRoom {
 export interface InventoryItem {
   id: string;
   file_id: string;
-  room_id: string;
-  user_id?: string;
+  room_id: string | null;
+  room: string | null;
   name: string;
   category: string | null;
   confidence: string | null;
@@ -37,6 +37,7 @@ export interface InventoryItem {
   quantity: number | null;
   quantity_estimate: string | null;
   valuation_basis: string | null;
+  price_source_type: string | null;
   description: string | null;
   image_url: string | null;
   photo_url: string | null;
@@ -46,10 +47,7 @@ export interface InventoryItem {
   condition_label: string | null;
   purchase_source: string | null;
   original_purchase_price: number | null;
-  purchase_year_approx: number | null;
-  web_listing_url: string | null;
-  web_listing_title: string | null;
-  web_listing_price: number | null;
-  web_listing_source: string | null;
-  sort_order: number | null;
+  purchase_year_approx: string | null;
+  image_pin: unknown | null;
+  attachments: unknown | null;
 }
