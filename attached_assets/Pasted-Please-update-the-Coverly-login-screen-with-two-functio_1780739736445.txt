@@ -1,0 +1,73 @@
+Please update the Coverly login screen with two functional/content additions while keeping the current visual direction.
+
+Planner mode recommendation:
+Use Planner briefly first, because this touches auth UI and may involve existing Supabase sign-up logic. Inspect the current auth/login component, Supabase auth client, routes, profile creation flow, and any existing sign-up/register logic before editing.
+
+Scope:
+This is mainly a login/sign-up UI improvement. Keep the current dark premium background, logo area, tagline, and floating login card direction.
+
+Required changes:
+
+1. Add new account sign-up
+
+* Add a clear sign-up option for new users.
+* Use copy similar to:
+  "New to Coverly? Create your free inventory"
+* Tapping this should switch the card into a create-account/sign-up mode or navigate to the existing sign-up screen if one already exists.
+* If there is no existing sign-up screen, implement a simple sign-up mode in the same component using Supabase email/password signUp.
+* Keep the flow simple:
+
+  * Email
+  * Password
+  * Create account button
+  * Link back to "Already have an account? Sign in"
+* Preserve all existing login/auth behaviour.
+* Do not rename existing auth functions, routes, Supabase clients, database tables, RLS policies, storage buckets, or environment variables.
+* If profile creation is already handled elsewhere after auth, do not duplicate it.
+* If the existing app has a required user profile creation step, follow the existing pattern.
+
+2. Add security reassurance copy
+
+* Add a small reassurance line below the form area, using a shield/lock icon if available.
+* Preferred copy:
+  "Your data is encrypted and securely stored."
+* Keep it subtle and premium, not large or distracting.
+* It should visually sit below the sign-in/sign-up action area, before or near the new account link.
+* Use existing icon library if available.
+
+3. Shield/logo
+
+* Do not spend time refining the temporary shield logo further.
+* The shield will be replaced later with a proper Coverly logo.
+* Keep the current logo area working, but do not over-engineer the icon.
+
+4. Dev-only diagnostics
+
+* Hide "Test Supabase Connection" from the normal user-facing UI.
+* Keep it available only behind a dev/debug condition if needed.
+
+5. Visual polish
+
+* Keep the exact Coverly tagline:
+  "Know what you own"
+* Make sure sign-in and sign-up modes both look polished and mobile-native.
+* Keep spacing tight and readable on iPhone and Android screen sizes.
+* Avoid overusing bright green.
+* Use existing theme/color tokens where possible.
+
+6. Behaviour safety
+
+* Do not change backend behaviour except using the existing Supabase auth flow where needed.
+* Do not create new backend dependencies.
+* Do not hard-code secrets.
+* Do not break Expo/mobile preview or production mobile builds.
+* TypeScript must pass.
+
+Acceptance criteria:
+
+* Existing users can still sign in.
+* New users have an obvious way to create an account.
+* The login screen includes the line: "Your data is encrypted and securely stored."
+* The temporary shield is left as-is apart from existing styling.
+* "Test Supabase Connection" is not visible to normal users.
+* Auth logic, Supabase configuration, and navigation remain stable.
