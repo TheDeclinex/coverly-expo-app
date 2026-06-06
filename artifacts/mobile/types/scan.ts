@@ -13,8 +13,12 @@ export interface ScanInput {
   mode: ScanMode;
   fileId: string;
   roomId: string;
-  /** Local URIs for images selected by the user */
-  imageUris: string[];
+  roomName?: string;
+  /**
+   * Supabase Storage object paths after upload to inventory-photos bucket.
+   * These are NOT local device file:// URIs — upload first, then pass paths.
+   */
+  imagePaths: string[];
   /** Local URI for video (mode: video_room only) */
   videoUri?: string;
 }
@@ -37,10 +41,10 @@ export interface ScanDetectedItem {
   confidence?: string | null;
   valuationBasis?: string | null;
   priceSourceType?: string | null;
-  /** Supabase storage URL after upload, or null */
+  /** Supabase storage path for the item's photo (set for single_item scans) */
   imageUrl?: string | null;
   photoUrl?: string | null;
-  /** Source image URI (local, used for preview before upload) */
+  /** Source image local URI for thumbnail preview in review screen */
   sourceImageUri?: string | null;
 }
 

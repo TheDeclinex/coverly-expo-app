@@ -25,6 +25,7 @@ import { buildItemInsertPayload } from "@/lib/item-insert-helpers";
 import {
   MAX_MULTI_PHOTO_IMAGES,
   runAiScan,
+  uploadScanImages,
   validateScanInput,
 } from "@/lib/scan-service";
 import { supabase } from "@/lib/supabase";
@@ -76,8 +77,17 @@ const SCAN_MODES: ScanModeCard[] = [
 ];
 
 export default function ScanScreen() {
-  const { fileId: paramFileId, roomId: paramRoomId, fileName: paramFileName, roomName: paramRoomName } =
-    useLocalSearchParams<{ fileId?: string; roomId?: string; fileName?: string; roomName?: string }>();
+  const {
+    fileId: paramFileId,
+    roomId: paramRoomId,
+    fileName: paramFileName,
+    roomName: paramRoomName,
+  } = useLocalSearchParams<{
+    fileId?: string;
+    roomId?: string;
+    fileName?: string;
+    roomName?: string;
+  }>();
   const { session } = useAuth();
   const colors = useColors();
   const insets = useSafeAreaInsets();
@@ -90,6 +100,7 @@ export default function ScanScreen() {
   const [scanStatus, setScanStatus] = useState<ScanStatus>("idle");
   const [detectedItems, setDetectedItems] = useState<ScanDetectedItem[]>([]);
   const [scanError, setScanError] = useState<string | null>(null);
+  const [uploadWarning, setUploadWarning] = useState<string | null>(null);
   const [savingIds, setSavingIds] = useState<Set<number>>(new Set());
   const [scanSaveError, setScanSaveError] = useState<string | null>(null);
 
@@ -126,7 +137,7 @@ export default function ScanScreen() {
     const isMulti = selectedMode === "multi_photo_room";
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (status !== "granted") {
-      Alert.alert("Permission needed", "Allow photo library access.");
+      Alert.alert("Permission needed", "Allow photo library access to continue.");
       return;
     }
     const result = await ImagePicker.launchImageLibraryAsync({
@@ -144,7 +155,7 @@ export default function ScanScreen() {
   const takePhoto = async () => {
     const { status } = await ImagePicker.requestCameraPermissionsAsync();
     if (status !== "granted") {
-      Alert.alert("Permission needed", "Allow camera access.");
+      Alert.alert("Permission needed", "Allow camera access to continue.");
       return;
     }
     const result = await ImagePicker.launchCameraAsync({
@@ -161,20 +172,70 @@ export default function ScanScreen() {
       setScanError("Select a scan type above.");
       return;
     }
+    if (!selectedFileId) {
+      setScanError("Select a property.");
+      return;
+    }
+    if (!selectedRoomId) {
+      setScanError("Select a room.");
+      return;
+    }
+    if (images.length === 0) {
+      setScanError("Add at least one photo.");
+      return;
+    }
+    if (!session?.user.id) {
+      setScanError("Not signed in — please sign in again.");
+      return;
+    }
+
+    setScanError(null);
+    setUploadWarning(null);
+
+    // Step 1 — upload images to inventory-photos (private bucket)
+    setScanStatus("uploading");
+    const { uploadedPaths, failedCount } = await uploadScanImages(
+      images,
+      selectedFileId,
+      session.user.id
+    );
+
+    if (uploadedPaths.length === 0) {
+      setScanStatus("idle");
+      setScanError(
+        failedCount === 1
+          ? "Photo upload failed. Please check your connection and try again."
+          : `All ${failedCount} photos failed to upload. Please check your connection and try again.`
+      );
+      return;
+    }
+
+    if (failedCount > 0) {
+      setUploadWarning(
+        `${failedCount} of ${images.length} photo${failedCount > 1 ? "s" : ""} failed to upload — scanning with ${uploadedPaths.length} photo${uploadedPaths.length > 1 ? "s" : ""}.`
+      );
+    }
+
+    // Step 2 — validate and call Edge Function with storage paths
+    const destRoomName =
+      paramRoomName ?? rooms?.find((r) => r.id === selectedRoomId)?.name ?? null;
+
     const input = {
       mode: selectedMode,
       fileId: selectedFileId,
       roomId: selectedRoomId,
-      imageUris: images,
+      roomName: destRoomName ?? undefined,
+      imagePaths: uploadedPaths,
     };
+
     const validationError = validateScanInput(input);
     if (validationError) {
+      setScanStatus("idle");
       setScanError(validationError);
       return;
     }
 
     setScanStatus("scanning");
-    setScanError(null);
 
     const result = await runAiScan(input);
 
@@ -182,19 +243,33 @@ export default function ScanScreen() {
       setScanStatus("idle");
       setScanError(
         result.errorMessage ??
-          "AI scan not configured yet. Connect a Supabase Edge Function to enable scanning."
+          "AI scan is not configured yet. The Edge Function needs to be deployed."
       );
       return;
     }
 
     if (result.status === "error") {
       setScanStatus("error");
-      setScanError(result.errorMessage ?? "Unknown scan error");
+      setScanError(result.errorMessage ?? "Scan failed. Please try again.");
+      return;
+    }
+
+    if (result.items.length === 0) {
+      setScanStatus("idle");
+      setScanError(
+        "No items were detected in this photo. Try a clearer shot or a different angle."
+      );
       return;
     }
 
     setDetectedItems(result.items);
     setScanStatus("reviewing");
+    void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+  };
+
+  const handleDiscardItem = (index: number) => {
+    void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    setDetectedItems((prev) => prev.filter((_, i) => i !== index));
   };
 
   const handleSaveItem = async (item: ScanDetectedItem, index: number) => {
@@ -203,7 +278,7 @@ export default function ScanScreen() {
     setScanSaveError(null);
 
     const destRoomName =
-      rooms?.find((r) => r.id === selectedRoomId)?.name ?? null;
+      paramRoomName ?? rooms?.find((r) => r.id === selectedRoomId)?.name ?? null;
 
     const payload = buildItemInsertPayload({
       fileId: selectedFileId,
@@ -222,8 +297,8 @@ export default function ScanScreen() {
       modelSeries: item.modelSeries,
       conditionLabel: item.conditionLabel,
       confidence: item.confidence,
-      valuationBasis: item.valuationBasis,
-      priceSourceType: item.priceSourceType,
+      valuationBasis: item.valuationBasis ?? "ai_estimate",
+      priceSourceType: item.priceSourceType ?? "ai_scan",
     });
 
     const { error } = await supabase.from("inventory_items").insert(payload);
@@ -238,6 +313,7 @@ export default function ScanScreen() {
       console.error("[Scan] Save item failed:", error.message);
       setScanSaveError(error.message);
     } else {
+      void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
       queryClient.invalidateQueries({ queryKey: ["items", selectedRoomId] });
       queryClient.invalidateQueries({ queryKey: ["all-items"] });
       queryClient.invalidateQueries({
@@ -253,7 +329,7 @@ export default function ScanScreen() {
     setScanSaveError(null);
 
     const destRoomName =
-      rooms?.find((r) => r.id === selectedRoomId)?.name ?? null;
+      paramRoomName ?? rooms?.find((r) => r.id === selectedRoomId)?.name ?? null;
 
     const payloads = detectedItems.map((item) =>
       buildItemInsertPayload({
@@ -273,8 +349,8 @@ export default function ScanScreen() {
         modelSeries: item.modelSeries,
         conditionLabel: item.conditionLabel,
         confidence: item.confidence,
-        valuationBasis: item.valuationBasis,
-        priceSourceType: item.priceSourceType,
+        valuationBasis: item.valuationBasis ?? "ai_estimate",
+        priceSourceType: item.priceSourceType ?? "ai_scan",
       })
     );
 
@@ -287,6 +363,7 @@ export default function ScanScreen() {
       return;
     }
 
+    void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     queryClient.invalidateQueries({ queryKey: ["items", selectedRoomId] });
     queryClient.invalidateQueries({ queryKey: ["all-items"] });
     queryClient.invalidateQueries({
@@ -296,7 +373,9 @@ export default function ScanScreen() {
     setDetectedItems([]);
 
     const roomName =
-      rooms?.find((r) => r.id === selectedRoomId)?.name ?? "Room";
+      paramRoomName ??
+      rooms?.find((r) => r.id === selectedRoomId)?.name ??
+      "Room";
     router.replace({
       pathname: "/(tabs)/room/[id]",
       params: { id: selectedRoomId, name: roomName, fileId: selectedFileId },
@@ -309,9 +388,13 @@ export default function ScanScreen() {
     setDetectedItems([]);
     setScanStatus("idle");
     setScanError(null);
+    setUploadWarning(null);
+    setScanSaveError(null);
   };
 
-  if (scanStatus === "reviewing" && detectedItems.length > 0) {
+  // ── Review screen ──────────────────────────────────────────────────────────
+
+  if ((scanStatus === "reviewing" || scanStatus === "saving") && detectedItems.length > 0) {
     return (
       <>
         <Stack.Screen
@@ -324,7 +407,7 @@ export default function ScanScreen() {
             ),
           }}
         />
-        <View style={{ flex: 1 }}>
+        <View style={{ flex: 1, backgroundColor: colors.background }}>
           <FlatList
             data={detectedItems}
             keyExtractor={(_, i) => String(i)}
@@ -333,8 +416,58 @@ export default function ScanScreen() {
               gap: 12,
               paddingBottom: insets.bottom + 100,
             }}
+            ListHeaderComponent={
+              <View style={{ gap: 8, marginBottom: 4 }}>
+                <Text
+                  style={[reviewStyles.header, { color: colors.mutedForeground }]}
+                >
+                  {detectedItems.length} item{detectedItems.length !== 1 ? "s" : ""} detected — review and save
+                </Text>
+                {uploadWarning && (
+                  <View
+                    style={[
+                      reviewStyles.warningBanner,
+                      { backgroundColor: "#FEF3C7", borderColor: "#F59E0B" },
+                    ]}
+                  >
+                    <Feather name="alert-triangle" size={14} color="#D97706" />
+                    <Text style={[reviewStyles.warningText, { color: "#92400E" }]}>
+                      {uploadWarning}
+                    </Text>
+                  </View>
+                )}
+                {scanSaveError && (
+                  <View
+                    style={[
+                      reviewStyles.warningBanner,
+                      {
+                        backgroundColor: "#FEE2E2",
+                        borderColor: "#B91C1C",
+                      },
+                    ]}
+                  >
+                    <Feather name="alert-circle" size={14} color="#B91C1C" />
+                    <Text style={[reviewStyles.warningText, { color: "#7F1D1D" }]}>
+                      Save failed: {scanSaveError}
+                    </Text>
+                  </View>
+                )}
+              </View>
+            }
             renderItem={({ item, index }) => {
               const isSaving = savingIds.has(index);
+              const confidenceLow = item.confidence === "low";
+              const confidenceColor =
+                item.confidence === "high"
+                  ? "#1D9E75"
+                  : item.confidence === "medium"
+                  ? "#D97706"
+                  : "#94a3b8";
+              const hasMeta =
+                item.brandMaker || item.modelSeries || item.conditionLabel;
+              const hasDescription = !!item.description;
+              const qty = item.quantity ?? 1;
+
               return (
                 <View
                   style={[
@@ -354,59 +487,151 @@ export default function ScanScreen() {
                     />
                   )}
                   <View style={reviewStyles.cardBody}>
+                    {/* Name */}
                     <Text
                       style={[reviewStyles.itemName, { color: colors.foreground }]}
+                      numberOfLines={2}
                     >
                       {item.name}
                     </Text>
-                    {item.category && (
+
+                    {/* Category · Quantity */}
+                    <View style={{ flexDirection: "row", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                      {item.category && (
+                        <Text
+                          style={[
+                            reviewStyles.itemChip,
+                            {
+                              color: colors.mutedForeground,
+                              backgroundColor: colors.secondary,
+                            },
+                          ]}
+                        >
+                          {item.category}
+                        </Text>
+                      )}
+                      {qty > 1 && (
+                        <Text
+                          style={[
+                            reviewStyles.itemChip,
+                            {
+                              color: colors.mutedForeground,
+                              backgroundColor: colors.secondary,
+                            },
+                          ]}
+                        >
+                          Qty {qty}
+                        </Text>
+                      )}
+                    </View>
+
+                    {/* Brand / Model / Condition */}
+                    {hasMeta && (
                       <Text
-                        style={[
-                          reviewStyles.itemMeta,
-                          { color: colors.mutedForeground },
-                        ]}
+                        style={[reviewStyles.itemMeta, { color: colors.mutedForeground }]}
+                        numberOfLines={1}
                       >
-                        {item.category}
+                        {[item.brandMaker, item.modelSeries, item.conditionLabel]
+                          .filter(Boolean)
+                          .join(" · ")}
                       </Text>
                     )}
-                    {item.estimatedPrice != null && (
+
+                    {/* Description */}
+                    {hasDescription && (
                       <Text
-                        style={[reviewStyles.itemPrice, { color: colors.primary }]}
+                        style={[reviewStyles.itemDesc, { color: colors.mutedForeground }]}
+                        numberOfLines={2}
                       >
-                        ${item.estimatedPrice.toLocaleString("en-US")}
+                        {item.description}
                       </Text>
                     )}
+
+                    {/* Confidence · Price */}
+                    <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginTop: 2 }}>
+                      {item.confidence && (
+                        <View
+                          style={[
+                            reviewStyles.confidenceBadge,
+                            { borderColor: confidenceColor },
+                          ]}
+                        >
+                          <Text
+                            style={[
+                              reviewStyles.confidenceText,
+                              { color: confidenceColor },
+                            ]}
+                          >
+                            {item.confidence.charAt(0).toUpperCase() +
+                              item.confidence.slice(1)}{" "}
+                            confidence
+                          </Text>
+                        </View>
+                      )}
+                      {item.estimatedPrice != null && (
+                        <Text
+                          style={[reviewStyles.itemPrice, { color: colors.primary }]}
+                        >
+                          £{item.estimatedPrice.toLocaleString("en-GB")}
+                        </Text>
+                      )}
+                    </View>
                   </View>
-                  <Pressable
-                    onPress={() => handleSaveItem(item, index)}
-                    disabled={isSaving}
-                    style={({ pressed }) => [
-                      reviewStyles.saveBtn,
-                      {
-                        backgroundColor: colors.primary,
-                        borderRadius: 8,
-                        opacity: pressed || isSaving ? 0.7 : 1,
-                      },
-                    ]}
-                  >
-                    {isSaving ? (
-                      <ActivityIndicator size="small" color={colors.primaryForeground} />
-                    ) : (
-                      <Feather name="check" size={16} color={colors.primaryForeground} />
-                    )}
-                  </Pressable>
+
+                  {/* Action buttons: discard + save */}
+                  <View style={reviewStyles.actionCol}>
+                    <Pressable
+                      onPress={() => handleDiscardItem(index)}
+                      disabled={isSaving}
+                      hitSlop={4}
+                      style={({ pressed }) => [
+                        reviewStyles.actionBtn,
+                        {
+                          backgroundColor: colors.secondary,
+                          borderRadius: 8,
+                          opacity: pressed || isSaving ? 0.6 : 1,
+                        },
+                      ]}
+                    >
+                      <Feather
+                        name="x"
+                        size={15}
+                        color={colors.mutedForeground}
+                      />
+                    </Pressable>
+                    <Pressable
+                      onPress={() => void handleSaveItem(item, index)}
+                      disabled={isSaving}
+                      hitSlop={4}
+                      style={({ pressed }) => [
+                        reviewStyles.actionBtn,
+                        {
+                          backgroundColor: colors.primary,
+                          borderRadius: 8,
+                          opacity: pressed || isSaving ? 0.7 : 1,
+                        },
+                      ]}
+                    >
+                      {isSaving ? (
+                        <ActivityIndicator
+                          size="small"
+                          color={colors.primaryForeground}
+                        />
+                      ) : (
+                        <Feather
+                          name="check"
+                          size={15}
+                          color={colors.primaryForeground}
+                        />
+                      )}
+                    </Pressable>
+                  </View>
                 </View>
               );
             }}
-            ListHeaderComponent={
-              <Text
-                style={[reviewStyles.header, { color: colors.mutedForeground }]}
-              >
-                {detectedItems.length} items detected — save individually or all
-                at once
-              </Text>
-            }
           />
+
+          {/* Save all bar */}
           <View
             style={[
               reviewStyles.saveAllBar,
@@ -418,24 +643,36 @@ export default function ScanScreen() {
             ]}
           >
             <Pressable
-              onPress={handleSaveAll}
+              onPress={() => void handleSaveAll()}
+              disabled={scanStatus === "saving"}
               style={({ pressed }) => [
                 reviewStyles.saveAllBtn,
                 {
-                  backgroundColor: colors.primary,
+                  backgroundColor:
+                    scanStatus === "saving" ? colors.muted : colors.primary,
                   borderRadius: colors.radius,
                   opacity: pressed ? 0.85 : 1,
                 },
               ]}
             >
-              <Feather name="check-circle" size={18} color={colors.primaryForeground} />
+              {scanStatus === "saving" ? (
+                <ActivityIndicator color={colors.primaryForeground} />
+              ) : (
+                <Feather
+                  name="check-circle"
+                  size={18}
+                  color={colors.primaryForeground}
+                />
+              )}
               <Text
                 style={[
                   reviewStyles.saveAllText,
                   { color: colors.primaryForeground },
                 ]}
               >
-                Save all {detectedItems.length} items
+                {scanStatus === "saving"
+                  ? "Saving…"
+                  : `Save all ${detectedItems.length} item${detectedItems.length !== 1 ? "s" : ""}`}
               </Text>
             </Pressable>
           </View>
@@ -444,11 +681,23 @@ export default function ScanScreen() {
     );
   }
 
+  // ── Main scan screen ───────────────────────────────────────────────────────
+
+  const isWorking =
+    scanStatus === "uploading" || scanStatus === "scanning";
+
   const canScan =
     selectedMode &&
     selectedFileId &&
     selectedRoomId &&
     (selectedMode === "video_room" || images.length > 0);
+
+  const scanBtnLabel =
+    scanStatus === "uploading"
+      ? "Uploading…"
+      : scanStatus === "scanning"
+      ? "Scanning…"
+      : "Start scan";
 
   return (
     <>
@@ -471,6 +720,7 @@ export default function ScanScreen() {
                 if (m.comingSoon) return;
                 setSelectedMode(m.mode);
                 setImages([]);
+                setScanError(null);
               }}
               style={({ pressed }) => [
                 styles.modeCard,
@@ -499,12 +749,16 @@ export default function ScanScreen() {
                   name={m.icon}
                   size={20}
                   color={
-                    selectedMode === m.mode ? colors.primaryForeground : colors.primary
+                    selectedMode === m.mode
+                      ? colors.primaryForeground
+                      : colors.primary
                   }
                 />
               </View>
               <View style={{ flex: 1, gap: 2 }}>
-                <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                <View
+                  style={{ flexDirection: "row", alignItems: "center", gap: 8 }}
+                >
                   <Text
                     style={[
                       styles.modeTitle,
@@ -576,28 +830,80 @@ export default function ScanScreen() {
 
             {paramFileId ? (
               <View style={{ gap: 6 }}>
-                <Text style={{ fontSize: 12, fontFamily: "Inter_500Medium", color: colors.mutedForeground }}>
+                <Text
+                  style={{
+                    fontSize: 12,
+                    fontFamily: "Inter_500Medium",
+                    color: colors.mutedForeground,
+                  }}
+                >
                   Property
                 </Text>
-                <View style={[styles.chip, { backgroundColor: colors.primary, borderRadius: 20, alignSelf: "flex-start" }]}>
-                  <Text style={{ fontSize: 13, fontFamily: "Inter_500Medium", color: colors.primaryForeground }}>
+                <View
+                  style={[
+                    styles.chip,
+                    {
+                      backgroundColor: colors.primary,
+                      borderRadius: 20,
+                      alignSelf: "flex-start",
+                    },
+                  ]}
+                >
+                  <Text
+                    style={{
+                      fontSize: 13,
+                      fontFamily: "Inter_500Medium",
+                      color: colors.primaryForeground,
+                    }}
+                  >
                     {paramFileName ?? paramFileId}
                   </Text>
                 </View>
               </View>
             ) : (
               <View style={{ gap: 6 }}>
-                <Text style={{ fontSize: 12, fontFamily: "Inter_500Medium", color: colors.mutedForeground }}>
+                <Text
+                  style={{
+                    fontSize: 12,
+                    fontFamily: "Inter_500Medium",
+                    color: colors.mutedForeground,
+                  }}
+                >
                   Property
                 </Text>
-                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
+                <ScrollView
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={{ gap: 8 }}
+                >
                   {(properties ?? []).map((p) => (
                     <Pressable
                       key={p.id}
-                      onPress={() => { setSelectedFileId(p.id); setSelectedRoomId(""); }}
-                      style={[styles.chip, { backgroundColor: selectedFileId === p.id ? colors.primary : colors.secondary, borderRadius: 20 }]}
+                      onPress={() => {
+                        setSelectedFileId(p.id);
+                        setSelectedRoomId("");
+                      }}
+                      style={[
+                        styles.chip,
+                        {
+                          backgroundColor:
+                            selectedFileId === p.id
+                              ? colors.primary
+                              : colors.secondary,
+                          borderRadius: 20,
+                        },
+                      ]}
                     >
-                      <Text style={{ fontSize: 13, fontFamily: "Inter_500Medium", color: selectedFileId === p.id ? colors.primaryForeground : colors.foreground }}>
+                      <Text
+                        style={{
+                          fontSize: 13,
+                          fontFamily: "Inter_500Medium",
+                          color:
+                            selectedFileId === p.id
+                              ? colors.primaryForeground
+                              : colors.foreground,
+                        }}
+                      >
                         {p.name}
                       </Text>
                     </Pressable>
@@ -606,39 +912,87 @@ export default function ScanScreen() {
               </View>
             )}
 
-            {selectedFileId && (
-              paramRoomId ? (
+            {selectedFileId &&
+              (paramRoomId ? (
                 <View style={{ gap: 6 }}>
-                  <Text style={{ fontSize: 12, fontFamily: "Inter_500Medium", color: colors.mutedForeground }}>
+                  <Text
+                    style={{
+                      fontSize: 12,
+                      fontFamily: "Inter_500Medium",
+                      color: colors.mutedForeground,
+                    }}
+                  >
                     Room
                   </Text>
-                  <View style={[styles.chip, { backgroundColor: colors.primary, borderRadius: 20, alignSelf: "flex-start" }]}>
-                    <Text style={{ fontSize: 13, fontFamily: "Inter_500Medium", color: colors.primaryForeground }}>
+                  <View
+                    style={[
+                      styles.chip,
+                      {
+                        backgroundColor: colors.primary,
+                        borderRadius: 20,
+                        alignSelf: "flex-start",
+                      },
+                    ]}
+                  >
+                    <Text
+                      style={{
+                        fontSize: 13,
+                        fontFamily: "Inter_500Medium",
+                        color: colors.primaryForeground,
+                      }}
+                    >
                       {paramRoomName ?? paramRoomId}
                     </Text>
                   </View>
                 </View>
               ) : (
                 <View style={{ gap: 6 }}>
-                  <Text style={{ fontSize: 12, fontFamily: "Inter_500Medium", color: colors.mutedForeground }}>
+                  <Text
+                    style={{
+                      fontSize: 12,
+                      fontFamily: "Inter_500Medium",
+                      color: colors.mutedForeground,
+                    }}
+                  >
                     Room
                   </Text>
-                  <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
+                  <ScrollView
+                    horizontal
+                    showsHorizontalScrollIndicator={false}
+                    contentContainerStyle={{ gap: 8 }}
+                  >
                     {(rooms ?? []).map((r) => (
                       <Pressable
                         key={r.id}
                         onPress={() => setSelectedRoomId(r.id)}
-                        style={[styles.chip, { backgroundColor: selectedRoomId === r.id ? colors.primary : colors.secondary, borderRadius: 20 }]}
+                        style={[
+                          styles.chip,
+                          {
+                            backgroundColor:
+                              selectedRoomId === r.id
+                                ? colors.primary
+                                : colors.secondary,
+                            borderRadius: 20,
+                          },
+                        ]}
                       >
-                        <Text style={{ fontSize: 13, fontFamily: "Inter_500Medium", color: selectedRoomId === r.id ? colors.primaryForeground : colors.foreground }}>
+                        <Text
+                          style={{
+                            fontSize: 13,
+                            fontFamily: "Inter_500Medium",
+                            color:
+                              selectedRoomId === r.id
+                                ? colors.primaryForeground
+                                : colors.foreground,
+                          }}
+                        >
                           {r.name}
                         </Text>
                       </Pressable>
                     ))}
                   </ScrollView>
                 </View>
-              )
-            )}
+              ))}
           </View>
         )}
 
@@ -771,14 +1125,34 @@ export default function ScanScreen() {
             ]}
           >
             <Feather name="video" size={32} color={colors.border} />
-            <Text style={[styles.comingSoonCardTitle, { color: colors.foreground }]}>
+            <Text
+              style={[styles.comingSoonCardTitle, { color: colors.foreground }]}
+            >
               Video scan coming soon
             </Text>
             <Text
-              style={[styles.comingSoonCardSub, { color: colors.mutedForeground }]}
+              style={[
+                styles.comingSoonCardSub,
+                { color: colors.mutedForeground },
+              ]}
             >
               This mode will extract representative frames from a room walkthrough
               video and avoid duplicate items automatically.
+            </Text>
+          </View>
+        )}
+
+        {/* Upload warning (non-blocking) */}
+        {uploadWarning && !isWorking && (
+          <View
+            style={[
+              styles.warningCard,
+              { backgroundColor: "#FEF3C7", borderColor: "#F59E0B" },
+            ]}
+          >
+            <Feather name="alert-triangle" size={15} color="#D97706" />
+            <Text style={[styles.warningText, { color: "#92400E" }]}>
+              {uploadWarning}
             </Text>
           </View>
         )}
@@ -807,27 +1181,28 @@ export default function ScanScreen() {
         {/* Start scan button */}
         {selectedMode && selectedMode !== "video_room" && (
           <Pressable
-            onPress={handleStartScan}
-            disabled={!canScan || scanStatus === "scanning"}
+            onPress={() => void handleStartScan()}
+            disabled={!canScan || isWorking}
             style={({ pressed }) => [
               styles.scanBtn,
               {
                 backgroundColor:
-                  !canScan || scanStatus === "scanning"
-                    ? colors.muted
-                    : colors.primary,
+                  !canScan || isWorking ? colors.muted : colors.primary,
                 borderRadius: colors.radius,
                 opacity: pressed ? 0.85 : 1,
               },
             ]}
           >
-            {scanStatus === "scanning" ? (
+            {isWorking ? (
               <>
                 <ActivityIndicator color={colors.primaryForeground} />
                 <Text
-                  style={[styles.scanBtnText, { color: colors.primaryForeground }]}
+                  style={[
+                    styles.scanBtnText,
+                    { color: colors.primaryForeground },
+                  ]}
                 >
-                  Scanning…
+                  {scanBtnLabel}
                 </Text>
               </>
             ) : (
@@ -835,7 +1210,9 @@ export default function ScanScreen() {
                 <Feather
                   name="zap"
                   size={18}
-                  color={!canScan ? colors.mutedForeground : colors.primaryForeground}
+                  color={
+                    !canScan ? colors.mutedForeground : colors.primaryForeground
+                  }
                 />
                 <Text
                   style={[
@@ -847,7 +1224,7 @@ export default function ScanScreen() {
                     },
                   ]}
                 >
-                  Start scan
+                  {scanBtnLabel}
                 </Text>
               </>
             )}
@@ -951,6 +1328,20 @@ const styles = StyleSheet.create({
     textAlign: "center",
     lineHeight: 20,
   },
+  warningCard: {
+    borderWidth: 1,
+    borderRadius: 8,
+    padding: 12,
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 8,
+  },
+  warningText: {
+    fontSize: 13,
+    fontFamily: "Inter_400Regular",
+    lineHeight: 18,
+    flex: 1,
+  },
   errorCard: {
     borderWidth: 1,
     padding: 14,
@@ -979,26 +1370,82 @@ const reviewStyles = StyleSheet.create({
   header: {
     fontSize: 13,
     fontFamily: "Inter_400Regular",
-    marginBottom: 4,
+    marginBottom: 2,
+  },
+  warningBanner: {
+    borderWidth: 1,
+    borderRadius: 8,
+    padding: 10,
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 8,
+  },
+  warningText: {
+    fontSize: 12,
+    fontFamily: "Inter_400Regular",
+    lineHeight: 17,
+    flex: 1,
   },
   card: {
     borderWidth: 1,
     flexDirection: "row",
-    alignItems: "center",
+    alignItems: "stretch",
     overflow: "hidden",
-    gap: 0,
   },
-  thumb: { width: 72, height: 72 },
-  cardBody: { flex: 1, padding: 12, gap: 2 },
-  itemName: { fontSize: 15, fontFamily: "Inter_600SemiBold" },
-  itemMeta: { fontSize: 12, fontFamily: "Inter_400Regular" },
-  itemPrice: { fontSize: 14, fontFamily: "Inter_600SemiBold" },
-  saveBtn: {
-    width: 40,
-    height: 40,
+  thumb: { width: 80, height: "100%" as unknown as number },
+  cardBody: {
+    flex: 1,
+    padding: 12,
+    gap: 4,
+  },
+  itemName: {
+    fontSize: 15,
+    fontFamily: "Inter_600SemiBold",
+    lineHeight: 20,
+  },
+  itemChip: {
+    fontSize: 11,
+    fontFamily: "Inter_500Medium",
+    borderRadius: 10,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    overflow: "hidden",
+  },
+  itemMeta: {
+    fontSize: 12,
+    fontFamily: "Inter_400Regular",
+  },
+  itemDesc: {
+    fontSize: 12,
+    fontFamily: "Inter_400Regular",
+    lineHeight: 16,
+  },
+  confidenceBadge: {
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingHorizontal: 6,
+    paddingVertical: 1,
+  },
+  confidenceText: {
+    fontSize: 10,
+    fontFamily: "Inter_500Medium",
+  },
+  itemPrice: {
+    fontSize: 14,
+    fontFamily: "Inter_600SemiBold",
+  },
+  actionCol: {
+    paddingVertical: 12,
+    paddingRight: 12,
+    gap: 8,
     alignItems: "center",
     justifyContent: "center",
-    marginRight: 12,
+  },
+  actionBtn: {
+    width: 36,
+    height: 36,
+    alignItems: "center",
+    justifyContent: "center",
   },
   saveAllBar: {
     position: "absolute",

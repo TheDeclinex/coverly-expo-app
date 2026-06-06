@@ -1,0 +1,219 @@
+Use Planner mode first. Do not edit files until I approve the plan.
+
+Goal:
+Plan the next Coverly mobile tranche: Scan V1 end-to-end, based on the existing UI Bakery Coverly workflow/code export where available.
+
+Current Expo mobile app already has:
+
+* Supabase login
+* Home dashboard
+* Property detail
+* Room list/detail
+* Item list/detail
+* Manual Add Item
+* Edit Item
+* Move item between rooms
+* Photo upload to inventory-photos
+* Correct inventory_items insert/update helper
+* Scan tab scaffold with 4 scan options
+
+The scan UI exists, but AI scan is not fully wired.
+
+Important:
+Use the UI Bakery export/code as a reference for workflow and field mapping only.
+Do not blindly copy UI Bakery code.
+Do not rebuild the app.
+Do not change database schema.
+Do not change working item save/photo/RLS logic.
+Do not add billing, claim pack, replacement pricing, or offline sync in this tranche.
+Do not call OpenAI directly from the mobile app.
+AI scan must go through backend/Supabase Edge Function or existing secure backend logic.
+
+Plan the implementation for Scan V1.
+
+SCAN MODES
+
+The mobile scan screen should support these 4 Coverly scan options:
+
+1. Single photo room scan
+
+* User selects/takes one room photo.
+* AI detects multiple visible items.
+* Results go to review screen.
+* User saves selected items into selected room.
+* This is the highest priority.
+
+2. Single item scan
+
+* User selects/takes one close-up item photo.
+* AI returns one richer item result with brand/model/condition/value where possible.
+* Results go to review screen.
+* User saves item into selected room.
+* This is second priority.
+
+3. Multi-photo room scan
+
+* User selects/takes up to 5 photos for the same room.
+* For V1, plan either:
+
+  * wire it if the existing UI Bakery/backend logic is clear, or
+  * keep UI ready and return “coming soon”/not configured safely
+* Later logic should detect exhaustively per photo and merge only when clearly the same object.
+
+4. Video room scan
+
+* Keep as placeholder/coming soon for now.
+* Do not build video frame extraction in this tranche.
+
+BACKEND / AI RULES
+
+Inspect the current mobile code and UI Bakery export/reference to determine:
+
+* whether an existing Supabase Edge Function or backend scan endpoint exists
+* what endpoint name/payload is used by UI Bakery for AI scanning
+* what fields AI returns
+* how photos are prepared/uploaded
+* how scan performance logs are recorded if applicable
+
+Important:
+
+* Mobile app must not contain OpenAI keys.
+* Mobile app must not call OpenAI directly.
+* If no secure scan endpoint exists, plan a clean placeholder and document what backend Edge Function is needed.
+* If an endpoint exists, plan how to call it safely from the mobile app with the current Supabase session.
+
+SCAN FLOW
+
+Plan the scan flow as:
+
+1. User chooses scan mode.
+2. User selects property/file and room, or these are preselected from route params.
+3. User captures/selects image(s).
+4. App uploads/stages image(s) as needed.
+5. App calls secure AI scan backend.
+6. App shows a review screen.
+7. User can edit detected item fields before saving.
+8. User saves selected items.
+9. Saved items use the existing item insert helper, not a separate insert path.
+10. Room list refreshes and new items appear.
+
+REVIEW SCREEN REQUIREMENTS
+
+Plan a review screen or review section that shows each detected item:
+
+* name
+* category
+* description
+* estimated_price
+* quantity
+* confidence if available
+* photo preview if available
+* editable category dropdown using existing shared categories
+* save all / save selected
+* discard item option
+
+Detected item fields should map to real inventory_items columns:
+
+* id generated as text
+* file_id
+* room_id
+* room
+* name
+* description
+* category
+* estimated_price
+* unit_estimated_price if appropriate
+* quantity
+* quantity_estimate
+* valuation_basis
+* price_source_type
+* confidence
+* photo_url / image_url if available
+* brand_maker
+* model_series
+* condition_label
+* purchase_source
+* original_purchase_price
+* purchase_year_approx
+* image_pin / attachments if applicable
+
+Do not include:
+
+* user_id on inventory_items
+* property_id unless it is only a client-side alias
+* camelCase DB fields in insert payload
+
+UI / UX REQUIREMENTS
+
+Keep Coverly visual style:
+
+* dark green / deep teal primary action
+* soft off-white background
+* white cards
+* slate text
+* green-grey borders
+* scan remains primary
+
+Scan screen should feel like the main app feature:
+
+* clear mode cards
+* helpful short descriptions
+* property/room preselection if launched from property/room
+* obvious next action
+* safe loading/error states
+
+ERROR HANDLING
+
+Plan safe handling for:
+
+* no property selected
+* no room selected
+* no photo selected
+* upload failure
+* scan endpoint not configured
+* AI scan timeout
+* invalid AI response
+* partial save failure
+* RLS/save failure
+
+Do not use Alert.alert for important errors in web preview.
+Use inline error banners.
+
+PERFORMANCE / LOGGING
+
+If existing UIB logic has scan performance logging, plan whether to reuse later.
+Do not overbuild logging in this tranche.
+Keep it simple:
+
+* scan started
+* scan failed
+* items detected
+* items saved
+
+OUTPUT REQUIRED
+
+Produce a plan only. Include:
+
+1. Files to inspect.
+2. Files likely to change.
+3. Whether an AI scan endpoint exists in current code/export.
+4. Proposed scan-service structure.
+5. Proposed review screen structure.
+6. Exact item save mapping.
+7. What will be built in Scan V1.
+8. What stays placeholder.
+9. Risks.
+10. Acceptance criteria.
+11. Any questions before execution.
+
+Acceptance criteria after eventual execution:
+
+* Single photo room scan can call the secure scan backend if available, or shows a clear “scan endpoint not configured” state if not.
+* Single item scan can call the secure scan backend if available, or shows a clear not-configured state.
+* Review screen can display detected items.
+* Saving reviewed items uses the existing working item insert helper.
+* New scan-created items appear in the correct room.
+* Multi-photo remains safely scaffolded if not fully wired.
+* Video remains placeholder.
+* No OpenAI key is exposed in the mobile app.
+* TypeScript passes.

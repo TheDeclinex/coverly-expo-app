@@ -1,0 +1,107 @@
+Approve the Scan V1 plan with required corrections before execution.
+
+Correction 1 — bucket name:
+Use `inventory-photos`, not `item-photos`.
+
+The app has already been aligned to the production-style bucket:
+
+* inventory-photos
+
+Do not reintroduce item-photos anywhere.
+
+Correction 2 — private/prod-style storage:
+Treat `inventory-photos` as private/prod-style storage.
+
+Do not design Scan V1 around public bucket URLs.
+
+Preferred flow:
+
+1. Mobile uploads selected scan images to `inventory-photos`.
+2. Mobile keeps/sends the storage object paths, not public URLs.
+3. Mobile calls the secure Supabase Edge Function `coverly-scan`.
+4. Edge Function validates the authenticated user/file/room context.
+5. Edge Function creates short-lived signed URLs for those storage paths server-side.
+6. Edge Function sends those signed URLs to OpenAI vision.
+7. Edge Function returns normalized detected items to mobile.
+8. Mobile shows review screen.
+9. Saving reviewed items uses the existing `buildItemInsertPayload` helper.
+
+Correction 3 — no OpenAI key in mobile:
+The mobile app must never contain or call an OpenAI key directly.
+
+OPENAI_API_KEY belongs only in Supabase Edge Function secrets.
+
+Correction 4 — Edge Function deployment:
+It is fine to create the function files, but clearly report any manual deployment/secrets steps needed:
+
+* deploy `coverly-scan`
+* set `OPENAI_API_KEY`
+* confirm function name in `SCAN_EDGE_FUNCTION_NAME`
+* confirm `inventory-photos` storage policies allow authenticated upload/read or server-side signed URL generation
+
+Correction 5 — image upload result:
+`uploadScanImages()` should return storage paths, not public URLs, unless there is already a signed/public URL helper being used safely.
+
+Suggested return shape:
+
+```ts
+{
+  uploadedPaths: string[];
+  failedCount: number;
+}
+```
+
+Correction 6 — scan payload:
+The Edge Function payload should be:
+
+```ts
+{
+  mode: "single_photo_room" | "single_item" | "multi_photo_room";
+  fileId: string;
+  roomId: string;
+  roomName?: string;
+  imagePaths: string[];
+}
+```
+
+Not local `file://` URIs and not assumed public URLs.
+
+Correction 7 — keep scope tight:
+Build Scan V1 only:
+
+* single photo room scan
+* single item scan
+* multi-photo using the same up-to-5 image path if straightforward
+* review screen improvements
+* save detected items through existing insert helper
+
+Keep video as placeholder.
+Do not add billing, claim pack, replacement pricing, offline sync, or database schema changes.
+Do not touch working Add/Edit/Move/Photo save logic except where scan upload needs shared helper reuse.
+
+Correction 8 — review screen:
+Proceed with the review card improvements:
+
+* image/thumb if available
+* name
+* category
+* description
+* quantity
+* confidence
+* brand/model if available
+* estimated price
+* discard
+* save one
+* save all
+
+Correction 9 — price source:
+Saved scan items should use:
+
+* price_source_type: "ai_scan"
+* valuation_basis: suitable AI/manual estimate wording already supported by the app
+
+Correction 10 — TypeScript:
+TypeScript must pass.
+Report all files changed, plus any manual Supabase deployment/secrets steps.
+
+Proceed with execution using these corrections.
