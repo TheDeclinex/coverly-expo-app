@@ -1,0 +1,78 @@
+Please improve the Coverly login / first-run screen so it feels more modern, premium, mobile-native, and tech-friendly.
+
+Use Planner mode first. Before editing files, inspect the current login screen/component, theme/constants, app layout, and any existing Coverly brand color constants. Propose 2–3 visual directions briefly, then implement the strongest option.
+
+Goal:
+The current screen works but feels too basic: flat blue header, plain white card, temporary-looking shield, and a very utilitarian login layout. I want the first impression to feel like a polished AI-powered home inventory app.
+
+Design direction:
+
+* Replace the flat top blue block with a more premium full-screen background.
+* Use a dark navy/slate/charcoal base with a subtle modern background effect.
+* The background can include abstract blurred blobs, soft scan lines, a faint grid, floating particles, or a room-scanning style pattern.
+* Do not overuse green. There is already a lot of green in the app.
+* Use existing Coverly theme/color constants where possible. Do not introduce random one-off colors if brand tokens already exist.
+* Keep the overall feel calm, trustworthy, secure, and modern.
+* The screen should still feel appropriate for home contents insurance documentation, not like a crypto or gaming app.
+
+Logo/header:
+
+* Keep the Coverly name.
+* Use the exact Coverly tagline: "Know what you own".
+* Present the hero area as:
+  Coverly
+  Know what you own
+* Improve the icon presentation. The shield can remain, but make it feel more polished, for example inside a glassy rounded square, subtle illuminated app-mark container, or another refined native-style logo treatment.
+* Make the logo/header feel like a real app brand, not a placeholder.
+
+Login card:
+
+* Make the login form a floating rounded card/panel over the background.
+* Use good spacing, readable labels, and mobile-friendly input heights.
+* Add subtle shadow/elevation.
+* Keep email/password functionality unchanged.
+* Keep password visibility toggle unchanged.
+* Keep all auth logic, Supabase calls, navigation, session handling, and environment variables unchanged.
+* This is a visual/UI polish task only unless a tiny structural change is needed for layout.
+* Login card copy should say something like:
+  "Welcome back"
+  "Sign in to view your home inventory"
+
+Buttons:
+
+* Make the primary sign-in button feel premium and native.
+* Avoid bright green unless it is already the app’s primary brand token.
+* Use existing design tokens if available.
+* Keep button behaviour unchanged.
+
+Dev-only diagnostics:
+
+* The "Test Supabase connection" button should not appear in the normal production login UI.
+* If it is still useful for development, hide it behind a dev/debug condition rather than showing it to users.
+
+Responsiveness:
+
+* Must look good on iPhone-sized screens and Android phones.
+* Must avoid clipping behind the notch/status bar.
+* Must work in Expo/mobile preview and production mobile builds.
+* Avoid fixed heights that break on small screens.
+* Use SafeAreaView or equivalent where appropriate.
+
+Production migration requirement:
+
+* Keep naming conventions aligned with the current Coverly app.
+* Do not rename auth functions, Supabase clients, route names, storage buckets, database tables, or environment variables.
+* Do not create new backend dependencies.
+* Do not change authentication behaviour.
+* Keep this easy to port into the future production mobile app.
+
+Acceptance criteria:
+
+* Login screen looks clearly more modern and polished than the current screenshot.
+* Background is premium and tech-friendly, not plain flat blue.
+* Coverly branding is stronger and uses the exact tagline "Know what you own".
+* Login card is clean, readable, and mobile-native.
+* Supabase test button is hidden from normal users.
+* No auth behaviour is broken.
+* No hard-coded production secrets.
+* TypeScript passes.
