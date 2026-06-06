@@ -117,6 +117,7 @@ export default function EditItemScreen() {
   const [saving, setSaving] = useState(false);
   const [hydrated, setHydrated] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [photoWarning, setPhotoWarning] = useState<string | null>(null);
 
   const {
     data: item,
@@ -204,7 +205,7 @@ export default function EditItemScreen() {
   const uploadPhoto = async (
     uri: string,
     fileId: string
-  ): Promise<string | null> => {
+  ): Promise<{ url: string | null; uploadErrMsg: string | null }> => {
     try {
       const response = await fetch(uri);
       const blob = await response.blob();
@@ -214,16 +215,17 @@ export default function EditItemScreen() {
         .from(ITEM_PHOTOS_BUCKET)
         .upload(path, blob, { contentType: `image/${ext}`, upsert: false });
       if (uploadError) {
-        console.warn("Photo upload failed:", uploadError.message);
-        return null;
+        console.warn("[EditItem] Photo upload failed:", uploadError.message);
+        return { url: null, uploadErrMsg: uploadError.message };
       }
       const { data: urlData } = supabase.storage
         .from(ITEM_PHOTOS_BUCKET)
         .getPublicUrl(uploadData.path);
-      return urlData.publicUrl ?? null;
+      return { url: urlData.publicUrl ?? null, uploadErrMsg: null };
     } catch (err) {
-      console.warn("Photo upload error:", err);
-      return null;
+      const msg = err instanceof Error ? err.message : String(err);
+      console.warn("[EditItem] Photo upload error:", msg);
+      return { url: null, uploadErrMsg: msg };
     }
   };
 
@@ -242,10 +244,17 @@ export default function EditItemScreen() {
     setSaving(true);
 
     try {
+      setPhotoWarning(null);
       let uploadedPhotoUrl: string | null = existingPhotoUrl;
       if (photoUri && item?.file_id) {
-        const uploaded = await uploadPhoto(photoUri, item.file_id);
-        if (uploaded) uploadedPhotoUrl = uploaded;
+        const { url, uploadErrMsg } = await uploadPhoto(photoUri, item.file_id);
+        if (url) {
+          uploadedPhotoUrl = url;
+        } else {
+          setPhotoWarning(
+            `Photo upload failed: ${uploadErrMsg ?? "unknown error"} — existing photo kept.`
+          );
+        }
       }
 
       const price = estimatedPrice
@@ -264,6 +273,7 @@ export default function EditItemScreen() {
         estimatedPrice: price,
         quantity: qty,
         imageUrl: uploadedPhotoUrl,
+        photoUrl: uploadedPhotoUrl,
       });
 
       console.log("[EditItem] Update payload keys:", Object.keys(updates));
@@ -578,6 +588,32 @@ export default function EditItemScreen() {
               </View>
             )}
           </View>
+
+          {/* PHOTO WARNING BANNER */}
+          {photoWarning ? (
+            <View
+              style={[
+                styles.errorBanner,
+                {
+                  backgroundColor: colors.card,
+                  borderColor: colors.warning ?? "#F59E0B",
+                  borderRadius: colors.radius,
+                },
+              ]}
+            >
+              <Feather name="alert-triangle" size={14} color={colors.warning ?? "#F59E0B"} />
+              <Text
+                style={{
+                  fontSize: 13,
+                  fontFamily: "Inter_500Medium",
+                  color: colors.warning ?? "#F59E0B",
+                  flex: 1,
+                }}
+              >
+                {photoWarning}
+              </Text>
+            </View>
+          ) : null}
 
           {/* INLINE ERROR BANNER */}
           {errorMsg ? (

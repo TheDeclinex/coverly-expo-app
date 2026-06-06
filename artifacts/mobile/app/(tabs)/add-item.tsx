@@ -202,7 +202,7 @@ export default function AddItemScreen() {
   const uploadPhoto = async (
     uri: string,
     itemFileId: string
-  ): Promise<string | null> => {
+  ): Promise<{ url: string | null; uploadErrMsg: string | null }> => {
     try {
       const response = await fetch(uri);
       const blob = await response.blob();
@@ -212,16 +212,17 @@ export default function AddItemScreen() {
         .from(ITEM_PHOTOS_BUCKET)
         .upload(path, blob, { contentType: `image/${ext}`, upsert: false });
       if (uploadError) {
-        console.warn("Photo upload failed:", uploadError.message);
-        return null;
+        console.warn("[AddItem] Photo upload failed:", uploadError.message);
+        return { url: null, uploadErrMsg: uploadError.message };
       }
       const { data: urlData } = supabase.storage
         .from(ITEM_PHOTOS_BUCKET)
         .getPublicUrl(uploadData.path);
-      return urlData.publicUrl ?? null;
+      return { url: urlData.publicUrl ?? null, uploadErrMsg: null };
     } catch (err) {
-      console.warn("Photo upload error:", err);
-      return null;
+      const msg = err instanceof Error ? err.message : String(err);
+      console.warn("[AddItem] Photo upload error:", msg);
+      return { url: null, uploadErrMsg: msg };
     }
   };
 
@@ -250,9 +251,12 @@ export default function AddItemScreen() {
 
     let uploadedPhotoUrl: string | null = null;
     if (photoUri) {
-      uploadedPhotoUrl = await uploadPhoto(photoUri, selectedFileId);
-      if (!uploadedPhotoUrl) {
-        setPhotoWarning("Photo could not be uploaded — item will be saved without a photo.");
+      const { url, uploadErrMsg } = await uploadPhoto(photoUri, selectedFileId);
+      uploadedPhotoUrl = url;
+      if (!url) {
+        setPhotoWarning(
+          `Photo upload failed: ${uploadErrMsg ?? "unknown error"} — item will be saved without a photo.`
+        );
       }
     }
 
@@ -273,6 +277,7 @@ export default function AddItemScreen() {
       estimatedPrice: price,
       quantity: qty,
       imageUrl: uploadedPhotoUrl,
+      photoUrl: uploadedPhotoUrl,
     });
 
     // --- RLS diagnostics ---
