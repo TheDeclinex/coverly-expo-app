@@ -99,7 +99,16 @@ export default function ItemDetailScreen() {
     enabled: !!session && !!id,
   });
 
-  const imageUri = item?.image_url ?? item?.photo_url;
+  const primaryUri = item?.image_url ?? item?.photo_url;
+
+  const allPhotoUris: string[] = React.useMemo(() => {
+    const uris: string[] = [];
+    if (primaryUri) uris.push(primaryUri);
+    for (const att of item?.attachments ?? []) {
+      if (att.url && !uris.includes(att.url)) uris.push(att.url);
+    }
+    return uris;
+  }, [primaryUri, item?.attachments]);
 
   const handleEdit = async () => {
     router.push({
@@ -140,13 +149,15 @@ export default function ItemDetailScreen() {
           showsVerticalScrollIndicator={false}
         >
           <ExpandableImage
-            uri={imageUri}
+            uri={primaryUri}
             style={styles.heroImage}
             contentFit="cover"
             placeholderIcon="package"
             placeholderIconSize={48}
             placeholderIconColor={colors.primary}
             placeholderBackgroundColor={colors.secondary}
+            allUris={allPhotoUris}
+            initialPhotoIndex={0}
           />
 
           <View style={styles.content}>
