@@ -893,6 +893,8 @@ export default function PropertyDetailScreen() {
   const queryClient = useQueryClient();
   const [coverModalVisible, setCoverModalVisible] = useState(false);
   const [coverPhotoUploading, setCoverPhotoUploading] = useState(false);
+  // Optimistic local state so the cover photo shows instantly after upload
+  const [localCoverUrl, setLocalCoverUrl] = useState<string | null>(null);
 
   const {
     data: rooms,
@@ -1022,11 +1024,16 @@ export default function PropertyDetailScreen() {
         Alert.alert("Upload failed", "Could not upload cover photo. Please try again.");
         return;
       }
+      // Show the photo immediately — don't wait for cache refetch
+      setLocalCoverUrl(publicUrl);
       const { error: updateError } = await supabase
         .from("inventory_files")
         .update({ property_cover_image_url: publicUrl })
-        .eq("id", id);
+        .eq("id", id)
+        .eq("user_id", session.user.id);
       if (updateError) {
+        // Revert optimistic update and surface the real error
+        setLocalCoverUrl(null);
         Alert.alert("Save failed", updateError.message);
         return;
       }
@@ -1045,40 +1052,114 @@ export default function PropertyDetailScreen() {
     return (
       <>
         {/* Property cover photo hero */}
-        <View style={{ height: 200, overflow: "hidden", backgroundColor: colors.secondary }}>
-          {property?.property_cover_image_url ? (
+        <View style={{ height: 200, overflow: "hidden" }}>
+          {(localCoverUrl ?? property?.property_cover_image_url) ? (
             <Image
-              source={{ uri: property.property_cover_image_url }}
+              source={{ uri: localCoverUrl ?? property!.property_cover_image_url! }}
               style={StyleSheet.absoluteFill}
               contentFit="cover"
             />
           ) : (
-            <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
-              <Feather name="home" size={72} color={colors.primary} style={{ opacity: 0.5 }} />
-            </View>
+            /* Designed placeholder — dark teal, icon badge, CTA */
+            <Pressable
+              onPress={handlePickPropertyCover}
+              disabled={coverPhotoUploading}
+              style={{
+                flex: 1,
+                backgroundColor: "#085041",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: 12,
+              }}
+            >
+              {/* Subtle concentric rings for depth */}
+              <View
+                style={{
+                  position: "absolute",
+                  width: 220,
+                  height: 220,
+                  borderRadius: 110,
+                  borderWidth: 1,
+                  borderColor: "rgba(255,255,255,0.06)",
+                }}
+              />
+              <View
+                style={{
+                  position: "absolute",
+                  width: 160,
+                  height: 160,
+                  borderRadius: 80,
+                  borderWidth: 1,
+                  borderColor: "rgba(255,255,255,0.08)",
+                }}
+              />
+              {/* Icon badge */}
+              <View
+                style={{
+                  width: 64,
+                  height: 64,
+                  borderRadius: 32,
+                  backgroundColor: "rgba(255,255,255,0.12)",
+                  borderWidth: 1.5,
+                  borderColor: "rgba(255,255,255,0.25)",
+                  alignItems: "center",
+                  justifyContent: "center",
+                }}
+              >
+                {coverPhotoUploading ? (
+                  <ActivityIndicator size="small" color="#fff" />
+                ) : (
+                  <Feather name="camera" size={26} color="#fff" />
+                )}
+              </View>
+              <View style={{ alignItems: "center", gap: 4 }}>
+                <Text
+                  style={{
+                    color: "#fff",
+                    fontSize: 15,
+                    fontFamily: "Inter_600SemiBold",
+                    letterSpacing: 0.1,
+                  }}
+                >
+                  Add a cover photo
+                </Text>
+                <Text
+                  style={{
+                    color: "rgba(255,255,255,0.5)",
+                    fontSize: 12,
+                    fontFamily: "Inter_400Regular",
+                  }}
+                >
+                  Tap to choose from your library
+                </Text>
+              </View>
+            </Pressable>
           )}
-          <Pressable
-            onPress={handlePickPropertyCover}
-            disabled={coverPhotoUploading}
-            style={{
-              position: "absolute",
-              bottom: 12,
-              right: 12,
-              width: 36,
-              height: 36,
-              borderRadius: 18,
-              backgroundColor: "rgba(0,0,0,0.45)",
-              alignItems: "center",
-              justifyContent: "center",
-            }}
-            hitSlop={8}
-          >
-            {coverPhotoUploading ? (
-              <ActivityIndicator size="small" color="#fff" />
-            ) : (
-              <Feather name="camera" size={16} color="#fff" />
-            )}
-          </Pressable>
+          {/* Camera button shown only when a photo is already set */}
+          {(localCoverUrl ?? property?.property_cover_image_url) && (
+            <Pressable
+              onPress={handlePickPropertyCover}
+              disabled={coverPhotoUploading}
+              style={{
+                position: "absolute",
+                bottom: 12,
+                right: 12,
+                width: 36,
+                height: 36,
+                borderRadius: 18,
+                backgroundColor: "rgba(0,0,0,0.45)",
+                alignItems: "center",
+                justifyContent: "center",
+              }}
+              hitSlop={8}
+            >
+              {coverPhotoUploading ? (
+                <ActivityIndicator size="small" color="#fff" />
+              ) : (
+                <Feather name="camera" size={16} color="#fff" />
+              )}
+            </Pressable>
+          )}
         </View>
 
       <View style={{ gap: 10, paddingHorizontal: 16, paddingTop: 14 }}>
