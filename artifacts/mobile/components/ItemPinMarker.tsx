@@ -1,6 +1,5 @@
 import React from "react";
-import { StyleSheet, View } from "react-native";
-import { Circle, Defs, Filter, ForeignObject, Path, Svg } from "react-native-svg";
+import { Circle, Path, Svg } from "react-native-svg";
 
 /**
  * Coverly map-pin drop marker.
@@ -75,40 +74,25 @@ export function ItemPinMarker({ size = "sm", color = TEAL }: ItemPinMarkerProps)
   const vbH = 30 + half; // tip (y=30) + half-stroke below = visual bottom
 
   return (
-    <View style={styles.shadow}>
-      <Svg
-        width={s.w}
-        height={s.h}
-        viewBox={`${vbX} ${vbY} ${vbW} ${vbH}`}
-      >
-        {/* White border pin */}
-        <Path d={PIN_PATH} fill={WHITE} />
-        {/* Teal body (slightly inset via 1px inward offset trick: draw teal on top,
-            leaving the white edge visible underneath) */}
-        <Path
-          d={PIN_PATH}
-          fill={color}
-          stroke={WHITE}
-          strokeWidth={s.stroke}
-          strokeLinejoin="round"
-          // Paint mode: stroke half inside/half outside. The white fill below
-          // covers the inside half, so only the outside half of the stroke shows
-          // as the white border. Net visible white border = stroke/2 px.
-          // We want ~1.25px visible → stroke = 2.5 ✓
-        />
-        {/* White centre eye */}
-        <Circle cx={EYE_CX} cy={EYE_CY} r={s.eyeR} fill={WHITE} />
-      </Svg>
-    </View>
+    <Svg
+      width={s.w}
+      height={s.h}
+      viewBox={`${vbX} ${vbY} ${vbW} ${vbH}`}
+    >
+      {/* White backing — provides the outer border */}
+      <Path d={PIN_PATH} fill={WHITE} />
+      {/* Teal body on top; stroke=2.5 paints half inside/half outside.
+          The white fill below covers the inside half so only the outside
+          half (~1.25px) shows as the white border ring. */}
+      <Path
+        d={PIN_PATH}
+        fill={color}
+        stroke={WHITE}
+        strokeWidth={s.stroke}
+        strokeLinejoin="round"
+      />
+      {/* White centre eye */}
+      <Circle cx={EYE_CX} cy={EYE_CY} r={s.eyeR} fill={WHITE} />
+    </Svg>
   );
 }
-
-const styles = StyleSheet.create({
-  shadow: {
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.35,
-    shadowRadius: 3,
-    elevation: 5,
-  },
-});
