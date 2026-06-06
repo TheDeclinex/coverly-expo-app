@@ -28,7 +28,7 @@ import { buildItemUpdatePayload } from "@/lib/item-insert-helpers";
 import { supabase } from "@/lib/supabase";
 import type { InventoryItem, InventoryRoom } from "@/types";
 
-const ITEM_PHOTOS_BUCKET = "item-photos";
+const ITEM_PHOTOS_BUCKET = "inventory-photos";
 
 function FormField({
   label,
@@ -207,17 +207,42 @@ export default function EditItemScreen() {
     fileId: string
   ): Promise<{ url: string | null; uploadErrMsg: string | null }> => {
     try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const accessToken = sessionData?.session?.access_token;
+      const userId = sessionData?.session?.user?.id ?? "none";
+      const email = sessionData?.session?.user?.email ?? "none";
+      const hasToken = !!accessToken;
+
       const response = await fetch(uri);
       const blob = await response.blob();
-      const ext = (uri.split(".").pop() ?? "jpg").split("?")[0];
+      const ext = (uri.split(".").pop() ?? "jpg").split("?")[0].toLowerCase();
       const path = `${fileId}/${Date.now()}.${ext}`;
+
+      const uploadDiag = {
+        supabase_host: "krbrmskfvpjukcbkbegc.supabase.co",
+        bucket: ITEM_PHOTOS_BUCKET,
+        path,
+        email,
+        user_id: userId,
+        has_access_token: hasToken,
+      };
+      console.log("[EditItem] Upload attempt:", uploadDiag);
+
       const { data: uploadData, error: uploadError } = await supabase.storage
         .from(ITEM_PHOTOS_BUCKET)
         .upload(path, blob, { contentType: `image/${ext}`, upsert: false });
+
       if (uploadError) {
-        console.warn("[EditItem] Photo upload failed:", uploadError.message);
-        return { url: null, uploadErrMsg: uploadError.message };
+        const diagStr = Object.entries(uploadDiag)
+          .map(([k, v]) => `${k}: ${v}`)
+          .join(" | ");
+        console.warn("[EditItem] Photo upload failed:", uploadError.message, "|", diagStr);
+        return {
+          url: null,
+          uploadErrMsg: `${uploadError.message} [bucket=${ITEM_PHOTOS_BUCKET} path=${path} auth=${hasToken} user=${userId}]`,
+        };
       }
+
       const { data: urlData } = supabase.storage
         .from(ITEM_PHOTOS_BUCKET)
         .getPublicUrl(uploadData.path);
