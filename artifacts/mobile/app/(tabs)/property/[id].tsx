@@ -2,15 +2,20 @@ import { Feather } from "@expo/vector-icons";
 import { Image } from "expo-image";
 import * as Haptics from "expo-haptics";
 import { Stack, router, useLocalSearchParams } from "expo-router";
-import { useQuery } from "@tanstack/react-query";
-import React, { useMemo } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import React, { useMemo, useState } from "react";
 import {
+  ActivityIndicator,
+  Alert,
   FlatList,
+  KeyboardAvoidingView,
+  Modal,
   Platform,
   Pressable,
   RefreshControl,
   StyleSheet,
   Text,
+  TextInput,
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -419,11 +424,201 @@ function RoomCard({
   );
 }
 
+function CoverAmountModal({
+  visible,
+  current,
+  onClose,
+  onSave,
+  colors,
+}: {
+  visible: boolean;
+  current: number | null;
+  onClose: () => void;
+  onSave: (value: number | null) => Promise<void>;
+  colors: ReturnType<typeof import("@/hooks/useColors").useColors>;
+}) {
+  const insets = useSafeAreaInsets();
+  const [raw, setRaw] = useState(
+    current != null ? String(current) : ""
+  );
+  const [saving, setSaving] = useState(false);
+
+  const handleSave = async () => {
+    const trimmed = raw.trim();
+    const parsed = trimmed === "" ? null : parseFloat(trimmed.replace(/,/g, ""));
+    if (trimmed !== "" && (isNaN(parsed!) || parsed! < 0)) {
+      Alert.alert("Invalid amount", "Please enter a valid positive number.");
+      return;
+    }
+    setSaving(true);
+    try {
+      await onSave(parsed);
+      onClose();
+    } catch {
+      Alert.alert("Error", "Failed to save cover amount. Please try again.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleOpen = () => {
+    setRaw(current != null ? String(current) : "");
+  };
+
+  return (
+    <Modal
+      visible={visible}
+      transparent
+      animationType="slide"
+      onRequestClose={onClose}
+      onShow={handleOpen}
+    >
+      <Pressable
+        style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.45)" }}
+        onPress={onClose}
+      />
+      <KeyboardAvoidingView
+        behavior={Platform.OS === "ios" ? "padding" : "height"}
+        style={{ position: "absolute", bottom: 0, left: 0, right: 0 }}
+      >
+        <View
+          style={{
+            backgroundColor: colors.card,
+            borderTopLeftRadius: 20,
+            borderTopRightRadius: 20,
+            padding: 24,
+            paddingBottom: insets.bottom + 24,
+            gap: 16,
+          }}
+        >
+          <View
+            style={{
+              flexDirection: "row",
+              alignItems: "center",
+              justifyContent: "space-between",
+            }}
+          >
+            <Text
+              style={{
+                fontSize: 18,
+                fontFamily: "Inter_700Bold",
+                color: colors.foreground,
+              }}
+            >
+              Contents cover amount
+            </Text>
+            <Pressable onPress={onClose} hitSlop={12}>
+              <Feather name="x" size={20} color={colors.mutedForeground} />
+            </Pressable>
+          </View>
+
+          <Text
+            style={{
+              fontSize: 13,
+              fontFamily: "Inter_400Regular",
+              color: colors.mutedForeground,
+              lineHeight: 19,
+            }}
+          >
+            Enter the contents insurance sum insured from your policy document.
+            This unlocks the coverage arc and bar on this property.
+          </Text>
+
+          <View style={{ gap: 6 }}>
+            <Text
+              style={{
+                fontSize: 12,
+                fontFamily: "Inter_500Medium",
+                color: colors.mutedForeground,
+                letterSpacing: 0.3,
+              }}
+            >
+              Cover amount (£)
+            </Text>
+            <TextInput
+              value={raw}
+              onChangeText={setRaw}
+              placeholder="e.g. 50000"
+              placeholderTextColor={colors.mutedForeground}
+              keyboardType="decimal-pad"
+              autoFocus
+              style={{
+                borderWidth: 1,
+                borderColor: colors.border,
+                borderRadius: colors.radius,
+                paddingHorizontal: 14,
+                paddingVertical: 12,
+                fontSize: 16,
+                fontFamily: "Inter_400Regular",
+                color: colors.foreground,
+                backgroundColor: colors.background,
+              }}
+            />
+          </View>
+
+          <View style={{ flexDirection: "row", gap: 10 }}>
+            <Pressable
+              onPress={onClose}
+              style={({ pressed }) => ({
+                flex: 1,
+                paddingVertical: 14,
+                borderRadius: colors.radius,
+                borderWidth: 1,
+                borderColor: colors.border,
+                alignItems: "center",
+                opacity: pressed ? 0.7 : 1,
+              })}
+            >
+              <Text
+                style={{
+                  fontSize: 15,
+                  fontFamily: "Inter_600SemiBold",
+                  color: colors.foreground,
+                }}
+              >
+                Cancel
+              </Text>
+            </Pressable>
+            <Pressable
+              onPress={handleSave}
+              disabled={saving}
+              style={({ pressed }) => ({
+                flex: 1,
+                paddingVertical: 14,
+                borderRadius: colors.radius,
+                backgroundColor: colors.primary,
+                alignItems: "center",
+                opacity: pressed || saving ? 0.7 : 1,
+              })}
+            >
+              {saving ? (
+                <ActivityIndicator size="small" color={colors.primaryForeground} />
+              ) : (
+                <Text
+                  style={{
+                    fontSize: 15,
+                    fontFamily: "Inter_600SemiBold",
+                    color: colors.primaryForeground,
+                  }}
+                >
+                  Save
+                </Text>
+              )}
+            </Pressable>
+          </View>
+        </View>
+      </KeyboardAvoidingView>
+    </Modal>
+  );
+}
+
 export default function PropertyDetailScreen() {
   const { id, name } = useLocalSearchParams<{ id: string; name: string }>();
   const { session } = useAuth();
   const colors = useColors();
   const insets = useSafeAreaInsets();
+  const queryClient = useQueryClient();
+  const [coverModalVisible, setCoverModalVisible] = useState(false);
 
   const {
     data: rooms,
@@ -485,6 +680,17 @@ export default function PropertyDetailScreen() {
     : 1;
 
   const isLoading = roomsLoading || itemsLoading;
+
+  const saveCoverAmount = async (value: number | null) => {
+    const { error } = await supabase
+      .from("inventory_files")
+      .update({ contents_sum_insured: value })
+      .eq("id", id);
+    if (error) throw error;
+    await queryClient.invalidateQueries({
+      queryKey: ["property", id, session?.user.id],
+    });
+  };
 
   const renderHeader = () => {
     if (!stats) return null;
@@ -555,9 +761,67 @@ export default function PropertyDetailScreen() {
               </View>
             </View>
 
-            {/* Radial coverage arc */}
-            {stats.coveragePercent != null && (
-              <RadialCoverage percent={stats.coveragePercent} />
+            {/* Radial coverage arc or set-cover CTA */}
+            {stats.coveragePercent != null ? (
+              <Pressable
+                onPress={() => setCoverModalVisible(true)}
+                style={{ alignItems: "center" }}
+                hitSlop={8}
+              >
+                <RadialCoverage percent={stats.coveragePercent} />
+                <View
+                  style={{
+                    flexDirection: "row",
+                    alignItems: "center",
+                    gap: 3,
+                    marginTop: 4,
+                  }}
+                >
+                  <Feather
+                    name="edit-2"
+                    size={10}
+                    color={colors.mutedForeground}
+                  />
+                  <Text
+                    style={{
+                      fontSize: 10,
+                      fontFamily: "Inter_400Regular",
+                      color: colors.mutedForeground,
+                    }}
+                  >
+                    Edit cover
+                  </Text>
+                </View>
+              </Pressable>
+            ) : (
+              <Pressable
+                onPress={() => setCoverModalVisible(true)}
+                style={({ pressed }) => ({
+                  alignItems: "center",
+                  justifyContent: "center",
+                  width: 88,
+                  height: 88,
+                  borderRadius: 44,
+                  borderWidth: 2,
+                  borderColor: colors.border,
+                  borderStyle: "dashed",
+                  gap: 4,
+                  opacity: pressed ? 0.7 : 1,
+                })}
+              >
+                <Feather name="shield" size={20} color={colors.mutedForeground} />
+                <Text
+                  style={{
+                    fontSize: 9,
+                    fontFamily: "Inter_500Medium",
+                    color: colors.mutedForeground,
+                    textAlign: "center",
+                    lineHeight: 12,
+                  }}
+                >
+                  Set{"\n"}cover
+                </Text>
+              </Pressable>
             )}
           </View>
 
@@ -565,6 +829,48 @@ export default function PropertyDetailScreen() {
             <View style={{ marginTop: 14 }}>
               <CoverageBar percent={stats.coveragePercent} colors={colors} />
             </View>
+          )}
+
+          {stats.coveragePercent == null && (
+            <Pressable
+              onPress={() => setCoverModalVisible(true)}
+              style={({ pressed }) => ({
+                marginTop: 10,
+                paddingVertical: 10,
+                paddingHorizontal: 14,
+                borderRadius: colors.radius,
+                borderWidth: 1,
+                borderColor: colors.border,
+                flexDirection: "row",
+                alignItems: "center",
+                gap: 8,
+                opacity: pressed ? 0.7 : 1,
+              })}
+            >
+              <Feather name="shield" size={14} color={colors.primary} />
+              <View style={{ flex: 1 }}>
+                <Text
+                  style={{
+                    fontSize: 13,
+                    fontFamily: "Inter_600SemiBold",
+                    color: colors.foreground,
+                  }}
+                >
+                  Set your contents cover amount
+                </Text>
+                <Text
+                  style={{
+                    fontSize: 11,
+                    fontFamily: "Inter_400Regular",
+                    color: colors.mutedForeground,
+                    marginTop: 1,
+                  }}
+                >
+                  Unlocks the coverage arc and bar
+                </Text>
+              </View>
+              <Feather name="chevron-right" size={16} color={colors.mutedForeground} />
+            </Pressable>
           )}
 
           {stats.itemCount > 0 && (
@@ -735,6 +1041,13 @@ export default function PropertyDetailScreen() {
           }
         />
       )}
+      <CoverAmountModal
+        visible={coverModalVisible}
+        current={property?.contents_sum_insured ?? null}
+        onClose={() => setCoverModalVisible(false)}
+        onSave={saveCoverAmount}
+        colors={colors}
+      />
     </>
   );
 }
