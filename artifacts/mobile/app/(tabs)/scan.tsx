@@ -14,6 +14,7 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -111,6 +112,7 @@ export default function ScanScreen() {
   const [selectedMode, setSelectedMode] = useState<ScanMode | null>(null);
   const [selectedFileId, setSelectedFileId] = useState(paramFileId ?? "");
   const [selectedRoomId, setSelectedRoomId] = useState(paramRoomId ?? "");
+  const [newRoomName, setNewRoomName] = useState("");
   const [images, setImages] = useState<ScanEncodedImage[]>([]);
   const [scanStatus, setScanStatus] = useState<ScanStatus>("idle");
   const [detectedItems, setDetectedItems] = useState<ScanDetectedItem[]>([]);
@@ -201,8 +203,10 @@ export default function ScanScreen() {
     }
   };
 
-  const getDestRoomName = () =>
-    paramRoomName ?? rooms?.find((r) => r.id === selectedRoomId)?.name ?? null;
+  const getDestRoomName = (resolvedRoomId?: string) => {
+    const rid = resolvedRoomId ?? selectedRoomId;
+    return paramRoomName ?? rooms?.find((r) => r.id === rid)?.name ?? (newRoomName.trim() || null);
+  };
 
   /**
    * Build the Supabase insert payload for a detected item.
@@ -242,16 +246,38 @@ export default function ScanScreen() {
   const handleStartScan = async () => {
     if (!selectedMode) { setScanError("Select a scan type above."); return; }
     if (!selectedFileId) { setScanError("Select a property."); return; }
-    if (!selectedRoomId) { setScanError("Select a room."); return; }
     if (images.length === 0) { setScanError("Add at least one photo."); return; }
+
+    // Resolve room: use existing selection, or create a new room from the typed name.
+    let resolvedRoomId = selectedRoomId;
+    if (!resolvedRoomId) {
+      const trimmedName = newRoomName.trim();
+      if (!trimmedName) { setScanError("Enter a room name to scan into."); return; }
+      const roomId = "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
+        const r = (Math.random() * 16) | 0;
+        return (c === "x" ? r : (r & 0x3) | 0x8).toString(16);
+      });
+      const { error: roomErr } = await supabase.from("inventory_rooms").insert({
+        id: roomId,
+        file_id: selectedFileId,
+        user_id: session!.user.id,
+        name: trimmedName,
+        sort_order: 1,
+      });
+      if (roomErr) { setScanError(`Could not create room: ${roomErr.message}`); return; }
+      resolvedRoomId = roomId;
+      setSelectedRoomId(roomId);
+      queryClient.invalidateQueries({ queryKey: ["rooms", selectedFileId] });
+      queryClient.invalidateQueries({ queryKey: ["rooms", selectedFileId, session?.user.id] });
+    }
 
     setScanError(null);
 
     const input = {
       mode: selectedMode,
       fileId: selectedFileId,
-      roomId: selectedRoomId,
-      roomName: getDestRoomName() ?? undefined,
+      roomId: resolvedRoomId,
+      roomName: getDestRoomName(resolvedRoomId) ?? undefined,
       images,
     };
 
@@ -760,7 +786,7 @@ export default function ScanScreen() {
   const canScan =
     selectedMode &&
     selectedFileId &&
-    selectedRoomId &&
+    (selectedRoomId || newRoomName.trim()) &&
     (selectedMode === "video_room" || images.length > 0);
 
   // ── Scanning overlay — full screen while AI processes ─────────────────────
@@ -898,19 +924,42 @@ export default function ScanScreen() {
               ) : (
                 <View style={{ gap: 4 }}>
                   <Text style={[styles.fieldLabel, { color: colors.mutedForeground }]}>Room</Text>
-                  <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
-                    {(rooms ?? []).map((r) => (
-                      <Pressable
-                        key={r.id}
-                        onPress={() => setSelectedRoomId(r.id)}
-                        style={[styles.chip, { backgroundColor: selectedRoomId === r.id ? colors.primary : colors.secondary }]}
-                      >
-                        <Text style={[styles.chipText, { color: selectedRoomId === r.id ? colors.primaryForeground : colors.foreground }]}>
-                          {r.name}
-                        </Text>
-                      </Pressable>
-                    ))}
-                  </ScrollView>
+                  {(rooms ?? []).length === 0 ? (
+                    /* No rooms yet — let the user name one inline; it will be
+                       created automatically when the scan starts. */
+                    <TextInput
+                      value={newRoomName}
+                      onChangeText={setNewRoomName}
+                      placeholder="e.g. Living Room, Kitchen…"
+                      placeholderTextColor={colors.mutedForeground}
+                      autoCapitalize="words"
+                      style={{
+                        borderWidth: 1.5,
+                        borderColor: newRoomName.trim() ? colors.primary : colors.border,
+                        borderRadius: colors.radius,
+                        paddingHorizontal: 12,
+                        paddingVertical: 9,
+                        fontSize: 14,
+                        fontFamily: "Inter_400Regular",
+                        color: colors.foreground,
+                        backgroundColor: colors.muted,
+                      }}
+                    />
+                  ) : (
+                    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
+                      {(rooms ?? []).map((r) => (
+                        <Pressable
+                          key={r.id}
+                          onPress={() => { setSelectedRoomId(r.id); setNewRoomName(""); }}
+                          style={[styles.chip, { backgroundColor: selectedRoomId === r.id ? colors.primary : colors.secondary }]}
+                        >
+                          <Text style={[styles.chipText, { color: selectedRoomId === r.id ? colors.primaryForeground : colors.foreground }]}>
+                            {r.name}
+                          </Text>
+                        </Pressable>
+                      ))}
+                    </ScrollView>
+                  )}
                 </View>
               )
             )}
