@@ -307,12 +307,28 @@ export default function ScanScreen() {
     setSavingIds((prev) => new Set(prev).add(index));
     setScanSaveError(null);
 
-    // Upload the source scan photo to inventory-photos before inserting
+    // Upload the source scan photo to inventory-photos before inserting.
+    // A missing or failed upload is treated as a hard failure — we never save
+    // an item with a null photo_url when a source image is available.
     const userId = session?.user.id;
-    let uploadedUrl: string | null = null;
-    if (userId && item.sourceImageUri) {
-      const dedupeKey = `${item.sourcePhotoIndex ?? 0}:${item.sourceImageUri}`;
-      uploadedUrl = await uploadScanPhoto(item.sourceImageUri, userId, dedupeKey);
+    if (!userId) {
+      setScanSaveError("You must be signed in to save items.");
+      setSavingIds((prev) => { const n = new Set(prev); n.delete(index); return n; });
+      return;
+    }
+
+    if (!item.sourceImageUri) {
+      setScanSaveError("Source image is missing — cannot save this item.");
+      setSavingIds((prev) => { const n = new Set(prev); n.delete(index); return n; });
+      return;
+    }
+
+    const dedupeKey = `${item.sourcePhotoIndex ?? 0}:${item.sourceImageUri}`;
+    const uploadedUrl = await uploadScanPhoto(item.sourceImageUri, userId, dedupeKey);
+    if (!uploadedUrl) {
+      setScanSaveError("Photo upload failed. Check your connection and try again.");
+      setSavingIds((prev) => { const n = new Set(prev); n.delete(index); return n; });
+      return;
     }
 
     const { error } = await supabase.from("inventory_items").insert(buildPayload(item, uploadedUrl));
@@ -340,32 +356,43 @@ export default function ScanScreen() {
     setScanSaveError(null);
     setPartialFailures([]);
 
-    // Phase 1: Upload each unique source photo once, build photoIndex → publicUrl map
     const userId = session?.user.id;
-    const photoUrlByIndex = new Map<number, string | null>();
-    if (userId) {
-      for (const item of detectedItems) {
-        const photoIdx = item.sourcePhotoIndex ?? 0;
-        if (!photoUrlByIndex.has(photoIdx)) {
-          const uri = item.sourceImageUri ?? images[photoIdx]?.uri ?? null;
-          if (uri) {
-            const dedupeKey = `${photoIdx}:${uri}`;
-            const url = await uploadScanPhoto(uri, userId, dedupeKey);
-            photoUrlByIndex.set(photoIdx, url);
-          } else {
-            photoUrlByIndex.set(photoIdx, null);
-          }
-        }
-      }
+    if (!userId) {
+      setScanStatus("reviewing");
+      setScanSaveError("You must be signed in to save items.");
+      return;
+    }
+
+    // Phase 1: Upload each unique source photo once.
+    // Track successful uploads (photoIdx → URL) and failures (photoIdx in failedPhotoIndices).
+    // Items whose photo failed to upload are treated as partial failures and never inserted.
+    const photoUrlByIndex = new Map<number, string>();
+    const failedPhotoIndices = new Set<number>();
+
+    for (const item of detectedItems) {
+      const photoIdx = item.sourcePhotoIndex ?? 0;
+      if (photoUrlByIndex.has(photoIdx) || failedPhotoIndices.has(photoIdx)) continue;
+      const uri = item.sourceImageUri ?? images[photoIdx]?.uri ?? null;
+      if (!uri) { failedPhotoIndices.add(photoIdx); continue; }
+      const dedupeKey = `${photoIdx}:${uri}`;
+      const url = await uploadScanPhoto(uri, userId, dedupeKey);
+      if (url) { photoUrlByIndex.set(photoIdx, url); }
+      else { failedPhotoIndices.add(photoIdx); }
     }
 
     const failures: PartialFailure[] = [];
     const savedIndices: number[] = [];
 
-    // Phase 2: Sequential insert with matched uploaded photo URL
+    // Phase 2: Sequential insert — skip items whose source photo failed to upload.
     for (let i = 0; i < detectedItems.length; i++) {
       const item = detectedItems[i];
       const photoIdx = item.sourcePhotoIndex ?? 0;
+
+      if (failedPhotoIndices.has(photoIdx)) {
+        failures.push({ itemName: item.name, error: "Photo upload failed — check your connection" });
+        continue;
+      }
+
       const uploadedUrl = photoUrlByIndex.get(photoIdx) ?? null;
       const { error } = await supabase.from("inventory_items").insert(buildPayload(item, uploadedUrl));
       if (error) {
@@ -571,7 +598,12 @@ export default function ScanScreen() {
 
               return (
                 <Pressable
-                  onPress={() => setActivePinIndex(isActive ? null : index)}
+                  onPress={() => {
+                    setActivePinIndex(isActive ? null : index);
+                    // Switch the source photo panel to this card's source image so the
+                    // matching pin is always visible after tapping a card.
+                    setActiveSourcePhotoIdx(item.sourcePhotoIndex ?? 0);
+                  }}
                   style={[
                     revStyles.card,
                     {
