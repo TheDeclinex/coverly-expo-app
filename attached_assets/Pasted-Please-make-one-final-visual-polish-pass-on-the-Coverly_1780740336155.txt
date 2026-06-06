@@ -1,0 +1,29 @@
+Please make one final visual polish pass on the Coverly login/sign-up screen.
+
+Keep the current layout and overall direction. Do not redesign it from scratch.
+
+Changes:
+- Lighten the background from near-black to a premium deep slate / blue-grey tone.
+- Keep the dark premium feel, but avoid the screen feeling black or overly cyber/security themed.
+- Use existing theme tokens where possible. If new colours are needed, keep them close to deep slate, blue-grey, and restrained teal.
+- Keep the subtle dot/particle background, but add a very faint home-inventory/scanning feel if simple: scan frame corners, floor-plan style lines, or soft abstract room/documentation shapes. Keep it very subtle.
+- Do not spend time improving the temporary shield logo, as this will be replaced later.
+- Keep the exact tagline: "Know what you own".
+- Keep the security reassurance line. Preferred copy:
+  "Your data is encrypted and securely stored."
+- Add a "Forgot password?" link under or near the password field if Supabase password reset is already available. If not already implemented, add a simple Supabase password reset flow using the existing auth client and environment config.
+- Make the "Create your free inventory" sign-up link slightly more obvious/tappable, but do not make the screen feel cluttered.
+- Slightly tighten the login card vertical spacing if possible.
+- Keep all existing sign-in, sign-up, Supabase auth, navigation, routes, environment variables, and profile creation behaviour unchanged.
+- Do not add new backend dependencies.
+- Hide any debug/test connection controls from normal users.
+- TypeScript must pass.
+
+Acceptance criteria:
+- Background feels premium slate/blue-grey rather than near-black.
+- Login screen still feels calm, trustworthy, and modern.
+- New users can clearly find the create-account option.
+- Existing users can sign in.
+- Users can recover a forgotten password if supported.
+- Security reassurance copy is visible but subtle.
+- No auth behaviour is broken.
