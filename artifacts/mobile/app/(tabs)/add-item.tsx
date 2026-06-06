@@ -21,6 +21,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { useAuth } from "@/context/AuthContext";
 import { useColors } from "@/hooks/useColors";
+import { buildItemInsertPayload } from "@/lib/item-insert-helpers";
 import { supabase } from "@/lib/supabase";
 import type { InventoryFile, InventoryRoom } from "@/types";
 
@@ -40,21 +41,22 @@ function FormField({
   colors: ReturnType<typeof import("@/hooks/useColors").useColors>;
 }) {
   return (
-    <View style={fieldStyles.container}>
-      <Text style={[fieldStyles.label, { color: colors.mutedForeground }]}>
+    <View style={{ gap: 6 }}>
+      <Text
+        style={{
+          fontSize: 12,
+          fontFamily: "Inter_500Medium",
+          letterSpacing: 0.3,
+          color: colors.mutedForeground,
+        }}
+      >
         {label}
-        {required && (
-          <Text style={{ color: colors.destructive }}> *</Text>
-        )}
+        {required && <Text style={{ color: colors.destructive }}> *</Text>}
       </Text>
       {children}
     </View>
   );
 }
-const fieldStyles = StyleSheet.create({
-  container: { gap: 6 },
-  label: { fontSize: 12, fontFamily: "Inter_500Medium", letterSpacing: 0.3 },
-});
 
 function StyledInput({
   value,
@@ -79,29 +81,22 @@ function StyledInput({
       placeholderTextColor={colors.mutedForeground}
       keyboardType={keyboardType ?? "default"}
       multiline={multiline}
-      style={[
-        inputStyles.input,
-        {
-          backgroundColor: colors.card,
-          borderColor: colors.border,
-          borderRadius: colors.radius,
-          color: colors.foreground,
-          minHeight: multiline ? 80 : 44,
-          textAlignVertical: multiline ? "top" : "center",
-        },
-      ]}
+      style={{
+        borderWidth: 1,
+        borderColor: colors.border,
+        borderRadius: colors.radius,
+        backgroundColor: colors.card,
+        color: colors.foreground,
+        paddingHorizontal: 12,
+        paddingVertical: 10,
+        fontSize: 15,
+        fontFamily: "Inter_400Regular",
+        minHeight: multiline ? 80 : 44,
+        textAlignVertical: multiline ? "top" : "center",
+      }}
     />
   );
 }
-const inputStyles = StyleSheet.create({
-  input: {
-    borderWidth: 1,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    fontSize: 15,
-    fontFamily: "Inter_400Regular",
-  },
-});
 
 export default function AddItemScreen() {
   const { fileId, roomId, fileName, roomName } = useLocalSearchParams<{
@@ -186,26 +181,25 @@ export default function AddItemScreen() {
     }
   };
 
-  const uploadPhoto = async (uri: string, itemFileId: string): Promise<string | null> => {
+  const uploadPhoto = async (
+    uri: string,
+    itemFileId: string
+  ): Promise<string | null> => {
     try {
       const response = await fetch(uri);
       const blob = await response.blob();
       const ext = uri.split(".").pop() ?? "jpg";
       const path = `${itemFileId}/${Date.now()}.${ext}`;
-
       const { data: uploadData, error: uploadError } = await supabase.storage
         .from(ITEM_PHOTOS_BUCKET)
         .upload(path, blob, { contentType: `image/${ext}`, upsert: false });
-
       if (uploadError) {
         console.warn("Photo upload failed:", uploadError.message);
         return null;
       }
-
       const { data: urlData } = supabase.storage
         .from(ITEM_PHOTOS_BUCKET)
         .getPublicUrl(uploadData.path);
-
       return urlData.publicUrl ?? null;
     } catch (err) {
       console.warn("Photo upload error:", err);
@@ -226,56 +220,109 @@ export default function AddItemScreen() {
       Alert.alert("Room required", "Please select a room.");
       return;
     }
+    if (!session?.user.id) {
+      Alert.alert("Not signed in", "Please sign in again.");
+      return;
+    }
 
     setSaving(true);
     await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
 
-    try {
-      let uploadedPhotoUrl: string | null = null;
-      if (photoUri) {
-        uploadedPhotoUrl = await uploadPhoto(photoUri, selectedFileId);
-      }
+    let photoUploadWarning = false;
+    let uploadedPhotoUrl: string | null = null;
 
-      const price = parseFloat(estimatedPrice.replace(/[^0-9.]/g, "")) || null;
-      const qty = parseInt(quantity, 10) || 1;
+    if (photoUri) {
+      uploadedPhotoUrl = await uploadPhoto(photoUri, selectedFileId);
+      if (!uploadedPhotoUrl) photoUploadWarning = true;
+    }
 
-      const { error } = await supabase.from("inventory_items").insert({
-        file_id: selectedFileId,
-        room_id: selectedRoomId,
-        name: name.trim(),
-        description: description.trim() || null,
-        category: category.trim() || null,
-        estimated_price: price,
-        quantity: qty,
-        image_url: uploadedPhotoUrl,
-        // Fall back to local URI for display while photo is not yet confirmed uploaded
-        // photo_url intentionally left null — image_url is the canonical field
-      });
+    const price =
+      estimatedPrice.trim()
+        ? parseFloat(estimatedPrice.replace(/[^0-9.]/g, "")) || null
+        : null;
+    const qty = parseInt(quantity, 10) || 1;
 
-      if (error) throw error;
+    const payload = buildItemInsertPayload({
+      fileId: selectedFileId,
+      roomId: selectedRoomId,
+      userId: session.user.id,
+      name,
+      description: description || null,
+      category: category || null,
+      estimatedPrice: price,
+      quantity: qty,
+      imageUrl: uploadedPhotoUrl,
+    });
 
-      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    const { error } = await supabase.from("inventory_items").insert(payload);
 
-      queryClient.invalidateQueries({ queryKey: ["items", selectedRoomId] });
-      queryClient.invalidateQueries({ queryKey: ["all-items"] });
-      queryClient.invalidateQueries({ queryKey: ["property-items", selectedFileId] });
+    setSaving(false);
 
-      router.back();
-    } catch (err) {
+    if (error) {
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      // Diagnostics shown on failure — no secrets included
       Alert.alert(
         "Save failed",
-        err instanceof Error ? err.message : "Could not save item."
+        [
+          `Error: ${error.message}`,
+          `Code: ${error.code ?? "—"}`,
+          `Table: inventory_items`,
+          `Property ID: ${selectedFileId || "not set"}`,
+          `Room ID: ${selectedRoomId || "not set"}`,
+          `User: ${session.user.id ? "present" : "missing"}`,
+        ].join("\n")
       );
-    } finally {
-      setSaving(false);
+      return;
+    }
+
+    await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+
+    // Invalidate all relevant caches
+    queryClient.invalidateQueries({ queryKey: ["items", selectedRoomId] });
+    queryClient.invalidateQueries({ queryKey: ["all-items"] });
+    queryClient.invalidateQueries({
+      queryKey: ["property-items", selectedFileId],
+    });
+
+    // Navigate to the room so the user can see the new item
+    const destRoomName =
+      rooms?.find((r) => r.id === selectedRoomId)?.name ?? roomName ?? "Room";
+
+    if (photoUploadWarning) {
+      Alert.alert(
+        "Item saved",
+        "Photo could not be uploaded (bucket not configured). Item was saved without a photo.",
+        [
+          {
+            text: "OK",
+            onPress: () =>
+              router.replace({
+                pathname: "/(tabs)/room/[id]",
+                params: {
+                  id: selectedRoomId,
+                  name: destRoomName,
+                  fileId: selectedFileId,
+                },
+              }),
+          },
+        ]
+      );
+    } else {
+      router.replace({
+        pathname: "/(tabs)/room/[id]",
+        params: {
+          id: selectedRoomId,
+          name: destRoomName,
+          fileId: selectedFileId,
+        },
+      });
     }
   };
 
   const selectedPropertyName =
-    properties?.find((p) => p.id === selectedFileId)?.name ?? fileName ?? "Select property";
-  const selectedRoomName =
-    rooms?.find((r) => r.id === selectedRoomId)?.name ?? roomName ?? "Select room";
+    properties?.find((p) => p.id === selectedFileId)?.name ??
+    fileName ??
+    "Select property";
 
   return (
     <>
@@ -311,12 +358,13 @@ export default function AddItemScreen() {
           ]}
           keyboardShouldPersistTaps="handled"
         >
+          {/* LOCATION */}
           <View style={styles.section}>
             <Text style={[styles.sectionTitle, { color: colors.mutedForeground }]}>
               LOCATION
             </Text>
 
-            {!fileId && (
+            {!fileId ? (
               <FormField label="Property" required colors={colors}>
                 <ScrollView
                   horizontal
@@ -334,7 +382,9 @@ export default function AddItemScreen() {
                         styles.chip,
                         {
                           backgroundColor:
-                            selectedFileId === p.id ? colors.primary : colors.secondary,
+                            selectedFileId === p.id
+                              ? colors.primary
+                              : colors.secondary,
                           borderRadius: 20,
                         },
                       ]}
@@ -356,12 +406,16 @@ export default function AddItemScreen() {
                   ))}
                 </ScrollView>
               </FormField>
-            )}
-
-            {fileId && (
-              <View style={styles.locRow}>
+            ) : (
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
                 <Feather name="home" size={14} color={colors.primary} />
-                <Text style={[styles.locText, { color: colors.foreground }]}>
+                <Text
+                  style={{
+                    fontSize: 14,
+                    fontFamily: "Inter_500Medium",
+                    color: colors.foreground,
+                  }}
+                >
                   {selectedPropertyName}
                 </Text>
               </View>
@@ -369,10 +423,16 @@ export default function AddItemScreen() {
 
             <FormField label="Room" required colors={colors}>
               {!selectedFileId ? (
-                <Text style={[styles.hint, { color: colors.mutedForeground }]}>
+                <Text
+                  style={{
+                    fontSize: 13,
+                    fontFamily: "Inter_400Regular",
+                    color: colors.mutedForeground,
+                  }}
+                >
                   Select a property first
                 </Text>
-              ) : (
+              ) : !roomId ? (
                 <ScrollView
                   horizontal
                   showsHorizontalScrollIndicator={false}
@@ -386,7 +446,9 @@ export default function AddItemScreen() {
                         styles.chip,
                         {
                           backgroundColor:
-                            selectedRoomId === r.id ? colors.primary : colors.secondary,
+                            selectedRoomId === r.id
+                              ? colors.primary
+                              : colors.secondary,
                           borderRadius: 20,
                         },
                       ]}
@@ -407,10 +469,24 @@ export default function AddItemScreen() {
                     </Pressable>
                   ))}
                 </ScrollView>
+              ) : (
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                  <Feather name="layers" size={14} color={colors.primary} />
+                  <Text
+                    style={{
+                      fontSize: 14,
+                      fontFamily: "Inter_500Medium",
+                      color: colors.foreground,
+                    }}
+                  >
+                    {roomName}
+                  </Text>
+                </View>
               )}
             </FormField>
           </View>
 
+          {/* ITEM DETAILS */}
           <View style={styles.section}>
             <Text style={[styles.sectionTitle, { color: colors.mutedForeground }]}>
               ITEM DETAILS
@@ -470,9 +546,20 @@ export default function AddItemScreen() {
             </View>
           </View>
 
+          {/* PHOTO */}
           <View style={styles.section}>
             <Text style={[styles.sectionTitle, { color: colors.mutedForeground }]}>
               PHOTO
+            </Text>
+            <Text
+              style={{
+                fontSize: 11,
+                fontFamily: "Inter_400Regular",
+                color: colors.mutedForeground,
+              }}
+            >
+              Photo upload requires a configured storage bucket. Item saves
+              without a photo if upload fails.
             </Text>
 
             {photoUri ? (
@@ -494,7 +581,13 @@ export default function AddItemScreen() {
                   ]}
                 >
                   <Feather name="x" size={14} color={colors.destructive} />
-                  <Text style={[styles.removePhotoText, { color: colors.destructive }]}>
+                  <Text
+                    style={{
+                      fontSize: 13,
+                      fontFamily: "Inter_500Medium",
+                      color: colors.destructive,
+                    }}
+                  >
                     Remove photo
                   </Text>
                 </Pressable>
@@ -514,7 +607,13 @@ export default function AddItemScreen() {
                   ]}
                 >
                   <Feather name="camera" size={20} color={colors.primary} />
-                  <Text style={[styles.photoBtnText, { color: colors.primary }]}>
+                  <Text
+                    style={{
+                      fontSize: 14,
+                      fontFamily: "Inter_500Medium",
+                      color: colors.primary,
+                    }}
+                  >
                     Camera
                   </Text>
                 </Pressable>
@@ -531,7 +630,13 @@ export default function AddItemScreen() {
                   ]}
                 >
                   <Feather name="image" size={20} color={colors.primary} />
-                  <Text style={[styles.photoBtnText, { color: colors.primary }]}>
+                  <Text
+                    style={{
+                      fontSize: 14,
+                      fontFamily: "Inter_500Medium",
+                      color: colors.primary,
+                    }}
+                  >
                     Library
                   </Text>
                 </Pressable>
@@ -556,7 +661,13 @@ export default function AddItemScreen() {
             ) : (
               <>
                 <Feather name="check" size={18} color={colors.primaryForeground} />
-                <Text style={[styles.saveBtnText, { color: colors.primaryForeground }]}>
+                <Text
+                  style={{
+                    fontSize: 16,
+                    fontFamily: "Inter_600SemiBold",
+                    color: colors.primaryForeground,
+                  }}
+                >
                   Save item
                 </Text>
               </>
@@ -569,43 +680,16 @@ export default function AddItemScreen() {
 }
 
 const styles = StyleSheet.create({
-  scroll: {
-    padding: 16,
-    gap: 16,
-  },
-  section: {
-    gap: 14,
-  },
+  scroll: { padding: 16, gap: 20 },
+  section: { gap: 14 },
   sectionTitle: {
     fontSize: 11,
     fontFamily: "Inter_600SemiBold",
     letterSpacing: 0.8,
   },
-  locRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-  },
-  locText: {
-    fontSize: 14,
-    fontFamily: "Inter_500Medium",
-  },
-  chip: {
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-  },
-  chipText: {
-    fontSize: 13,
-    fontFamily: "Inter_500Medium",
-  },
-  hint: {
-    fontSize: 13,
-    fontFamily: "Inter_400Regular",
-  },
-  photoPreview: {
-    width: "100%",
-    height: 200,
-  },
+  chip: { paddingHorizontal: 14, paddingVertical: 8 },
+  chipText: { fontSize: 13, fontFamily: "Inter_500Medium" },
+  photoPreview: { width: "100%", height: 200 },
   removePhotoBtn: {
     flexDirection: "row",
     alignItems: "center",
@@ -614,10 +698,6 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     borderWidth: 1,
     alignSelf: "flex-start",
-  },
-  removePhotoText: {
-    fontSize: 13,
-    fontFamily: "Inter_500Medium",
   },
   photoBtn: {
     flex: 1,
@@ -628,10 +708,6 @@ const styles = StyleSheet.create({
     paddingVertical: 16,
     borderWidth: 1,
   },
-  photoBtnText: {
-    fontSize: 14,
-    fontFamily: "Inter_500Medium",
-  },
   saveBtn: {
     flexDirection: "row",
     alignItems: "center",
@@ -639,9 +715,5 @@ const styles = StyleSheet.create({
     gap: 8,
     paddingVertical: 15,
     marginTop: 8,
-  },
-  saveBtnText: {
-    fontSize: 16,
-    fontFamily: "Inter_600SemiBold",
   },
 });

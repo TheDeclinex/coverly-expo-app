@@ -28,6 +28,7 @@ export interface InventoryItem {
   id: string;
   file_id: string;
   room_id: string;
+  user_id?: string;
   name: string;
   category: string | null;
   confidence: string | null;

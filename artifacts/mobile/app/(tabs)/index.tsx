@@ -289,8 +289,12 @@ export default function HomeScreen() {
     {
       icon: "plus-circle" as const,
       label: "Add item",
-      onPress: () =>
-        router.push({ pathname: "/(tabs)/add-item", params: {} }),
+      onPress: () => router.push({ pathname: "/(tabs)/add-item", params: {} }),
+    },
+    {
+      icon: "zap" as const,
+      label: "Scan items",
+      onPress: () => router.push({ pathname: "/(tabs)/scan", params: {} }),
     },
   ];
 

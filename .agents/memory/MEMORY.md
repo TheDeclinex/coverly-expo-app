@@ -1,2 +1,1 @@
-- [Supabase iOS fetch fix](supabase-ios-fetch.md) — must pass `global: { fetch: fetch.bind(globalThis) }` to createClient or signIn fails on iOS
-- [Coverly app architecture](coverly-architecture.md) — Supabase tables, navigation structure, and storage bucket TODO
+- [Coverly Supabase insert rules](coverly-supabase-inserts.md) — inventory_items inserts MUST include user_id from session (RLS rejects without it)

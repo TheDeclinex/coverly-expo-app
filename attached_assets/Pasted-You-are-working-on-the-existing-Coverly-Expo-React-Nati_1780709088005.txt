@@ -1,0 +1,194 @@
+You are working on the existing Coverly Expo / React Native mobile app.
+
+Do not rebuild the app from scratch.
+Do not replace the existing login, dashboard, property, room, or item navigation flow.
+The current UI flow is good:
+Home dashboard → property → rooms → item list → item detail works with real Supabase data.
+
+Current critical bug:
+Manual Add Item does not save. Fix this first.
+
+Goal for this batch:
+
+1. Fix Manual Add Item save using the real Supabase schema.
+2. Add the Scan tab structure and scan service scaffold with the 4 Coverly scan options.
+3. Prepare scan results to use the same item insert mapper as Manual Add Item.
+4. Fix safe-area/header overlap where titles are partly covered by the iPhone dynamic island.
+
+PRIORITY 1 — Fix Manual Add Item save
+
+Inspect the working item read flow first:
+
+* room item list
+* item detail screen
+* inventory API/data fetch files
+* mapper files
+
+Identify the exact real schema already being used:
+
+* item table name
+* room table name
+* property/file table name
+* item primary key
+* item → room link column
+* item → property/file link column if used
+* required insert fields
+* correct name column
+* correct description/notes column
+* correct category column
+* correct estimated replacement value column
+* correct unit price column if used
+* correct quantity column
+* correct photo/image URL column
+* whether user_id / owner_id / created_by is required
+
+Fix Add Item so it inserts into the real item table using the real column names.
+
+Important:
+
+* Do not guess camelCase columns if the DB uses snake_case.
+* Do not insert fields that do not exist.
+* Create one central helper/mapper for converting form data into the Supabase insert payload.
+* Manual Add Item, future AI Scan, and future item import must all use this same insert helper.
+* Photo upload must not block item creation. If photo upload fails, save the item without photo and show a warning.
+* After save, navigate back to the correct room/item list and refetch/invalidate the data so the new item appears.
+
+Add temporary safe diagnostics on Add Item failure:
+
+* target table name
+* selected property/file ID
+* selected room ID
+* whether auth user ID exists
+* safe Supabase error message
+  Never show API keys or secrets.
+
+Acceptance for Priority 1:
+
+* Add item without photo saves successfully.
+* New item appears in the correct room after refresh.
+* Existing read/navigation flow still works.
+* TypeScript passes.
+
+PRIORITY 2 — Add Scan tab structure and scan service scaffold
+
+Add or update the Scan tab/screen.
+
+The Scan screen should show 4 Coverly scan options as clear cards/buttons:
+
+1. Single photo room scan
+
+   * User selects/takes one room photo.
+   * Intended to detect multiple items from one photo.
+   * Later cost: 1 AI scan credit.
+
+2. Multi-photo room scan
+
+   * User selects/takes up to 5 photos for the same room.
+   * Intended to detect and merge items across multiple photos.
+   * Later cost: 3 AI scan credits per batch of up to 5 photos.
+
+3. Video room scan
+
+   * User records/selects a video.
+   * For now this can be a placeholder or “coming soon”.
+   * Structure should allow later frame extraction and scan submission.
+
+4. Single item scan
+
+   * User takes/selects one close-up item photo.
+   * Intended to create one item with stronger brand/model details.
+
+The Scan screen should:
+
+* let the user choose property and room, or use the current room if launched from a room later
+* use Expo ImagePicker if already available
+* not require AI to be fully working yet
+* have clear placeholders for unavailable video/AI parts
+* show safe loading/error states
+* not break existing tabs/navigation
+
+Create a scan service scaffold, for example:
+
+* lib/scan-service.ts
+* types/scan.ts
+* app/(tabs)/scan.tsx or existing scan route
+* app/scan/review.tsx if route structure allows
+
+The scan service should define:
+
+* ScanMode = "single_photo_room" | "multi_photo_room" | "video_room" | "single_item"
+* ScanInput with propertyId/fileId, roomId, images/video, mode
+* ScanDetectedItem normalized shape:
+
+  * name
+  * description
+  * category
+  * estimatedPrice
+  * quantity
+  * brandMaker
+  * modelSeries
+  * conditionLabel
+  * confidence
+  * valuationBasis
+  * photoUrl/imageUrl if available
+
+Add a placeholder function:
+runAiScan(input)
+
+Behaviour:
+
+* If the existing Supabase Edge Function for AI scan is discoverable in current code/env, call it safely.
+* If not discoverable, do not guess a fake endpoint.
+* Instead return a clear “AI scan endpoint not configured yet” state.
+* Do not hardcode OpenAI keys in the mobile app.
+* Mobile app must never call OpenAI directly.
+* Future AI scan must go through Supabase Edge Function/backend only.
+
+Add a review/save structure:
+
+* After scan returns detected items, show a review screen/list if route budget allows.
+* User should be able to save detected items.
+* Saving detected items must use the same item insert mapper/helper fixed in Priority 1.
+* If full review screen is too much for this batch, create the service/types and Scan screen UI only, with clear TODOs.
+
+Important Coverly scan logic to encode as comments/TODOs:
+
+* Single photo room scan: one image, detect all visible room items.
+* Multi-photo room scan: up to 5 photos, detect exhaustively per photo, then merge only when clearly the same object.
+* Video room scan: later extract representative frames and avoid duplicates.
+* Single item scan: focus on one item and enrich brand/model/condition/value fields.
+* All scan saves must preserve room/property linkage and use the real item schema.
+
+PRIORITY 3 — Safe area/header fix
+
+Several screens have titles partly covered by the iPhone dynamic island.
+Fix safe area/header padding consistently for:
+
+* property detail
+* room detail
+* item detail
+* add item
+* edit item
+* scan screen
+
+Do not add heavy UI libraries unless already installed.
+Use safe-area support already present if available.
+
+Do not build in this batch:
+
+* RevenueCat billing
+* claim pack generation
+* full offline sync
+* direct OpenAI calls from the mobile app
+* complex chart libraries
+* admin console
+
+Final summary required:
+When finished, report:
+
+* files changed
+* exact Supabase item insert table and columns used
+* whether Add Item now saves
+* whether scan scaffold was added
+* whether AI endpoint was found or left as TODO
+* any Supabase bucket/config I need to manually confirm
