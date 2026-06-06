@@ -285,16 +285,29 @@ export default function HomeScreen() {
 
   const isLoading = propsLoading || itemsLoading;
 
+  const navigateWithProperty = (
+    dest: "/(tabs)/add-item" | "/(tabs)/scan"
+  ) => {
+    // Auto-select the only property; if multiple let the screen's inline picker handle it
+    const single = properties?.length === 1 ? properties[0] : null;
+    router.push({
+      pathname: dest,
+      params: single
+        ? { fileId: single.id, fileName: single.name }
+        : {},
+    });
+  };
+
   const quickActions = [
     {
       icon: "plus-circle" as const,
       label: "Add item",
-      onPress: () => router.push({ pathname: "/(tabs)/add-item", params: {} }),
+      onPress: () => navigateWithProperty("/(tabs)/add-item"),
     },
     {
       icon: "zap" as const,
       label: "Scan items",
-      onPress: () => router.push({ pathname: "/(tabs)/scan", params: {} }),
+      onPress: () => navigateWithProperty("/(tabs)/scan"),
     },
   ];
 
