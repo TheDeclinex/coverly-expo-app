@@ -31,7 +31,7 @@ export interface InventoryItem {
   room: string | null;
   name: string;
   category: string | null;
-  confidence: string | null;
+  confidence: number | null;
   estimated_price: number | null;
   unit_estimated_price: number | null;
   quantity: number | null;

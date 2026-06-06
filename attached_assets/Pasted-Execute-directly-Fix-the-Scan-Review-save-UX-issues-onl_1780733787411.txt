@@ -1,0 +1,132 @@
+Execute directly.
+
+Fix the Scan Review save/UX issues only.
+
+Current state:
+
+* AI scan now works.
+* It returns detected items and values.
+* Review screen shows detected items.
+* Save fails with:
+  invalid input syntax for type numeric: "high"
+
+Do not change Edge Function name.
+Do not change database schema.
+Do not touch Add Item, Edit Item, Move Item, or existing photo upload logic.
+Do not add billing, claim pack, replacement pricing, offline sync, or new scan modes.
+Do not change the production scan-room-photo contract unless absolutely required.
+
+Tasks:
+
+1. Fix confidence save mapping
+
+Current error means the app is sending a string like "high" into inventory_items.confidence, which is numeric.
+
+Fix the scan review save path so:
+
+* display confidence can still show "High confidence", "Medium confidence", "Low confidence"
+* database confidence is numeric only
+* if the scan response returns "high", "medium", or "low", convert before saving:
+
+  * high → 0.9
+  * medium → 0.6
+  * low → 0.3
+* if confidence is already numeric, pass the number through
+* if unknown, save null / omit confidence rather than saving a string
+
+inventory_items.confidence must never receive a string.
+
+2. Fix currency display
+
+The scan review is showing prices in pounds.
+
+Update shared currency formatting so scan review and item values use dollars/NZD-style display.
+
+Use:
+
+* "$3,000" or "NZ$3,000" depending on the existing app convention
+* do not show £
+
+Apply to:
+
+* scan review cards
+* save all summary if present
+* any new scan-created item display if using the same formatter
+
+Do not change stored numeric values, only display formatting.
+
+3. Add scan review thumbnails
+
+The review cards currently have no thumbnails.
+
+Use the selected image URI from the scan input to show a thumbnail on review cards.
+
+For V1:
+
+* single item scan: show the selected photo thumbnail on the detected item
+* single photo room scan: show the room photo thumbnail on each detected item, unless item-specific image info exists
+* multi-photo scan: if the AI response does not identify source photo, use the first selected photo as fallback
+* keep layout compact
+
+Do not attempt object cropping or pin cropping yet.
+
+4. Reduce green heaviness on review screen
+
+The review screen has too much solid green.
+
+Adjust styling:
+
+* keep Save all button as primary dark green
+* keep individual save check button green
+* make discard/remove button light/neutral
+* use white cards with subtle green-grey borders
+* use soft green only for small pills/badges
+* reduce large green-filled areas
+* keep Coverly palette consistent
+
+5. Save all behaviour
+
+Fix Save all after the confidence mapping bug.
+
+When user taps Save all:
+
+* save all detected items sequentially or safely in parallel
+* if one item fails, continue or report partial failure clearly
+* show clear inline error with item name if partial failure occurs
+* on success, return to the correct room or show a clear success state
+* new items must appear in the selected room
+
+Do not implement full autosave yet.
+
+Add a TODO comment:
+"Future option: auto-save detected scan results after review confidence improves / with undo."
+
+6. Pin functionality placeholder only
+
+Do not build full pin functionality in this pass.
+
+Add a clear TODO near scan review / detected item mapping:
+
+* production inventory_items has image_pin jsonb
+* future scan should support AI/user-generated pins if coordinates are returned
+* current scan review does not save pins unless the response includes a valid image_pin object
+
+If the scan response already includes pin coordinates, map them safely to image_pin.
+If not, leave image_pin undefined.
+
+7. TypeScript
+
+TypeScript must pass.
+
+Acceptance:
+
+1. Save one detected item works.
+2. Save all detected items works.
+3. No numeric confidence error.
+4. Review cards show thumbnails.
+5. Prices display as dollars/NZD, not pounds.
+6. Review screen feels less green-heavy.
+7. Saved scan-created items appear in the correct room.
+8. No backend/schema/RLS changes.
+9. TypeScript passes.
+10. Final response lists files changed and whether autosave/pins were deferred.

@@ -121,6 +121,10 @@ export async function runAiScan(input: ScanInput): Promise<ScanResult> {
 
     const rawItems: unknown[] = Array.isArray(data?.items) ? data.items : [];
 
+    // TODO: map sourcePhotoIndex from rawItems when multi-photo per-item thumbnail routing is needed.
+    // TODO: production inventory_items has image_pin jsonb. Map pin {x,y} here when the Edge Function
+    //       returns coordinates and the review screen supports it. Currently image_pin is not saved
+    //       unless the response includes a valid pin object.
     const items: ScanDetectedItem[] = rawItems
       .filter(
         (r): r is Record<string, unknown> =>

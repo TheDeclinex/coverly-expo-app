@@ -21,6 +21,7 @@ import { EmptyState } from "@/components/EmptyState";
 import { useAuth } from "@/context/AuthContext";
 import { useColors } from "@/hooks/useColors";
 import { buildItemInsertPayload } from "@/lib/item-insert-helpers";
+import { formatCurrency } from "@/lib/inventory-mappers";
 import {
   MAX_MULTI_PHOTO_IMAGES,
   runAiScan,
@@ -34,6 +35,8 @@ import type {
   ScanMode,
   ScanStatus,
 } from "@/types/scan";
+
+// Future option: auto-save detected scan results after review confidence improves / with undo.
 
 interface ScanModeCard {
   mode: ScanMode;
@@ -79,6 +82,11 @@ const SCAN_MODES: ScanModeCard[] = [
   },
 ];
 
+interface PartialFailure {
+  itemName: string;
+  error: string;
+}
+
 export default function ScanScreen() {
   const {
     fileId: paramFileId,
@@ -105,6 +113,7 @@ export default function ScanScreen() {
   const [scanError, setScanError] = useState<string | null>(null);
   const [savingIds, setSavingIds] = useState<Set<number>>(new Set());
   const [scanSaveError, setScanSaveError] = useState<string | null>(null);
+  const [partialFailures, setPartialFailures] = useState<PartialFailure[]>([]);
 
   const { data: properties } = useQuery({
     queryKey: ["properties", session?.user.id],
@@ -184,92 +193,14 @@ export default function ScanScreen() {
     }
   };
 
-  const handleStartScan = async () => {
-    if (!selectedMode) {
-      setScanError("Select a scan type above.");
-      return;
-    }
-    if (!selectedFileId) {
-      setScanError("Select a property.");
-      return;
-    }
-    if (!selectedRoomId) {
-      setScanError("Select a room.");
-      return;
-    }
-    if (images.length === 0) {
-      setScanError("Add at least one photo.");
-      return;
-    }
+  const getDestRoomName = () =>
+    paramRoomName ?? rooms?.find((r) => r.id === selectedRoomId)?.name ?? null;
 
-    setScanError(null);
-
-    const destRoomName =
-      paramRoomName ?? rooms?.find((r) => r.id === selectedRoomId)?.name ?? null;
-
-    const input = {
-      mode: selectedMode,
+  const buildPayload = (item: ScanDetectedItem) =>
+    buildItemInsertPayload({
       fileId: selectedFileId,
       roomId: selectedRoomId,
-      roomName: destRoomName ?? undefined,
-      images,
-    };
-
-    const validationError = validateScanInput(input);
-    if (validationError) {
-      setScanError(validationError);
-      return;
-    }
-
-    setScanStatus("scanning");
-
-    const result = await runAiScan(input);
-
-    if (result.status === "not_configured") {
-      setScanStatus("idle");
-      setScanError(
-        result.errorMessage ??
-          "AI scan is not configured yet. Deploy the scan-room-photo Edge Function."
-      );
-      return;
-    }
-
-    if (result.status === "error") {
-      setScanStatus("error");
-      setScanError(result.errorMessage ?? "Scan failed. Please try again.");
-      return;
-    }
-
-    if (result.items.length === 0) {
-      setScanStatus("idle");
-      setScanError(
-        "No items were detected in this photo. Try a clearer shot or a different angle."
-      );
-      return;
-    }
-
-    setDetectedItems(result.items);
-    setScanStatus("reviewing");
-    void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-  };
-
-  const handleDiscardItem = (index: number) => {
-    void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    setDetectedItems((prev) => prev.filter((_, i) => i !== index));
-  };
-
-  const handleSaveItem = async (item: ScanDetectedItem, index: number) => {
-    if (!selectedFileId || !selectedRoomId) return;
-    setSavingIds((prev) => new Set(prev).add(index));
-    setScanSaveError(null);
-
-    const destRoomName =
-      paramRoomName ?? rooms?.find((r) => r.id === selectedRoomId)?.name ?? null;
-
-    const payload = buildItemInsertPayload({
-      fileId: selectedFileId,
-      roomId: selectedRoomId,
-      roomName: destRoomName,
+      roomName: getDestRoomName(),
       name: item.name,
       description: item.description,
       notes: item.notes,
@@ -285,9 +216,83 @@ export default function ScanScreen() {
       confidence: item.confidence,
       valuationBasis: item.valuationBasis ?? "ai_estimate",
       priceSourceType: item.priceSourceType ?? "ai_scan",
+      // TODO: production inventory_items has image_pin jsonb; future scan should
+      // support AI/user-generated pins if coordinates are returned in scan response.
+      // Current scan review does not save pins unless the response includes a valid
+      // image_pin object. When implemented, map pin { x, y } here.
     });
 
-    const { error } = await supabase.from("inventory_items").insert(payload);
+  const invalidateRoomQueries = () => {
+    queryClient.invalidateQueries({ queryKey: ["items", selectedRoomId] });
+    queryClient.invalidateQueries({ queryKey: ["all-items"] });
+    queryClient.invalidateQueries({ queryKey: ["property-items", selectedFileId] });
+  };
+
+  const handleStartScan = async () => {
+    if (!selectedMode) { setScanError("Select a scan type above."); return; }
+    if (!selectedFileId) { setScanError("Select a property."); return; }
+    if (!selectedRoomId) { setScanError("Select a room."); return; }
+    if (images.length === 0) { setScanError("Add at least one photo."); return; }
+
+    setScanError(null);
+
+    const input = {
+      mode: selectedMode,
+      fileId: selectedFileId,
+      roomId: selectedRoomId,
+      roomName: getDestRoomName() ?? undefined,
+      images,
+    };
+
+    const validationError = validateScanInput(input);
+    if (validationError) { setScanError(validationError); return; }
+
+    setScanStatus("scanning");
+
+    const result = await runAiScan(input);
+
+    if (result.status === "not_configured") {
+      setScanStatus("idle");
+      setScanError(result.errorMessage ?? "AI scan is not configured yet. Deploy the scan-room-photo Edge Function.");
+      return;
+    }
+
+    if (result.status === "error") {
+      setScanStatus("error");
+      setScanError(result.errorMessage ?? "Scan failed. Please try again.");
+      return;
+    }
+
+    if (result.items.length === 0) {
+      setScanStatus("idle");
+      setScanError("No items were detected. Try a clearer shot or a different angle.");
+      return;
+    }
+
+    // Attach source image thumbnails for review cards.
+    // V1: single/single-item → images[0]; multi → images[0] as fallback (AI doesn't return per-item source index yet).
+    const fallbackUri = images[0]?.uri ?? null;
+    const itemsWithThumbs: ScanDetectedItem[] = result.items.map((item) => ({
+      ...item,
+      sourceImageUri: item.sourceImageUri ?? fallbackUri,
+    }));
+
+    setDetectedItems(itemsWithThumbs);
+    setScanStatus("reviewing");
+    void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+  };
+
+  const handleDiscardItem = (index: number) => {
+    void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    setDetectedItems((prev) => prev.filter((_, i) => i !== index));
+  };
+
+  const handleSaveItem = async (item: ScanDetectedItem, index: number) => {
+    if (!selectedFileId || !selectedRoomId) return;
+    setSavingIds((prev) => new Set(prev).add(index));
+    setScanSaveError(null);
+
+    const { error } = await supabase.from("inventory_items").insert(buildPayload(item));
 
     setSavingIds((prev) => {
       const next = new Set(prev);
@@ -297,71 +302,52 @@ export default function ScanScreen() {
 
     if (error) {
       console.error("[Scan] Save item failed:", error.message);
-      setScanSaveError(error.message);
+      setScanSaveError(`Failed to save "${item.name}": ${error.message}`);
     } else {
       void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-      queryClient.invalidateQueries({ queryKey: ["items", selectedRoomId] });
-      queryClient.invalidateQueries({ queryKey: ["all-items"] });
-      queryClient.invalidateQueries({
-        queryKey: ["property-items", selectedFileId],
-      });
+      invalidateRoomQueries();
       setDetectedItems((prev) => prev.filter((_, i) => i !== index));
     }
   };
 
+  /** Save all items sequentially. On partial failure, keep unsaved items visible and report failures inline. */
   const handleSaveAll = async () => {
     if (!selectedFileId || !selectedRoomId) return;
     setScanStatus("saving");
     setScanSaveError(null);
+    setPartialFailures([]);
 
-    const destRoomName =
-      paramRoomName ?? rooms?.find((r) => r.id === selectedRoomId)?.name ?? null;
+    const failures: PartialFailure[] = [];
+    const savedIndices: number[] = [];
 
-    const payloads = detectedItems.map((item) =>
-      buildItemInsertPayload({
-        fileId: selectedFileId,
-        roomId: selectedRoomId,
-        roomName: destRoomName,
-        name: item.name,
-        description: item.description,
-        notes: item.notes,
-        category: item.category,
-        estimatedPrice: item.estimatedPrice,
-        unitEstimatedPrice: item.unitEstimatedPrice,
-        quantity: item.quantity,
-        imageUrl: item.imageUrl,
-        photoUrl: item.photoUrl,
-        brandMaker: item.brandMaker,
-        modelSeries: item.modelSeries,
-        conditionLabel: item.conditionLabel,
-        confidence: item.confidence,
-        valuationBasis: item.valuationBasis ?? "ai_estimate",
-        priceSourceType: item.priceSourceType ?? "ai_scan",
-      })
-    );
+    for (let i = 0; i < detectedItems.length; i++) {
+      const item = detectedItems[i];
+      const { error } = await supabase.from("inventory_items").insert(buildPayload(item));
+      if (error) {
+        console.error("[Scan] Save all — item failed:", item.name, error.message);
+        failures.push({ itemName: item.name, error: error.message });
+      } else {
+        savedIndices.push(i);
+      }
+    }
 
-    const { error } = await supabase.from("inventory_items").insert(payloads);
+    if (savedIndices.length > 0) {
+      invalidateRoomQueries();
+    }
 
-    if (error) {
+    if (failures.length > 0) {
+      // Keep unsaved items in review; surface partial failure list
+      setDetectedItems((prev) => prev.filter((_, i) => !savedIndices.includes(i)));
+      setPartialFailures(failures);
       setScanStatus("reviewing");
-      console.error("[Scan] Save all failed:", error.message);
-      setScanSaveError(error.message);
       return;
     }
 
     void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    queryClient.invalidateQueries({ queryKey: ["items", selectedRoomId] });
-    queryClient.invalidateQueries({ queryKey: ["all-items"] });
-    queryClient.invalidateQueries({
-      queryKey: ["property-items", selectedFileId],
-    });
     setScanStatus("done");
     setDetectedItems([]);
 
-    const roomName =
-      paramRoomName ??
-      rooms?.find((r) => r.id === selectedRoomId)?.name ??
-      "Room";
+    const roomName = getDestRoomName() ?? "Room";
     router.replace({
       pathname: "/(tabs)/room/[id]",
       params: { id: selectedRoomId, name: roomName, fileId: selectedFileId },
@@ -375,9 +361,20 @@ export default function ScanScreen() {
     setScanStatus("idle");
     setScanError(null);
     setScanSaveError(null);
+    setPartialFailures([]);
   };
 
-  // ── Review screen ──────────────────────────────────────────────────────────
+  // ── Confidence badge helpers ─────────────────────────────────────────────────
+
+  const confidenceBadgeStyle = (confidence: string | null | undefined) => {
+    switch (confidence) {
+      case "high":   return { bg: "#E8F8F2", text: "#085041" };
+      case "medium": return { bg: "#FEF3C7", text: "#92400E" };
+      default:       return { bg: "#F1F5F9", text: "#64748b" };
+    }
+  };
+
+  // ── Review screen ────────────────────────────────────────────────────────────
 
   if ((scanStatus === "reviewing" || scanStatus === "saving") && detectedItems.length > 0) {
     return (
@@ -398,26 +395,38 @@ export default function ScanScreen() {
             keyExtractor={(_, i) => String(i)}
             contentContainerStyle={{
               padding: 16,
-              gap: 12,
+              gap: 10,
               paddingBottom: insets.bottom + 100,
             }}
             ListHeaderComponent={
               <View style={{ gap: 8, marginBottom: 4 }}>
-                <Text
-                  style={[reviewStyles.header, { color: colors.mutedForeground }]}
-                >
+                <Text style={[revStyles.headerNote, { color: colors.mutedForeground }]}>
                   {detectedItems.length} item{detectedItems.length !== 1 ? "s" : ""} detected — review and save
                 </Text>
-                {scanSaveError && (
-                  <View
-                    style={[
-                      reviewStyles.errorBanner,
-                      { backgroundColor: "#FEE2E2", borderColor: "#B91C1C" },
-                    ]}
-                  >
-                    <Feather name="alert-circle" size={14} color="#B91C1C" />
-                    <Text style={[reviewStyles.bannerText, { color: "#7F1D1D" }]}>
-                      Save failed: {scanSaveError}
+
+                {/* Partial failure list */}
+                {partialFailures.length > 0 && (
+                  <View style={[revStyles.failureBanner, { backgroundColor: "#FEF2F2", borderColor: "#FCA5A5" }]}>
+                    <Feather name="alert-circle" size={14} color="#DC2626" />
+                    <View style={{ flex: 1, gap: 2 }}>
+                      <Text style={{ fontSize: 12, fontFamily: "Inter_600SemiBold", color: "#991B1B" }}>
+                        {partialFailures.length} item{partialFailures.length !== 1 ? "s" : ""} failed to save
+                      </Text>
+                      {partialFailures.map((f, i) => (
+                        <Text key={i} style={{ fontSize: 11, fontFamily: "Inter_400Regular", color: "#B91C1C" }} numberOfLines={2}>
+                          • {f.itemName}: {f.error}
+                        </Text>
+                      ))}
+                    </View>
+                  </View>
+                )}
+
+                {/* Single-item save error */}
+                {scanSaveError && partialFailures.length === 0 && (
+                  <View style={[revStyles.failureBanner, { backgroundColor: "#FEF2F2", borderColor: "#FCA5A5" }]}>
+                    <Feather name="alert-circle" size={14} color="#DC2626" />
+                    <Text style={{ fontSize: 12, fontFamily: "Inter_400Regular", color: "#991B1B", flex: 1 }}>
+                      {scanSaveError}
                     </Text>
                   </View>
                 )}
@@ -425,111 +434,86 @@ export default function ScanScreen() {
             }
             renderItem={({ item, index }) => {
               const isSaving = savingIds.has(index);
-              const confidenceColor =
-                item.confidence === "high"
-                  ? "#1D9E75"
-                  : item.confidence === "medium"
-                  ? "#D97706"
-                  : "#94a3b8";
-              const qty = item.quantity ?? 1;
+              const badge = confidenceBadgeStyle(item.confidence);
 
               return (
                 <View
                   style={[
-                    reviewStyles.card,
-                    {
-                      backgroundColor: colors.card,
-                      borderColor: colors.border,
-                      borderRadius: colors.radius,
-                    },
+                    revStyles.card,
+                    { backgroundColor: "#FFFFFF", borderColor: colors.border, borderRadius: colors.radius },
                   ]}
                 >
+                  {/* Thumbnail */}
                   {item.sourceImageUri ? (
                     <Image
                       source={{ uri: item.sourceImageUri }}
-                      style={reviewStyles.thumb}
+                      style={[revStyles.thumb, { borderTopLeftRadius: colors.radius, borderBottomLeftRadius: colors.radius }]}
                       contentFit="cover"
                     />
-                  ) : null}
-                  <View style={reviewStyles.cardBody}>
-                    <Text
-                      style={[reviewStyles.itemName, { color: colors.foreground }]}
-                      numberOfLines={2}
-                    >
+                  ) : (
+                    <View style={[revStyles.thumbPlaceholder, { backgroundColor: colors.secondary, borderTopLeftRadius: colors.radius, borderBottomLeftRadius: colors.radius }]}>
+                      <Feather name="image" size={18} color={colors.border} />
+                    </View>
+                  )}
+
+                  {/* Card body */}
+                  <View style={revStyles.cardBody}>
+                    <Text style={[revStyles.itemName, { color: colors.foreground }]} numberOfLines={2}>
                       {item.name}
                     </Text>
 
-                    <View style={{ flexDirection: "row", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                    <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 5, alignItems: "center" }}>
                       {item.category ? (
-                        <Text
-                          style={[
-                            reviewStyles.itemChip,
-                            { color: colors.mutedForeground, backgroundColor: colors.secondary },
-                          ]}
-                        >
-                          {item.category}
-                        </Text>
+                        <View style={[revStyles.pill, { backgroundColor: colors.secondary }]}>
+                          <Text style={[revStyles.pillText, { color: colors.mutedForeground }]}>
+                            {item.category}
+                          </Text>
+                        </View>
                       ) : null}
-                      {qty > 1 ? (
-                        <Text
-                          style={[
-                            reviewStyles.itemChip,
-                            { color: colors.mutedForeground, backgroundColor: colors.secondary },
-                          ]}
-                        >
-                          Qty {qty}
-                        </Text>
+                      {(item.quantity ?? 1) > 1 ? (
+                        <View style={[revStyles.pill, { backgroundColor: colors.secondary }]}>
+                          <Text style={[revStyles.pillText, { color: colors.mutedForeground }]}>
+                            Qty {item.quantity}
+                          </Text>
+                        </View>
+                      ) : null}
+                      {item.confidence ? (
+                        <View style={[revStyles.pill, { backgroundColor: badge.bg }]}>
+                          <Text style={[revStyles.pillText, { color: badge.text }]}>
+                            {item.confidence.charAt(0).toUpperCase() + item.confidence.slice(1)}
+                          </Text>
+                        </View>
                       ) : null}
                     </View>
 
                     {item.brandMaker ? (
-                      <Text
-                        style={[reviewStyles.itemMeta, { color: colors.mutedForeground }]}
-                        numberOfLines={1}
-                      >
+                      <Text style={[revStyles.meta, { color: colors.mutedForeground }]} numberOfLines={1}>
                         {item.brandMaker}
                       </Text>
                     ) : null}
 
                     {item.description ? (
-                      <Text
-                        style={[reviewStyles.itemDesc, { color: colors.mutedForeground }]}
-                        numberOfLines={2}
-                      >
+                      <Text style={[revStyles.desc, { color: colors.mutedForeground }]} numberOfLines={2}>
                         {item.description}
                       </Text>
                     ) : null}
 
-                    <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginTop: 2 }}>
-                      {item.confidence ? (
-                        <View
-                          style={[reviewStyles.confidenceBadge, { borderColor: confidenceColor }]}
-                        >
-                          <Text style={[reviewStyles.confidenceText, { color: confidenceColor }]}>
-                            {item.confidence.charAt(0).toUpperCase() + item.confidence.slice(1)} confidence
-                          </Text>
-                        </View>
-                      ) : null}
-                      {item.estimatedPrice != null ? (
-                        <Text style={[reviewStyles.itemPrice, { color: colors.primary }]}>
-                          £{item.estimatedPrice.toLocaleString("en-GB")}
-                        </Text>
-                      ) : null}
-                    </View>
+                    {item.estimatedPrice != null ? (
+                      <Text style={[revStyles.price, { color: colors.foreground }]}>
+                        {formatCurrency(item.estimatedPrice)}
+                      </Text>
+                    ) : null}
                   </View>
 
-                  <View style={reviewStyles.actionCol}>
+                  {/* Actions */}
+                  <View style={revStyles.actionCol}>
                     <Pressable
                       onPress={() => handleDiscardItem(index)}
                       disabled={isSaving}
                       hitSlop={4}
                       style={({ pressed }) => [
-                        reviewStyles.actionBtn,
-                        {
-                          backgroundColor: colors.secondary,
-                          borderRadius: 8,
-                          opacity: pressed || isSaving ? 0.6 : 1,
-                        },
+                        revStyles.actionBtn,
+                        { backgroundColor: colors.secondary, borderRadius: 8, opacity: pressed || isSaving ? 0.6 : 1 },
                       ]}
                     >
                       <Feather name="x" size={15} color={colors.mutedForeground} />
@@ -539,12 +523,8 @@ export default function ScanScreen() {
                       disabled={isSaving}
                       hitSlop={4}
                       style={({ pressed }) => [
-                        reviewStyles.actionBtn,
-                        {
-                          backgroundColor: colors.primary,
-                          borderRadius: 8,
-                          opacity: pressed || isSaving ? 0.7 : 1,
-                        },
+                        revStyles.actionBtn,
+                        { backgroundColor: colors.primary, borderRadius: 8, opacity: pressed || isSaving ? 0.7 : 1 },
                       ]}
                     >
                       {isSaving ? (
@@ -559,24 +539,20 @@ export default function ScanScreen() {
             }}
           />
 
+          {/* Save all bar */}
           <View
             style={[
-              reviewStyles.saveAllBar,
-              {
-                backgroundColor: colors.card,
-                borderTopColor: colors.border,
-                paddingBottom: insets.bottom + 12,
-              },
+              revStyles.saveAllBar,
+              { backgroundColor: "#FFFFFF", borderTopColor: colors.border, paddingBottom: insets.bottom + 12 },
             ]}
           >
             <Pressable
               onPress={() => void handleSaveAll()}
               disabled={scanStatus === "saving"}
               style={({ pressed }) => [
-                reviewStyles.saveAllBtn,
+                revStyles.saveAllBtn,
                 {
-                  backgroundColor:
-                    scanStatus === "saving" ? colors.muted : colors.primary,
+                  backgroundColor: scanStatus === "saving" ? colors.muted : colors.primary,
                   borderRadius: colors.radius,
                   opacity: pressed ? 0.85 : 1,
                 },
@@ -587,7 +563,7 @@ export default function ScanScreen() {
               ) : (
                 <Feather name="check-circle" size={18} color={colors.primaryForeground} />
               )}
-              <Text style={[reviewStyles.saveAllText, { color: colors.primaryForeground }]}>
+              <Text style={[revStyles.saveAllText, { color: colors.primaryForeground }]}>
                 {scanStatus === "saving"
                   ? "Saving…"
                   : `Save all ${detectedItems.length} item${detectedItems.length !== 1 ? "s" : ""}`}
@@ -599,7 +575,7 @@ export default function ScanScreen() {
     );
   }
 
-  // ── Main scan screen ───────────────────────────────────────────────────────
+  // ── Main scan screen ──────────────────────────────────────────────────────────
 
   const isScanning = scanStatus === "scanning";
   const canScan =
@@ -612,16 +588,11 @@ export default function ScanScreen() {
     <>
       <Stack.Screen options={{ title: "Scan items" }} />
       <ScrollView
-        contentContainerStyle={[
-          styles.scroll,
-          { paddingBottom: insets.bottom + 32 },
-        ]}
+        contentContainerStyle={[styles.scroll, { paddingBottom: insets.bottom + 32 }]}
       >
-        {/* Scan mode selection */}
+        {/* Scan mode cards */}
         <View style={styles.section}>
-          <Text style={[styles.sectionTitle, { color: colors.mutedForeground }]}>
-            SCAN TYPE
-          </Text>
+          <Text style={[styles.sectionLabel, { color: colors.mutedForeground }]}>SCAN TYPE</Text>
           {SCAN_MODES.map((m) => (
             <Pressable
               key={m.mode}
@@ -634,34 +605,23 @@ export default function ScanScreen() {
               style={({ pressed }) => [
                 styles.modeCard,
                 {
-                  backgroundColor:
-                    selectedMode === m.mode ? colors.primary : colors.card,
-                  borderColor:
-                    selectedMode === m.mode ? colors.primary : colors.border,
+                  backgroundColor: selectedMode === m.mode ? colors.primary : colors.card,
+                  borderColor: selectedMode === m.mode ? colors.primary : colors.border,
                   borderRadius: colors.radius,
-                  opacity: m.comingSoon ? 0.55 : pressed ? 0.9 : 1,
+                  opacity: m.comingSoon ? 0.5 : pressed ? 0.9 : 1,
                 },
               ]}
             >
               <View
                 style={[
-                  styles.modeIconWrap,
-                  {
-                    backgroundColor:
-                      selectedMode === m.mode
-                        ? "rgba(255,255,255,0.2)"
-                        : colors.secondary,
-                  },
+                  styles.modeIcon,
+                  { backgroundColor: selectedMode === m.mode ? "rgba(255,255,255,0.2)" : colors.secondary },
                 ]}
               >
                 <Feather
                   name={m.icon}
                   size={20}
-                  color={
-                    selectedMode === m.mode
-                      ? colors.primaryForeground
-                      : colors.primary
-                  }
+                  color={selectedMode === m.mode ? colors.primaryForeground : colors.primary}
                 />
               </View>
               <View style={{ flex: 1, gap: 2 }}>
@@ -669,33 +629,23 @@ export default function ScanScreen() {
                   <Text
                     style={[
                       styles.modeTitle,
-                      {
-                        color:
-                          selectedMode === m.mode
-                            ? colors.primaryForeground
-                            : colors.foreground,
-                      },
+                      { color: selectedMode === m.mode ? colors.primaryForeground : colors.foreground },
                     ]}
                   >
                     {m.title}
                   </Text>
                   {m.comingSoon && (
-                    <View style={[styles.comingSoonBadge, { backgroundColor: colors.muted }]}>
-                      <Text style={[styles.comingSoonText, { color: colors.mutedForeground }]}>
-                        Soon
+                    <View style={[styles.soonBadge, { backgroundColor: colors.muted }]}>
+                      <Text style={{ fontSize: 9, fontFamily: "Inter_600SemiBold", color: colors.mutedForeground }}>
+                        SOON
                       </Text>
                     </View>
                   )}
                 </View>
                 <Text
                   style={[
-                    styles.modeSubtitle,
-                    {
-                      color:
-                        selectedMode === m.mode
-                          ? "rgba(255,255,255,0.75)"
-                          : colors.mutedForeground,
-                    },
+                    styles.modeSub,
+                    { color: selectedMode === m.mode ? "rgba(255,255,255,0.75)" : colors.mutedForeground },
                   ]}
                 >
                   {m.subtitle}
@@ -703,12 +653,7 @@ export default function ScanScreen() {
                 <Text
                   style={[
                     styles.modeCredit,
-                    {
-                      color:
-                        selectedMode === m.mode
-                          ? "rgba(255,255,255,0.6)"
-                          : colors.mutedForeground,
-                    },
+                    { color: selectedMode === m.mode ? "rgba(255,255,255,0.6)" : colors.mutedForeground },
                   ]}
                 >
                   {m.creditLabel}
@@ -718,37 +663,31 @@ export default function ScanScreen() {
           ))}
         </View>
 
-        {/* Property + room selectors */}
+        {/* Location */}
         {selectedMode && selectedMode !== "video_room" && (
           <View style={styles.section}>
-            <Text style={[styles.sectionTitle, { color: colors.mutedForeground }]}>
-              LOCATION
-            </Text>
+            <Text style={[styles.sectionLabel, { color: colors.mutedForeground }]}>LOCATION</Text>
 
             {paramFileId ? (
-              <View style={{ gap: 6 }}>
-                <Text style={{ fontSize: 12, fontFamily: "Inter_500Medium", color: colors.mutedForeground }}>
-                  Property
-                </Text>
-                <View style={[styles.chip, { backgroundColor: colors.primary, borderRadius: 20, alignSelf: "flex-start" }]}>
-                  <Text style={{ fontSize: 13, fontFamily: "Inter_500Medium", color: colors.primaryForeground }}>
+              <View style={{ gap: 4 }}>
+                <Text style={[styles.fieldLabel, { color: colors.mutedForeground }]}>Property</Text>
+                <View style={[styles.chip, { backgroundColor: colors.primary, alignSelf: "flex-start" }]}>
+                  <Text style={[styles.chipText, { color: colors.primaryForeground }]}>
                     {paramFileName ?? paramFileId}
                   </Text>
                 </View>
               </View>
             ) : (
-              <View style={{ gap: 6 }}>
-                <Text style={{ fontSize: 12, fontFamily: "Inter_500Medium", color: colors.mutedForeground }}>
-                  Property
-                </Text>
+              <View style={{ gap: 4 }}>
+                <Text style={[styles.fieldLabel, { color: colors.mutedForeground }]}>Property</Text>
                 <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
                   {(properties ?? []).map((p) => (
                     <Pressable
                       key={p.id}
                       onPress={() => { setSelectedFileId(p.id); setSelectedRoomId(""); }}
-                      style={[styles.chip, { backgroundColor: selectedFileId === p.id ? colors.primary : colors.secondary, borderRadius: 20 }]}
+                      style={[styles.chip, { backgroundColor: selectedFileId === p.id ? colors.primary : colors.secondary }]}
                     >
-                      <Text style={{ fontSize: 13, fontFamily: "Inter_500Medium", color: selectedFileId === p.id ? colors.primaryForeground : colors.foreground }}>
+                      <Text style={[styles.chipText, { color: selectedFileId === p.id ? colors.primaryForeground : colors.foreground }]}>
                         {p.name}
                       </Text>
                     </Pressable>
@@ -759,29 +698,25 @@ export default function ScanScreen() {
 
             {selectedFileId && (
               paramRoomId ? (
-                <View style={{ gap: 6 }}>
-                  <Text style={{ fontSize: 12, fontFamily: "Inter_500Medium", color: colors.mutedForeground }}>
-                    Room
-                  </Text>
-                  <View style={[styles.chip, { backgroundColor: colors.primary, borderRadius: 20, alignSelf: "flex-start" }]}>
-                    <Text style={{ fontSize: 13, fontFamily: "Inter_500Medium", color: colors.primaryForeground }}>
+                <View style={{ gap: 4 }}>
+                  <Text style={[styles.fieldLabel, { color: colors.mutedForeground }]}>Room</Text>
+                  <View style={[styles.chip, { backgroundColor: colors.primary, alignSelf: "flex-start" }]}>
+                    <Text style={[styles.chipText, { color: colors.primaryForeground }]}>
                       {paramRoomName ?? paramRoomId}
                     </Text>
                   </View>
                 </View>
               ) : (
-                <View style={{ gap: 6 }}>
-                  <Text style={{ fontSize: 12, fontFamily: "Inter_500Medium", color: colors.mutedForeground }}>
-                    Room
-                  </Text>
+                <View style={{ gap: 4 }}>
+                  <Text style={[styles.fieldLabel, { color: colors.mutedForeground }]}>Room</Text>
                   <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
                     {(rooms ?? []).map((r) => (
                       <Pressable
                         key={r.id}
                         onPress={() => setSelectedRoomId(r.id)}
-                        style={[styles.chip, { backgroundColor: selectedRoomId === r.id ? colors.primary : colors.secondary, borderRadius: 20 }]}
+                        style={[styles.chip, { backgroundColor: selectedRoomId === r.id ? colors.primary : colors.secondary }]}
                       >
-                        <Text style={{ fontSize: 13, fontFamily: "Inter_500Medium", color: selectedRoomId === r.id ? colors.primaryForeground : colors.foreground }}>
+                        <Text style={[styles.chipText, { color: selectedRoomId === r.id ? colors.primaryForeground : colors.foreground }]}>
                           {r.name}
                         </Text>
                       </Pressable>
@@ -796,10 +731,8 @@ export default function ScanScreen() {
         {/* Photo picker */}
         {selectedMode && selectedMode !== "video_room" && (
           <View style={styles.section}>
-            <Text style={[styles.sectionTitle, { color: colors.mutedForeground }]}>
-              {selectedMode === "multi_photo_room"
-                ? `PHOTOS (max ${MAX_MULTI_PHOTO_IMAGES})`
-                : "PHOTO"}
+            <Text style={[styles.sectionLabel, { color: colors.mutedForeground }]}>
+              {selectedMode === "multi_photo_room" ? `PHOTOS (max ${MAX_MULTI_PHOTO_IMAGES})` : "PHOTO"}
             </Text>
 
             {images.length > 0 ? (
@@ -829,8 +762,8 @@ export default function ScanScreen() {
                       { borderColor: colors.border, borderRadius: colors.radius, opacity: pressed ? 0.8 : 1 },
                     ]}
                   >
-                    <Feather name="plus" size={16} color={colors.primary} />
-                    <Text style={{ fontSize: 13, fontFamily: "Inter_500Medium", color: colors.primary }}>
+                    <Feather name="plus" size={15} color={colors.primary} />
+                    <Text style={[styles.addMoreText, { color: colors.primary }]}>
                       Add more ({images.length}/{MAX_MULTI_PHOTO_IMAGES})
                     </Text>
                   </Pressable>
@@ -846,9 +779,7 @@ export default function ScanScreen() {
                   ]}
                 >
                   <Feather name="camera" size={20} color={colors.primary} />
-                  <Text style={{ fontSize: 14, fontFamily: "Inter_500Medium", color: colors.primary }}>
-                    Camera
-                  </Text>
+                  <Text style={[styles.photoBtnText, { color: colors.primary }]}>Camera</Text>
                 </Pressable>
                 <Pressable
                   onPress={pickImages}
@@ -858,9 +789,7 @@ export default function ScanScreen() {
                   ]}
                 >
                   <Feather name="image" size={20} color={colors.primary} />
-                  <Text style={{ fontSize: 14, fontFamily: "Inter_500Medium", color: colors.primary }}>
-                    Library
-                  </Text>
+                  <Text style={[styles.photoBtnText, { color: colors.primary }]}>Library</Text>
                 </Pressable>
               </View>
             )}
@@ -869,35 +798,20 @@ export default function ScanScreen() {
 
         {/* Video coming soon */}
         {selectedMode === "video_room" && (
-          <View
-            style={[
-              styles.comingSoonCard,
-              { backgroundColor: colors.card, borderColor: colors.border, borderRadius: colors.radius },
-            ]}
-          >
+          <View style={[styles.comingSoonCard, { backgroundColor: colors.card, borderColor: colors.border, borderRadius: colors.radius }]}>
             <Feather name="video" size={32} color={colors.border} />
-            <Text style={[styles.comingSoonCardTitle, { color: colors.foreground }]}>
-              Video scan coming soon
-            </Text>
-            <Text style={[styles.comingSoonCardSub, { color: colors.mutedForeground }]}>
-              This mode will extract representative frames from a room walkthrough
-              video and avoid duplicate items automatically.
+            <Text style={[styles.comingSoonTitle, { color: colors.foreground }]}>Video scan coming soon</Text>
+            <Text style={[styles.comingSoonSub, { color: colors.mutedForeground }]}>
+              This mode will extract representative frames from a room walkthrough video and avoid duplicate items automatically.
             </Text>
           </View>
         )}
 
-        {/* Scan error */}
+        {/* Inline error */}
         {scanError && (
-          <View
-            style={[
-              styles.errorCard,
-              { backgroundColor: colors.card, borderColor: colors.border, borderRadius: colors.radius },
-            ]}
-          >
-            <Feather name="alert-circle" size={16} color={colors.warning} />
-            <Text style={[styles.errorText, { color: colors.mutedForeground }]}>
-              {scanError}
-            </Text>
+          <View style={[styles.errorCard, { backgroundColor: "#FEF2F2", borderColor: "#FCA5A5", borderRadius: colors.radius }]}>
+            <Feather name="alert-circle" size={15} color="#DC2626" />
+            <Text style={[styles.errorText, { color: "#991B1B" }]}>{scanError}</Text>
           </View>
         )}
 
@@ -918,23 +832,12 @@ export default function ScanScreen() {
             {isScanning ? (
               <>
                 <ActivityIndicator color={colors.primaryForeground} />
-                <Text style={[styles.scanBtnText, { color: colors.primaryForeground }]}>
-                  Scanning…
-                </Text>
+                <Text style={[styles.scanBtnText, { color: colors.primaryForeground }]}>Scanning…</Text>
               </>
             ) : (
               <>
-                <Feather
-                  name="zap"
-                  size={18}
-                  color={!canScan ? colors.mutedForeground : colors.primaryForeground}
-                />
-                <Text
-                  style={[
-                    styles.scanBtnText,
-                    { color: !canScan ? colors.mutedForeground : colors.primaryForeground },
-                  ]}
-                >
+                <Feather name="zap" size={18} color={!canScan ? colors.mutedForeground : colors.primaryForeground} />
+                <Text style={[styles.scanBtnText, { color: !canScan ? colors.mutedForeground : colors.primaryForeground }]}>
                   Start scan
                 </Text>
               </>
@@ -943,13 +846,11 @@ export default function ScanScreen() {
         )}
 
         {!selectedMode && (
-          <View style={{ paddingTop: 8 }}>
-            <EmptyState
-              icon="zap"
-              title="Choose a scan type above"
-              subtitle="AI scan will detect and value your items automatically once connected"
-            />
-          </View>
+          <EmptyState
+            icon="zap"
+            title="Choose a scan type above"
+            subtitle="AI scan will detect and value your items automatically once connected"
+          />
         )}
       </ScrollView>
     </>
@@ -959,15 +860,16 @@ export default function ScanScreen() {
 const styles = StyleSheet.create({
   scroll: { padding: 16, gap: 20 },
   section: { gap: 12 },
-  sectionTitle: { fontSize: 11, fontFamily: "Inter_600SemiBold", letterSpacing: 0.8 },
+  sectionLabel: { fontSize: 11, fontFamily: "Inter_600SemiBold", letterSpacing: 0.8 },
+  fieldLabel: { fontSize: 12, fontFamily: "Inter_500Medium" },
   modeCard: { borderWidth: 1, padding: 14, flexDirection: "row", alignItems: "flex-start", gap: 12 },
-  modeIconWrap: { width: 40, height: 40, borderRadius: 10, alignItems: "center", justifyContent: "center" },
+  modeIcon: { width: 40, height: 40, borderRadius: 10, alignItems: "center", justifyContent: "center" },
   modeTitle: { fontSize: 15, fontFamily: "Inter_600SemiBold" },
-  modeSubtitle: { fontSize: 13, fontFamily: "Inter_400Regular", lineHeight: 18 },
+  modeSub: { fontSize: 13, fontFamily: "Inter_400Regular", lineHeight: 18 },
   modeCredit: { fontSize: 11, fontFamily: "Inter_500Medium", marginTop: 2 },
-  comingSoonBadge: { borderRadius: 10, paddingHorizontal: 6, paddingVertical: 2 },
-  comingSoonText: { fontSize: 10, fontFamily: "Inter_500Medium" },
-  chip: { paddingHorizontal: 14, paddingVertical: 8 },
+  soonBadge: { borderRadius: 4, paddingHorizontal: 5, paddingVertical: 2 },
+  chip: { borderRadius: 20, paddingHorizontal: 14, paddingVertical: 8 },
+  chipText: { fontSize: 13, fontFamily: "Inter_500Medium" },
   photoThumb: { width: 100, height: 100 },
   removeThumb: {
     position: "absolute", top: 4, right: 4,
@@ -978,38 +880,33 @@ const styles = StyleSheet.create({
     flexDirection: "row", alignItems: "center", gap: 6,
     paddingHorizontal: 14, paddingVertical: 10, borderWidth: 1, alignSelf: "flex-start",
   },
-  photoBtn: {
-    flex: 1, flexDirection: "row", alignItems: "center",
-    justifyContent: "center", gap: 8, paddingVertical: 16, borderWidth: 1,
-  },
+  addMoreText: { fontSize: 13, fontFamily: "Inter_500Medium" },
+  photoBtn: { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, paddingVertical: 16, borderWidth: 1 },
+  photoBtnText: { fontSize: 14, fontFamily: "Inter_500Medium" },
   comingSoonCard: { borderWidth: 1, padding: 24, alignItems: "center", gap: 12 },
-  comingSoonCardTitle: { fontSize: 16, fontFamily: "Inter_600SemiBold", textAlign: "center" },
-  comingSoonCardSub: { fontSize: 13, fontFamily: "Inter_400Regular", textAlign: "center", lineHeight: 20 },
-  errorCard: { borderWidth: 1, padding: 14, flexDirection: "row", alignItems: "flex-start", gap: 10 },
+  comingSoonTitle: { fontSize: 16, fontFamily: "Inter_600SemiBold", textAlign: "center" },
+  comingSoonSub: { fontSize: 13, fontFamily: "Inter_400Regular", textAlign: "center", lineHeight: 20 },
+  errorCard: { borderWidth: 1, padding: 12, flexDirection: "row", alignItems: "flex-start", gap: 8 },
   errorText: { fontSize: 13, fontFamily: "Inter_400Regular", lineHeight: 18, flex: 1 },
   scanBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, paddingVertical: 15, marginTop: 4 },
   scanBtnText: { fontSize: 16, fontFamily: "Inter_600SemiBold" },
 });
 
-const reviewStyles = StyleSheet.create({
-  header: { fontSize: 13, fontFamily: "Inter_400Regular", marginBottom: 2 },
-  errorBanner: {
-    borderWidth: 1, borderRadius: 8, padding: 10,
-    flexDirection: "row", alignItems: "flex-start", gap: 8,
-  },
-  bannerText: { fontSize: 12, fontFamily: "Inter_400Regular", lineHeight: 17, flex: 1 },
+const revStyles = StyleSheet.create({
+  headerNote: { fontSize: 13, fontFamily: "Inter_400Regular" },
+  failureBanner: { borderWidth: 1, borderRadius: 8, padding: 10, flexDirection: "row", alignItems: "flex-start", gap: 8 },
   card: { borderWidth: 1, flexDirection: "row", alignItems: "stretch", overflow: "hidden" },
-  thumb: { width: 80, height: "100%" as unknown as number },
-  cardBody: { flex: 1, padding: 12, gap: 4 },
-  itemName: { fontSize: 15, fontFamily: "Inter_600SemiBold", lineHeight: 20 },
-  itemChip: { fontSize: 11, fontFamily: "Inter_500Medium", borderRadius: 10, paddingHorizontal: 8, paddingVertical: 2, overflow: "hidden" },
-  itemMeta: { fontSize: 12, fontFamily: "Inter_400Regular" },
-  itemDesc: { fontSize: 12, fontFamily: "Inter_400Regular", lineHeight: 16 },
-  confidenceBadge: { borderWidth: 1, borderRadius: 10, paddingHorizontal: 6, paddingVertical: 1 },
-  confidenceText: { fontSize: 10, fontFamily: "Inter_500Medium" },
-  itemPrice: { fontSize: 14, fontFamily: "Inter_600SemiBold" },
-  actionCol: { paddingVertical: 12, paddingRight: 12, gap: 8, alignItems: "center", justifyContent: "center" },
-  actionBtn: { width: 36, height: 36, alignItems: "center", justifyContent: "center" },
+  thumb: { width: 76, height: 110 },
+  thumbPlaceholder: { width: 76, alignItems: "center", justifyContent: "center" },
+  cardBody: { flex: 1, padding: 10, gap: 4 },
+  itemName: { fontSize: 14, fontFamily: "Inter_600SemiBold", lineHeight: 19 },
+  pill: { borderRadius: 10, paddingHorizontal: 8, paddingVertical: 2 },
+  pillText: { fontSize: 11, fontFamily: "Inter_500Medium" },
+  meta: { fontSize: 12, fontFamily: "Inter_400Regular" },
+  desc: { fontSize: 12, fontFamily: "Inter_400Regular", lineHeight: 16 },
+  price: { fontSize: 14, fontFamily: "Inter_600SemiBold", marginTop: 2 },
+  actionCol: { paddingVertical: 10, paddingRight: 10, gap: 8, alignItems: "center", justifyContent: "center" },
+  actionBtn: { width: 34, height: 34, alignItems: "center", justifyContent: "center" },
   saveAllBar: { position: "absolute", bottom: 0, left: 0, right: 0, borderTopWidth: 1, padding: 16 },
   saveAllBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, paddingVertical: 14 },
   saveAllText: { fontSize: 15, fontFamily: "Inter_600SemiBold" },

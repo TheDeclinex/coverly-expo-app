@@ -46,7 +46,8 @@ export interface ItemFormData {
   estimatedPrice?: number | null;
   unitEstimatedPrice?: number | null;
   quantity?: number | null;
-  confidence?: string | null;
+  /** Accepts a display label ("high"/"medium"/"low") or a numeric value 0–1. Converted to numeric before saving. */
+  confidence?: string | number | null;
   valuationBasis?: string | null;
   priceSourceType?: string | null;
   imageUrl?: string | null;
@@ -57,6 +58,24 @@ export interface ItemFormData {
   purchaseSource?: string | null;
   originalPurchasePrice?: number | null;
   purchaseYearApprox?: string | null;
+}
+
+/**
+ * Convert a confidence display label or float to a numeric value for the DB.
+ * inventory_items.confidence is a numeric column — never send a string.
+ */
+function confidenceLabelToNumber(v: string | number | null | undefined): number | null {
+  if (v === null || v === undefined) return null;
+  if (typeof v === "number") return Math.min(1, Math.max(0, v));
+  switch (v.toLowerCase().trim()) {
+    case "high":   return 0.9;
+    case "medium": return 0.6;
+    case "low":    return 0.3;
+    default: {
+      const n = parseFloat(v);
+      return isNaN(n) ? null : Math.min(1, Math.max(0, n));
+    }
+  }
 }
 
 function generateItemId(): string {
@@ -85,7 +104,7 @@ export function buildItemInsertPayload(form: ItemFormData): InventoryItem {
     quantity_estimate: null,
     valuation_basis: form.valuationBasis ?? null,
     price_source_type: form.priceSourceType ?? "estimated_gpt",
-    confidence: form.confidence ?? null,
+    confidence: confidenceLabelToNumber(form.confidence),
     image_url: form.imageUrl ?? null,
     photo_url: form.photoUrl ?? null,
     brand_maker: form.brandMaker ?? null,
