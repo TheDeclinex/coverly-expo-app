@@ -1,4 +1,4 @@
-import type { InventoryItem } from "@/types";
+import type { InventoryItem, ItemPhoto } from "@/types";
 
 /**
  * Central mapper for converting form data into a Supabase inventory_items insert payload.
@@ -52,6 +52,8 @@ export interface ItemFormData {
   priceSourceType?: string | null;
   imageUrl?: string | null;
   photoUrl?: string | null;
+  /** Ordered array of item photos with captions. First entry is the cover/primary photo. */
+  photos?: ItemPhoto[] | null;
   brandMaker?: string | null;
   modelSeries?: string | null;
   conditionLabel?: string | null;
@@ -146,6 +148,7 @@ export function buildItemInsertPayload(form: ItemFormData): InventoryItem {
 export function buildItemUpdatePayload(
   form: Omit<ItemFormData, "fileId">
 ): Partial<InventoryItem> {
+  const primaryUrl = form.photos?.[0]?.url ?? form.imageUrl ?? form.photoUrl ?? null;
   return {
     room_id: form.roomId || null,
     room: form.roomName?.trim() || null,
@@ -158,8 +161,9 @@ export function buildItemUpdatePayload(
     quantity: form.quantity ?? 1,
     valuation_basis: form.valuationBasis ?? null,
     price_source_type: form.priceSourceType ?? null,
-    image_url: form.imageUrl ?? null,
-    photo_url: form.photoUrl ?? null,
+    image_url: primaryUrl,
+    photo_url: primaryUrl,
+    attachments: form.photos && form.photos.length > 0 ? form.photos : null,
     brand_maker: form.brandMaker ?? null,
     model_series: form.modelSeries ?? null,
     condition_label: form.conditionLabel ?? null,

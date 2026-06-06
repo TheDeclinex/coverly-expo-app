@@ -1,9 +1,7 @@
 import { Feather } from "@expo/vector-icons";
-import * as Haptics from "expo-haptics";
-import * as ImagePicker from "expo-image-picker";
 import { Stack, router, useLocalSearchParams } from "expo-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -19,12 +17,15 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { CategoryPicker } from "@/components/CategoryPicker";
-import { ExpandableImage } from "@/components/ExpandableImage";
+import {
+  DraggablePhotoStrip,
+  type PhotoEntry,
+} from "@/components/DraggablePhotoStrip";
 import { ErrorState } from "@/components/ErrorState";
 import { LoadingState } from "@/components/LoadingState";
 import { useAuth } from "@/context/AuthContext";
 import { useColors } from "@/hooks/useColors";
-import { getItemPhoto } from "@/lib/inventory-mappers";
+import { getItemPhotos } from "@/lib/inventory-mappers";
 import { buildItemUpdatePayload } from "@/lib/item-insert-helpers";
 import { supabase } from "@/lib/supabase";
 import type { InventoryItem, InventoryRoom } from "@/types";
@@ -113,8 +114,7 @@ export default function EditItemScreen() {
   const [estimatedPrice, setEstimatedPrice] = useState("");
   const [quantity, setQuantity] = useState("1");
   const [selectedRoomId, setSelectedRoomId] = useState("");
-  const [photoUri, setPhotoUri] = useState<string | null>(null);
-  const [existingPhotoUrl, setExistingPhotoUrl] = useState<string | null>(null);
+  const [photos, setPhotos] = useState<PhotoEntry[]>([]);
   const [saving, setSaving] = useState(false);
   const [hydrated, setHydrated] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -149,8 +149,8 @@ export default function EditItemScreen() {
       );
       setQuantity(item.quantity != null ? String(item.quantity) : "1");
       setSelectedRoomId(item.room_id ?? "");
-      const photo = getItemPhoto(item);
-      setExistingPhotoUrl(photo);
+      const existingPhotos = getItemPhotos(item);
+      setPhotos(existingPhotos);
       setHydrated(true);
     }
   }, [item, hydrated]);
@@ -170,39 +170,6 @@ export default function EditItemScreen() {
     enabled: !!session && !!item?.file_id,
   });
 
-  const pickPhoto = async () => {
-    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (status !== "granted") {
-      Alert.alert("Permission needed", "Allow photo library access.");
-      return;
-    }
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      allowsEditing: true,
-      aspect: [4, 3],
-      quality: 0.8,
-    });
-    if (!result.canceled && result.assets[0]) {
-      setPhotoUri(result.assets[0].uri);
-    }
-  };
-
-  const takePhoto = async () => {
-    const { status } = await ImagePicker.requestCameraPermissionsAsync();
-    if (status !== "granted") {
-      Alert.alert("Permission needed", "Allow camera access.");
-      return;
-    }
-    const result = await ImagePicker.launchCameraAsync({
-      allowsEditing: true,
-      aspect: [4, 3],
-      quality: 0.8,
-    });
-    if (!result.canceled && result.assets[0]) {
-      setPhotoUri(result.assets[0].uri);
-    }
-  };
-
   const uploadPhoto = async (
     uri: string,
     fileId: string
@@ -217,28 +184,25 @@ export default function EditItemScreen() {
       const response = await fetch(uri);
       const blob = await response.blob();
       const filename = uri.split("/").pop()?.split("?")[0] ?? "";
-      const ext = filename.includes(".") ? (filename.split(".").pop()?.toLowerCase() ?? "jpeg") : "jpeg";
+      const ext = filename.includes(".")
+        ? (filename.split(".").pop()?.toLowerCase() ?? "jpeg")
+        : "jpeg";
       const path = `${userId}/${fileId}/${Date.now()}.${ext}`;
 
-      const uploadDiag = {
-        supabase_host: "krbrmskfvpjukcbkbegc.supabase.co",
+      console.log("[EditItem] Upload attempt:", {
         bucket: ITEM_PHOTOS_BUCKET,
         path,
         email,
         user_id: userId,
         has_access_token: hasToken,
-      };
-      console.log("[EditItem] Upload attempt:", uploadDiag);
+      });
 
       const { data: uploadData, error: uploadError } = await supabase.storage
         .from(ITEM_PHOTOS_BUCKET)
         .upload(path, blob, { contentType: `image/${ext}`, upsert: false });
 
       if (uploadError) {
-        const diagStr = Object.entries(uploadDiag)
-          .map(([k, v]) => `${k}: ${v}`)
-          .join(" | ");
-        console.warn("[EditItem] Photo upload failed:", uploadError.message, "|", diagStr);
+        console.warn("[EditItem] Photo upload failed:", uploadError.message);
         return {
           url: null,
           uploadErrMsg: `${uploadError.message} [bucket=${ITEM_PHOTOS_BUCKET} path=${path} auth=${hasToken} user=${userId}]`,
@@ -256,6 +220,9 @@ export default function EditItemScreen() {
     }
   };
 
+  const isLocalUri = (url: string) =>
+    url.startsWith("file://") || url.startsWith("ph://") || url.startsWith("content://");
+
   const handleSave = async () => {
     setErrorMsg(null);
 
@@ -269,19 +236,31 @@ export default function EditItemScreen() {
     }
 
     setSaving(true);
+    setPhotoWarning(null);
 
     try {
-      setPhotoWarning(null);
-      let uploadedPhotoUrl: string | null = existingPhotoUrl;
-      if (photoUri && item?.file_id) {
-        const { url, uploadErrMsg } = await uploadPhoto(photoUri, item.file_id);
-        if (url) {
-          uploadedPhotoUrl = url;
+      const fileId = item?.file_id ?? "";
+
+      const uploadedPhotos: PhotoEntry[] = [];
+      const failedUploads: string[] = [];
+
+      for (const photo of photos) {
+        if (isLocalUri(photo.url)) {
+          const { url, uploadErrMsg } = await uploadPhoto(photo.url, fileId);
+          if (url) {
+            uploadedPhotos.push({ url, caption: photo.caption });
+          } else {
+            failedUploads.push(uploadErrMsg ?? "unknown error");
+          }
         } else {
-          setPhotoWarning(
-            `Photo upload failed: ${uploadErrMsg ?? "unknown error"} — existing photo kept.`
-          );
+          uploadedPhotos.push(photo);
         }
+      }
+
+      if (failedUploads.length > 0) {
+        setPhotoWarning(
+          `${failedUploads.length} photo(s) failed to upload and were skipped.`
+        );
       }
 
       const price = estimatedPrice
@@ -299,8 +278,7 @@ export default function EditItemScreen() {
         category,
         estimatedPrice: price,
         quantity: qty,
-        imageUrl: uploadedPhotoUrl,
-        photoUrl: uploadedPhotoUrl,
+        photos: uploadedPhotos.length > 0 ? uploadedPhotos : null,
       });
 
       console.log("[EditItem] Update payload keys:", Object.keys(updates));
@@ -340,6 +318,10 @@ export default function EditItemScreen() {
     }
   };
 
+  const handlePhotosChange = useCallback((next: PhotoEntry[]) => {
+    setPhotos(next);
+  }, []);
+
   if (itemLoading) return <LoadingState />;
   if (itemError)
     return (
@@ -350,7 +332,6 @@ export default function EditItemScreen() {
       />
     );
 
-  const displayPhoto = photoUri ?? existingPhotoUrl;
   const originalRoomId = item?.room_id;
   const isMoving = selectedRoomId && selectedRoomId !== originalRoomId;
 
@@ -495,120 +476,19 @@ export default function EditItemScreen() {
             </ScrollView>
           </View>
 
-          {/* PHOTO */}
+          {/* PHOTOS */}
           <View style={styles.section}>
             <Text style={[styles.sectionTitle, { color: colors.mutedForeground }]}>
-              PHOTO
+              PHOTOS
             </Text>
-
-            {displayPhoto ? (
-              <View style={{ gap: 10 }}>
-                <ExpandableImage
-                  uri={displayPhoto}
-                  style={[styles.photoPreview, { borderRadius: colors.radius }]}
-                  contentFit="cover"
-                />
-                <View style={{ flexDirection: "row", gap: 10 }}>
-                  <Pressable
-                    onPress={pickPhoto}
-                    style={({ pressed }) => [
-                      styles.photoActionBtn,
-                      {
-                        backgroundColor: colors.secondary,
-                        borderRadius: colors.radius,
-                        opacity: pressed ? 0.8 : 1,
-                      },
-                    ]}
-                  >
-                    <Feather name="image" size={14} color={colors.primary} />
-                    <Text
-                      style={[
-                        styles.photoActionText,
-                        { color: colors.primary },
-                      ]}
-                    >
-                      Change
-                    </Text>
-                  </Pressable>
-                  <Pressable
-                    onPress={() => {
-                      setPhotoUri(null);
-                      setExistingPhotoUrl(null);
-                    }}
-                    style={({ pressed }) => [
-                      styles.photoActionBtn,
-                      {
-                        backgroundColor: colors.secondary,
-                        borderRadius: colors.radius,
-                        opacity: pressed ? 0.8 : 1,
-                      },
-                    ]}
-                  >
-                    <Feather name="x" size={14} color={colors.destructive} />
-                    <Text
-                      style={[
-                        styles.photoActionText,
-                        { color: colors.destructive },
-                      ]}
-                    >
-                      Remove
-                    </Text>
-                  </Pressable>
-                </View>
-              </View>
-            ) : (
-              <View style={{ flexDirection: "row", gap: 10 }}>
-                <Pressable
-                  onPress={takePhoto}
-                  style={({ pressed }) => [
-                    styles.photoBtn,
-                    {
-                      backgroundColor: colors.card,
-                      borderColor: colors.border,
-                      borderRadius: colors.radius,
-                      opacity: pressed ? 0.8 : 1,
-                    },
-                  ]}
-                >
-                  <Feather name="camera" size={20} color={colors.primary} />
-                  <Text
-                    style={{
-                      fontSize: 14,
-                      fontFamily: "Inter_500Medium",
-                      color: colors.primary,
-                    }}
-                  >
-                    Camera
-                  </Text>
-                </Pressable>
-                <Pressable
-                  onPress={pickPhoto}
-                  style={({ pressed }) => [
-                    styles.photoBtn,
-                    {
-                      backgroundColor: colors.card,
-                      borderColor: colors.border,
-                      borderRadius: colors.radius,
-                      opacity: pressed ? 0.8 : 1,
-                    },
-                  ]}
-                >
-                  <Feather name="image" size={20} color={colors.primary} />
-                  <Text
-                    style={{
-                      fontSize: 14,
-                      fontFamily: "Inter_500Medium",
-                      color: colors.primary,
-                    }}
-                  >
-                    Library
-                  </Text>
-                </Pressable>
-              </View>
-            )}
+            <DraggablePhotoStrip
+              photos={photos}
+              onChange={handlePhotosChange}
+              colors={colors}
+            />
           </View>
 
-          {/* PHOTO WARNING BANNER */}
+          {/* PHOTO UPLOAD WARNING */}
           {photoWarning ? (
             <View
               style={[
@@ -620,7 +500,11 @@ export default function EditItemScreen() {
                 },
               ]}
             >
-              <Feather name="alert-triangle" size={14} color={colors.warning ?? "#F59E0B"} />
+              <Feather
+                name="alert-triangle"
+                size={14}
+                color={colors.warning ?? "#F59E0B"}
+              />
               <Text
                 style={{
                   fontSize: 13,
@@ -689,7 +573,7 @@ export default function EditItemScreen() {
                     color: colors.primaryForeground,
                   }}
                 >
-                  Save changes
+                  Save Changes
                 </Text>
               </>
             )}
@@ -710,27 +594,6 @@ const styles = StyleSheet.create({
   },
   chip: { paddingHorizontal: 14, paddingVertical: 8 },
   chipText: { fontSize: 13, fontFamily: "Inter_500Medium" },
-  photoPreview: { width: "100%", height: 200 },
-  photoActionBtn: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-  },
-  photoActionText: {
-    fontSize: 14,
-    fontFamily: "Inter_500Medium",
-  },
-  photoBtn: {
-    flex: 1,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 8,
-    paddingVertical: 16,
-    borderWidth: 1,
-  },
   moveNotice: {
     flexDirection: "row",
     alignItems: "center",

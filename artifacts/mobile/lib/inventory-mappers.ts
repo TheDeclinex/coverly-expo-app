@@ -1,4 +1,4 @@
-import type { InventoryItem } from "@/types";
+import type { InventoryItem, ItemPhoto } from "@/types";
 
 export function getItemPrice(item: InventoryItem): number {
   return item.estimated_price ?? item.unit_estimated_price ?? 0;
@@ -10,12 +10,28 @@ export function getItemTotalValue(item: InventoryItem): number {
   return price * qty;
 }
 
+export function getItemPhotos(item: InventoryItem): ItemPhoto[] {
+  if (Array.isArray(item.attachments) && item.attachments.length > 0) {
+    return item.attachments.filter(
+      (a): a is ItemPhoto =>
+        typeof a === "object" &&
+        a !== null &&
+        typeof (a as ItemPhoto).url === "string"
+    );
+  }
+  const url = item.image_url ?? item.photo_url ?? null;
+  if (url) return [{ url, caption: "" }];
+  return [];
+}
+
 export function getItemPhoto(item: InventoryItem): string | null {
+  const photos = getItemPhotos(item);
+  if (photos.length > 0) return photos[0].url;
   return item.image_url ?? item.photo_url ?? null;
 }
 
 export function hasPhoto(item: InventoryItem): boolean {
-  return !!(item.image_url || item.photo_url);
+  return getItemPhotos(item).length > 0;
 }
 
 export function hasValue(item: InventoryItem): boolean {

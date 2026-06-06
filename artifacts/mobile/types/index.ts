@@ -24,6 +24,11 @@ export interface InventoryRoom {
   archived_at: string | null;
 }
 
+export interface ItemPhoto {
+  url: string;
+  caption: string;
+}
+
 export interface InventoryItem {
   id: string;
   file_id: string;
@@ -49,7 +54,7 @@ export interface InventoryItem {
   original_purchase_price: number | null;
   purchase_year_approx: string | null;
   image_pin: unknown | null;
-  attachments: unknown | null;
+  attachments: ItemPhoto[] | null;
   // Optional — populated only if inventory_items.scan_date column exists in DB
   scan_date?: string | null;
 }
