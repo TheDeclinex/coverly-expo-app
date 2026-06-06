@@ -1,5 +1,4 @@
 import { Feather } from "@expo/vector-icons";
-import { Image } from "expo-image";
 import * as Haptics from "expo-haptics";
 import { Stack, router, useLocalSearchParams } from "expo-router";
 import { useQuery } from "@tanstack/react-query";
@@ -17,6 +16,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { EmptyState } from "@/components/EmptyState";
 import { ErrorState } from "@/components/ErrorState";
+import { ExpandableImage } from "@/components/ExpandableImage";
 import { LoadingState } from "@/components/LoadingState";
 import { useAuth } from "@/context/AuthContext";
 import { useColors } from "@/hooks/useColors";
@@ -54,13 +54,15 @@ function ItemCard({
         },
       ]}
     >
-      {imageUri ? (
-        <Image source={{ uri: imageUri }} style={styles.cardImage} contentFit="cover" />
-      ) : (
-        <View style={[styles.cardImagePlaceholder, { backgroundColor: colors.muted }]}>
-          <Feather name="package" size={22} color={colors.mutedForeground} />
-        </View>
-      )}
+      <ExpandableImage
+        uri={imageUri}
+        style={styles.cardImage}
+        contentFit="cover"
+        placeholderIcon="package"
+        placeholderIconSize={22}
+        placeholderIconColor={colors.mutedForeground}
+        placeholderBackgroundColor={colors.muted}
+      />
       <View style={styles.cardBody}>
         <Text
           style={[styles.cardName, { color: colors.foreground }]}

@@ -1,5 +1,4 @@
 import { Feather } from "@expo/vector-icons";
-import { Image } from "expo-image";
 import { Stack, router, useLocalSearchParams } from "expo-router";
 import { useQuery } from "@tanstack/react-query";
 import React from "react";
@@ -14,6 +13,7 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { ErrorState } from "@/components/ErrorState";
+import { ExpandableImage } from "@/components/ExpandableImage";
 import { LoadingState } from "@/components/LoadingState";
 import { useAuth } from "@/context/AuthContext";
 import { useColors } from "@/hooks/useColors";
@@ -139,19 +139,15 @@ export default function ItemDetailScreen() {
           ]}
           showsVerticalScrollIndicator={false}
         >
-          {imageUri ? (
-            <Image
-              source={{ uri: imageUri }}
-              style={styles.heroImage}
-              contentFit="cover"
-            />
-          ) : (
-            <View
-              style={[styles.heroPlaceholder, { backgroundColor: colors.secondary }]}
-            >
-              <Feather name="package" size={48} color={colors.primary} />
-            </View>
-          )}
+          <ExpandableImage
+            uri={imageUri}
+            style={styles.heroImage}
+            contentFit="cover"
+            placeholderIcon="package"
+            placeholderIconSize={48}
+            placeholderIconColor={colors.primary}
+            placeholderBackgroundColor={colors.secondary}
+          />
 
           <View style={styles.content}>
             <View style={styles.titleRow}>

@@ -20,6 +20,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { AiScanningOverlay } from "@/components/AiScanningOverlay";
 import { EmptyState } from "@/components/EmptyState";
+import { ExpandableImage } from "@/components/ExpandableImage";
 import { useAuth } from "@/context/AuthContext";
 import { useColors } from "@/hooks/useColors";
 import { buildItemInsertPayload } from "@/lib/item-insert-helpers";
@@ -519,7 +520,7 @@ export default function ScanScreen() {
                       borderRadius: 10, overflow: "hidden",
                       backgroundColor: colors.secondary,
                     }}>
-                      <Image source={{ uri: sourceUri }} style={{ width: PHOTO_W, height: PHOTO_H }} contentFit="cover" />
+                      <ExpandableImage uri={sourceUri} style={{ width: PHOTO_W, height: PHOTO_H }} contentFit="cover" />
                       {/* Numbered pin markers */}
                       {visiblePins.map(({ item, idx }) => (
                         <Pressable
@@ -617,17 +618,15 @@ export default function ScanScreen() {
                 >
                   {/* Thumbnail with optional pin number badge */}
                   <View style={{ position: "relative" }}>
-                    {item.sourceImageUri ? (
-                      <Image
-                        source={{ uri: item.sourceImageUri }}
-                        style={[revStyles.thumb, { borderTopLeftRadius: colors.radius, borderBottomLeftRadius: colors.radius }]}
-                        contentFit="cover"
-                      />
-                    ) : (
-                      <View style={[revStyles.thumbPlaceholder, { backgroundColor: colors.secondary, borderTopLeftRadius: colors.radius, borderBottomLeftRadius: colors.radius }]}>
-                        <Feather name="image" size={18} color={colors.border} />
-                      </View>
-                    )}
+                    <ExpandableImage
+                      uri={item.sourceImageUri}
+                      style={[revStyles.thumb, { borderTopLeftRadius: colors.radius, borderBottomLeftRadius: colors.radius }]}
+                      contentFit="cover"
+                      placeholderIcon="image"
+                      placeholderIconSize={18}
+                      placeholderIconColor={colors.border}
+                      placeholderBackgroundColor={colors.secondary}
+                    />
                     {/* Pin number badge — only shown when item has a pin */}
                     {item.pin != null && (
                       <View style={[pinStyles.cardBadge, { backgroundColor: isActive ? "#1D9E75" : "#085041" }]}>
@@ -930,8 +929,8 @@ export default function ScanScreen() {
                 <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
                   {images.map((img, i) => (
                     <View key={i} style={{ position: "relative" }}>
-                      <Image
-                        source={{ uri: img.uri }}
+                      <ExpandableImage
+                        uri={img.uri}
                         style={[styles.photoThumb, { borderRadius: colors.radius }]}
                         contentFit="cover"
                       />

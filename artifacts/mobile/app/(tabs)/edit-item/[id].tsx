@@ -1,5 +1,4 @@
 import { Feather } from "@expo/vector-icons";
-import { Image } from "expo-image";
 import * as Haptics from "expo-haptics";
 import * as ImagePicker from "expo-image-picker";
 import { Stack, router, useLocalSearchParams } from "expo-router";
@@ -20,6 +19,7 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { CategoryPicker } from "@/components/CategoryPicker";
+import { ExpandableImage } from "@/components/ExpandableImage";
 import { ErrorState } from "@/components/ErrorState";
 import { LoadingState } from "@/components/LoadingState";
 import { useAuth } from "@/context/AuthContext";
@@ -503,12 +503,9 @@ export default function EditItemScreen() {
 
             {displayPhoto ? (
               <View style={{ gap: 10 }}>
-                <Image
-                  source={{ uri: displayPhoto }}
-                  style={[
-                    styles.photoPreview,
-                    { borderRadius: colors.radius },
-                  ]}
+                <ExpandableImage
+                  uri={displayPhoto}
+                  style={[styles.photoPreview, { borderRadius: colors.radius }]}
                   contentFit="cover"
                 />
                 <View style={{ flexDirection: "row", gap: 10 }}>
