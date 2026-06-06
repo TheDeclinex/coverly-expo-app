@@ -15,8 +15,9 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+import { ItemPinMarker, PIN_MARKER_RADIUS } from "@/components/ItemPinMarker";
+
 const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get("window");
-const PIN_ICON_SIZE = 30;
 
 interface ImageViewerModalProps {
   uris: string[];
@@ -35,27 +36,6 @@ interface ImageViewerModalProps {
   pinColor?: string;
 }
 
-function PinMarker({ color }: { color: string }) {
-  return (
-    <View style={styles.pinMarker} pointerEvents="none">
-      {/* White halo behind the icon for contrast on all backgrounds */}
-      <Feather
-        name="map-pin"
-        size={PIN_ICON_SIZE + 6}
-        color="white"
-        style={[styles.pinHalo]}
-      />
-      {/* Colored icon on top */}
-      <Feather
-        name="map-pin"
-        size={PIN_ICON_SIZE}
-        color={color}
-        style={styles.pinIcon}
-      />
-    </View>
-  );
-}
-
 function ImagePage({
   uri,
   onClose,
@@ -71,19 +51,28 @@ function ImagePage({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
 
+  // Radius of the "lg" marker for center-anchoring
+  const r = PIN_MARKER_RADIUS.lg;
+
+  /**
+   * Compute the screen position of the pin for contentFit="contain".
+   * The image is letterboxed — we calculate the actual rendered rect first,
+   * then place the circular marker so its center aligns with the pin point.
+   */
   const pinPos = useMemo(() => {
     if (!pin || !imgSize) return null;
+    // Scale to fit the screen while keeping the full image visible
     const scale = Math.min(SCREEN_W / imgSize.w, SCREEN_H / imgSize.h);
-    const rw = imgSize.w * scale;
-    const rh = imgSize.h * scale;
-    const ox = (SCREEN_W - rw) / 2;
-    const oy = (SCREEN_H - rh) / 2;
+    const rw = imgSize.w * scale;   // rendered image width
+    const rh = imgSize.h * scale;   // rendered image height
+    const ox = (SCREEN_W - rw) / 2; // horizontal letterbox offset
+    const oy = (SCREEN_H - rh) / 2; // vertical letterbox offset
     return {
-      // Center of icon horizontally, tip (bottom) anchors pin point vertically
-      left: ox + pin.x * rw - (PIN_ICON_SIZE + 6) / 2,
-      top: oy + pin.y * rh - PIN_ICON_SIZE - 6,
+      // Center of circular marker at the pin point
+      left: ox + pin.x * rw - r,
+      top: oy + pin.y * rh - r,
     };
-  }, [pin, imgSize]);
+  }, [pin, imgSize, r]);
 
   return (
     <Pressable style={styles.page} onPress={onClose}>
@@ -120,7 +109,7 @@ function ImagePage({
           pointerEvents="none"
           style={[styles.pinWrap, { left: pinPos.left, top: pinPos.top }]}
         >
-          <PinMarker color={pinColor} />
+          <ItemPinMarker size="lg" color={pinColor} />
         </View>
       )}
     </Pressable>
@@ -298,24 +287,9 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontFamily: "Inter_400Regular",
   },
-  /* ── Pin marker ── */
   pinWrap: {
     position: "absolute",
   },
-  pinMarker: {
-    width: PIN_ICON_SIZE + 6,
-    height: PIN_ICON_SIZE + 6,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  pinHalo: {
-    position: "absolute",
-    opacity: 0.95,
-  },
-  pinIcon: {
-    position: "absolute",
-  },
-  /* ── Controls ── */
   closeBtn: {
     position: "absolute",
     right: 16,
