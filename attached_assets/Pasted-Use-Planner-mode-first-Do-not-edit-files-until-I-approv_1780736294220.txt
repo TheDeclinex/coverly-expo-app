@@ -1,0 +1,164 @@
+Use Planner mode first. Do not edit files until I approve the plan.
+
+Goal:
+Add scan review pins and expandable image thumbnails across the Coverly mobile app, aligned with existing production schema and naming conventions.
+
+Current state:
+
+* AI scan works.
+* Scan review returns detected items.
+* Save one and Save all work.
+* Saved scan-created items appear in the correct room.
+* Scan-created items currently do not reliably save/show photos.
+* Pins are not shown on the scan review screen.
+* Thumbnails are not expandable across screens.
+
+Production conventions:
+
+* Edge Function name: scan-room-photo
+* Storage bucket: inventory-photos
+* Item image fields: inventory_items.photo_url and inventory_items.image_url
+* Item pin field: inventory_items.image_pin jsonb
+* Do not create new DB columns.
+* Do not create new bucket names.
+* Do not use item-photos.
+* Do not use coverly-scan.
+* Do not store base64 or local file:// URIs in the database.
+* Do not change Add/Edit/Move/RLS logic unless required for shared image viewing only.
+
+Planning task:
+
+1. Inspect current image and pin data flow
+   Inspect:
+
+* app/(tabs)/scan.tsx
+* lib/scan-service.ts
+* lib/item-insert-helpers.ts
+* app/(tabs)/room/[id].tsx
+* app/(tabs)/item/[id].tsx
+* app/(tabs)/add-item.tsx
+* app/(tabs)/edit-item/[id].tsx
+* any existing image helper, storage helper, or full-screen image component
+
+Identify:
+
+* whether scan-room-photo currently returns pin/coordinate data
+* whether scan detected items include sourceImageUri, sourcePhotoIndex, image_pin, pin, bounding box, x/y, or similar
+* whether buildItemInsertPayload supports image_pin
+* whether room list and item detail use photo_url/image_url consistently
+* whether there is already a reusable image viewer/modal
+
+2. Scan review pin UI
+   Plan a scan review layout that shows pins on the scan source image.
+
+Requirements:
+
+* Show the scan source image near the top of the review screen or inside an expandable preview.
+* Overlay numbered pins for detected items where coordinates exist.
+* Tapping a pin should scroll/focus/highlight the matching detected item card.
+* Tapping a detected item card should highlight the matching pin.
+* Use Coverly styling: dark green/teal pins, white number, subtle shadow.
+* Keep layout usable on mobile.
+
+Coordinate handling:
+
+* If scan-room-photo returns valid coordinates, map them to inventory_items.image_pin.
+* If no coordinates are returned, do not fake coordinates silently.
+* Plan a manual tap-to-place pin fallback:
+
+  * user taps image while an item is selected
+  * save relative x/y coordinates, not pixel coordinates
+  * e.g. image_pin = { x: 0.42, y: 0.61, sourcePhotoIndex: 0, type: "manual" }
+* If manual pinning is too much for the first execution pass, plan it clearly as Phase 2 and show “No pin yet” safely.
+
+3. Save pin data
+   Plan how scan-created items save pin data:
+
+* inventory_items.image_pin should receive valid jsonb only.
+* Store relative coordinates x/y between 0 and 1.
+* Include sourcePhotoIndex if multi-photo scans are involved.
+* Do not save invalid strings or malformed objects.
+* Do not break save-one or save-all.
+* If a detected item has no pin, save image_pin as null/undefined.
+
+4. Scan-created item images
+   Plan image persistence for scan-created items:
+
+* upload the relevant source scan image to inventory-photos
+* save the resulting storage path or display URL into photo_url and/or image_url using the existing Coverly convention
+* single item scan: saved item uses the selected item photo
+* single photo room scan: V1 can use the room photo as the image for each detected item
+* multi-photo scan: use sourcePhotoIndex if available; otherwise fallback to first selected image with a TODO
+* avoid duplicate uploads in Save all by uploading each source image once and reusing the result
+
+5. Expandable thumbnails across all screens
+   Plan a reusable image viewer/lightbox component.
+
+Requirements:
+
+* Any item thumbnail/image can be tapped to open a larger view.
+* Works on:
+
+  * scan review thumbnails/source image
+  * room item list thumbnails
+  * item detail image
+  * add item selected photo preview
+  * edit item selected/existing photo preview
+* Full-screen or modal overlay.
+* Shows image clearly with close button.
+* Uses existing photo_url/image_url/local URI safely.
+* Does not require a heavy dependency unless already installed.
+* If image is private storage path, use existing signed/public URL helper pattern or plan one shared resolver.
+
+6. Reusable image helper
+   Plan whether to create shared helpers/components:
+
+* components/ExpandableImage.tsx
+* components/ImageViewerModal.tsx
+* lib/image-resolver.ts
+* lib/photo-upload.ts
+
+Avoid scattering image handling logic across screens.
+
+7. Production alignment
+   Do not change the Edge Function name.
+   Do not invent a new response contract unless necessary.
+   If scan-room-photo needs to return pin coordinates/sourcePhotoIndex, plan it as a backwards-compatible extension:
+
+* existing UI Bakery/web payload must continue to work
+* existing response fields must continue to work
+* new optional fields can be added:
+
+  * sourcePhotoIndex
+  * image_pin
+  * boundingBox
+  * pin
+    Do not break production web app.
+
+8. Output required
+   Provide a plan only:
+
+* files to change
+* current scan response fields found
+* whether scan-room-photo returns coordinates today
+* proposed image_pin jsonb shape
+* proposed scan review pin UX
+* proposed expandable image component
+* proposed image upload/reuse approach for scan saves
+* what can be done in Phase 1
+* what should stay Phase 2
+* risks
+* acceptance criteria
+
+Acceptance criteria after eventual execution:
+
+* Scan review screen shows source image with pins when pin data exists.
+* User can identify which detected item belongs to which pin.
+* Saved scan-created items preserve image_pin when available.
+* Scan-created items save/show image thumbnails.
+* Thumbnails/images are expandable on scan review, room list, item detail, add item, and edit item screens.
+* No local file:// URI or base64 is stored in inventory_items.
+* No schema changes.
+* No bucket name changes.
+* No Edge Function name changes.
+* TypeScript passes.
