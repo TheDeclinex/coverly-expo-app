@@ -97,7 +97,7 @@ function SparkLine({
           y1={height / 2}
           x2={width - pad}
           y2={height / 2}
-          stroke="rgba(255,255,255,0.3)"
+          stroke={BRAND_BORDER}
           strokeWidth={1.5}
           strokeDasharray="4 4"
         />
@@ -117,7 +117,7 @@ function SparkLine({
       <Polyline
         points={pts}
         fill="none"
-        stroke="rgba(255,255,255,0.85)"
+        stroke={BRAND_TEAL}
         strokeWidth={2}
         strokeLinecap="round"
         strokeLinejoin="round"
@@ -1282,9 +1282,13 @@ const styles = StyleSheet.create({
     fontFamily: "Inter_700Bold",
   },
 
-  // Insight card
+  // Insight card — light surface, green accent on value only
   insightCard: {
-    backgroundColor: BRAND_DARK,
+    backgroundColor: "#FFFFFF",
+    borderWidth: 1,
+    borderColor: BRAND_BORDER,
+    borderLeftWidth: 3,
+    borderLeftColor: BRAND_TEAL,
     padding: 16,
     gap: 0,
   },
@@ -1292,18 +1296,18 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontFamily: "Inter_600SemiBold",
     letterSpacing: 0.9,
-    color: "rgba(255,255,255,0.55)",
+    color: "#64736F",
   },
   insightValue: {
     fontSize: 28,
     fontFamily: "Inter_700Bold",
-    color: "#FFFFFF",
+    color: BRAND_DARK,
     marginTop: 2,
   },
   insightSubtext: {
     fontSize: 12,
     fontFamily: "Inter_400Regular",
-    color: "rgba(255,255,255,0.7)",
+    color: "#64736F",
     marginTop: 6,
   },
   periodRow: {
@@ -1318,12 +1322,12 @@ const styles = StyleSheet.create({
     borderWidth: 1,
   },
   periodChipSelected: {
-    backgroundColor: "rgba(255,255,255,0.15)",
-    borderColor: "rgba(255,255,255,0.45)",
+    backgroundColor: BRAND_DARK,
+    borderColor: BRAND_DARK,
   },
   periodChipIdle: {
-    backgroundColor: "transparent",
-    borderColor: "rgba(255,255,255,0.2)",
+    backgroundColor: "#E1F5EE",
+    borderColor: BRAND_BORDER,
   },
   periodChipText: {
     fontSize: 12,
@@ -1334,7 +1338,7 @@ const styles = StyleSheet.create({
   },
   periodChipTextIdle: {
     fontFamily: "Inter_400Regular",
-    color: "rgba(255,255,255,0.7)",
+    color: "#314B45",
   },
 
   // Action buttons

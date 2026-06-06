@@ -1,0 +1,119 @@
+Execute directly.
+
+Adjust the current Coverly mobile property/home visual styling based on this feedback:
+
+Current issue:
+
+* the dark green is too heavy when used as a large filled surface
+* the top property insight card reads as too much of a solid green block
+* the screen feels a bit dense and less premium than intended
+
+Goal:
+Keep the agreed Coverly palette, but redistribute it more elegantly so the UI feels lighter, more modern, and closer in feel to the UI Bakery mobile references.
+
+Do not change backend logic.
+Do not change save/photo/upload/RLS logic.
+Do not change navigation.
+Do not change database schema.
+Do not add new features.
+
+Design direction:
+
+1. Use dark green more selectively
+   Dark green / deep teal should be used primarily for:
+
+* primary scan buttons
+* icons
+* active chips
+* important accents
+* chart/sparkline accents
+* key headings or numeric highlights
+
+Do NOT use dark green as a large heavy block unless there is a strong reason.
+
+2. Restyle the top insight card on the Property screen
+   Current dark green filled card should be lightened.
+
+Preferred direction:
+
+* use a white or very pale green-tinted card background instead of a full dark green block
+* keep the large value figure in dark green or deep slate
+* keep period chips subtle and tonal
+* keep the sparkline teal/green
+* use muted slate text for supporting copy
+* if needed, use a small tinted accent area or subtle section divider rather than a full solid dark fill
+
+The top insight card should still communicate:
+
+* recorded contents / total estimated value
+* 1m / 3m / 6m / 12m selector
+* sparkline
+* items/value added in selected period
+
+But it should feel lighter and cleaner.
+
+3. Keep contrast hierarchy clear
+
+* Scan items / Scan room remains the strongest primary action using dark green / deep teal fill
+* Add manually remains secondary with white/off-white surface, green border/text
+* cards should mostly remain white or lightly tinted
+* background remains soft off-white
+
+4. Apply the same lighter approach to Home if needed
+   If any top card or large surface on Home is feeling too heavy or too saturated, lighten it similarly.
+   Keep the portfolio summary and property cards airy and clean.
+
+5. Palette usage guidance
+   Keep these colours, but rebalance their use:
+
+* Primary dark green #085041
+* Deep green #0F6E56
+* Main teal #1D9E75
+* Soft off-white #F5F8F6
+* Very pale green surface tint #E1F5EE
+* Card white #FFFFFF
+* Deep slate text #172A27
+* Muted slate text #64736F
+* Slate green #314B45
+* Soft border #DDE7E3
+
+Suggested usage:
+
+* most cards: white
+* highlighted/insight cards: white or very pale green tint
+* strong CTA buttons: dark green / teal
+* charts/bars/sparklines: teal/green accents
+* text: deep slate / muted slate
+* borders: soft green-grey
+
+6. Keep property screen hierarchy intact
+   Do not revert to the earlier top-heavy layout.
+   Keep:
+
+* compact summary
+* insight/value card
+* action row
+* rooms visible early
+* deeper insights lower down
+
+7. Use the UI Bakery screenshots as visual reference
+   Use the attached UI Bakery mobile screenshots as reference for:
+
+* balance of colour
+* density
+* lighter card treatment
+* premium feel
+
+Do not literally copy them, but move closer to that feel.
+
+Acceptance:
+
+1. The dark green is no longer used as an overly heavy block on the top insight card.
+2. The top insight/value card feels lighter and more premium.
+3. Scan remains visually primary.
+4. Add manually remains clearly secondary.
+5. White/off-white remains the dominant surface colour.
+6. Property screen still keeps rooms visible early.
+7. Coverly palette remains consistent.
+8. TypeScript passes.
+9. Final response should list the screens/components restyled.
