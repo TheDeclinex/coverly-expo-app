@@ -55,6 +55,16 @@ export interface ScanDetectedItem {
   photoUrl?: string | null;
   /** Source image local URI for thumbnail preview in review screen */
   sourceImageUri?: string | null;
+  /**
+   * Visual centre of this item in the source photo, as returned by the Edge Function.
+   * Coordinates are in 0–100 percentage space from top-left.
+   */
+  pin?: { x: number; y: number } | null;
+  /**
+   * 0-based index into the scan images array indicating which source photo this item
+   * was most clearly visible in (used for multi-photo scans).
+   */
+  sourcePhotoIndex?: number | null;
 }
 
 export type ScanStatus =

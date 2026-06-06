@@ -4,10 +4,11 @@ import * as Haptics from "expo-haptics";
 import * as ImagePicker from "expo-image-picker";
 import { Stack, router, useLocalSearchParams } from "expo-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import React, { useState } from "react";
+import React, { useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
+  Dimensions,
   FlatList,
   Pressable,
   ScrollView,
@@ -28,6 +29,7 @@ import {
   runAiScan,
   validateScanInput,
 } from "@/lib/scan-service";
+import { clearScanPhotoUploadCache, uploadScanPhoto } from "@/lib/photo-upload";
 import { supabase } from "@/lib/supabase";
 import type { InventoryFile, InventoryRoom } from "@/types";
 import type {
@@ -115,6 +117,10 @@ export default function ScanScreen() {
   const [savingIds, setSavingIds] = useState<Set<number>>(new Set());
   const [scanSaveError, setScanSaveError] = useState<string | null>(null);
   const [partialFailures, setPartialFailures] = useState<PartialFailure[]>([]);
+  const [activePinIndex, setActivePinIndex] = useState<number | null>(null);
+  const [activeSourcePhotoIdx, setActiveSourcePhotoIdx] = useState(0);
+
+  const flatListRef = useRef<FlatList<ScanDetectedItem>>(null);
 
   const { data: properties } = useQuery({
     queryKey: ["properties", session?.user.id],
@@ -197,7 +203,12 @@ export default function ScanScreen() {
   const getDestRoomName = () =>
     paramRoomName ?? rooms?.find((r) => r.id === selectedRoomId)?.name ?? null;
 
-  const buildPayload = (item: ScanDetectedItem) =>
+  /**
+   * Build the Supabase insert payload for a detected item.
+   * @param item - Detected item from AI scan.
+   * @param uploadedPhotoUrl - Public URL from storage upload; overrides any URL on the item itself.
+   */
+  const buildPayload = (item: ScanDetectedItem, uploadedPhotoUrl?: string | null) =>
     buildItemInsertPayload({
       fileId: selectedFileId,
       roomId: selectedRoomId,
@@ -209,18 +220,16 @@ export default function ScanScreen() {
       estimatedPrice: item.estimatedPrice,
       unitEstimatedPrice: item.unitEstimatedPrice,
       quantity: item.quantity,
-      imageUrl: item.imageUrl,
-      photoUrl: item.photoUrl,
+      imageUrl: uploadedPhotoUrl ?? item.imageUrl,
+      photoUrl: uploadedPhotoUrl ?? item.photoUrl,
       brandMaker: item.brandMaker,
       modelSeries: item.modelSeries,
       conditionLabel: item.conditionLabel,
       confidence: item.confidence,
       valuationBasis: item.valuationBasis ?? "ai_estimate",
       priceSourceType: item.priceSourceType ?? "ai_scan",
-      // TODO: production inventory_items has image_pin jsonb; future scan should
-      // support AI/user-generated pins if coordinates are returned in scan response.
-      // Current scan review does not save pins unless the response includes a valid
-      // image_pin object. When implemented, map pin { x, y } here.
+      pin: item.pin,
+      sourcePhotoIndex: item.sourcePhotoIndex,
     });
 
   const invalidateRoomQueries = () => {
@@ -271,13 +280,18 @@ export default function ScanScreen() {
     }
 
     // Attach source image thumbnails for review cards.
-    // V1: single/single-item → images[0]; multi → images[0] as fallback (AI doesn't return per-item source index yet).
+    // Use sourcePhotoIndex returned by Edge Function to route each item to the correct source photo.
     const fallbackUri = images[0]?.uri ?? null;
     const itemsWithThumbs: ScanDetectedItem[] = result.items.map((item) => ({
       ...item,
-      sourceImageUri: item.sourceImageUri ?? fallbackUri,
+      sourceImageUri:
+        item.sourcePhotoIndex != null
+          ? (images[item.sourcePhotoIndex]?.uri ?? fallbackUri)
+          : (item.sourceImageUri ?? fallbackUri),
     }));
 
+    setActiveSourcePhotoIdx(0);
+    setActivePinIndex(null);
     setDetectedItems(itemsWithThumbs);
     setScanStatus("reviewing");
     void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
@@ -293,7 +307,15 @@ export default function ScanScreen() {
     setSavingIds((prev) => new Set(prev).add(index));
     setScanSaveError(null);
 
-    const { error } = await supabase.from("inventory_items").insert(buildPayload(item));
+    // Upload the source scan photo to inventory-photos before inserting
+    const userId = session?.user.id;
+    let uploadedUrl: string | null = null;
+    if (userId && item.sourceImageUri) {
+      const dedupeKey = `${item.sourcePhotoIndex ?? 0}:${item.sourceImageUri}`;
+      uploadedUrl = await uploadScanPhoto(item.sourceImageUri, userId, dedupeKey);
+    }
+
+    const { error } = await supabase.from("inventory_items").insert(buildPayload(item, uploadedUrl));
 
     setSavingIds((prev) => {
       const next = new Set(prev);
@@ -318,12 +340,34 @@ export default function ScanScreen() {
     setScanSaveError(null);
     setPartialFailures([]);
 
+    // Phase 1: Upload each unique source photo once, build photoIndex → publicUrl map
+    const userId = session?.user.id;
+    const photoUrlByIndex = new Map<number, string | null>();
+    if (userId) {
+      for (const item of detectedItems) {
+        const photoIdx = item.sourcePhotoIndex ?? 0;
+        if (!photoUrlByIndex.has(photoIdx)) {
+          const uri = item.sourceImageUri ?? images[photoIdx]?.uri ?? null;
+          if (uri) {
+            const dedupeKey = `${photoIdx}:${uri}`;
+            const url = await uploadScanPhoto(uri, userId, dedupeKey);
+            photoUrlByIndex.set(photoIdx, url);
+          } else {
+            photoUrlByIndex.set(photoIdx, null);
+          }
+        }
+      }
+    }
+
     const failures: PartialFailure[] = [];
     const savedIndices: number[] = [];
 
+    // Phase 2: Sequential insert with matched uploaded photo URL
     for (let i = 0; i < detectedItems.length; i++) {
       const item = detectedItems[i];
-      const { error } = await supabase.from("inventory_items").insert(buildPayload(item));
+      const photoIdx = item.sourcePhotoIndex ?? 0;
+      const uploadedUrl = photoUrlByIndex.get(photoIdx) ?? null;
+      const { error } = await supabase.from("inventory_items").insert(buildPayload(item, uploadedUrl));
       if (error) {
         console.error("[Scan] Save all — item failed:", item.name, error.message);
         failures.push({ itemName: item.name, error: error.message });
@@ -363,6 +407,9 @@ export default function ScanScreen() {
     setScanError(null);
     setScanSaveError(null);
     setPartialFailures([]);
+    setActivePinIndex(null);
+    setActiveSourcePhotoIdx(0);
+    clearScanPhotoUploadCache();
   };
 
   // ── Confidence badge helpers ─────────────────────────────────────────────────
@@ -378,6 +425,15 @@ export default function ScanScreen() {
   // ── Review screen ────────────────────────────────────────────────────────────
 
   if ((scanStatus === "reviewing" || scanStatus === "saving") && detectedItems.length > 0) {
+    // Pin map layout — computed once per render of the review screen
+    const PHOTO_W = Dimensions.get("window").width - 32;
+    const PHOTO_H = Math.round(PHOTO_W * 0.72);
+    const PIN_R = 11;
+    const sourceUri = images[activeSourcePhotoIdx]?.uri ?? null;
+    const visiblePins = detectedItems
+      .map((item, idx) => ({ item, idx }))
+      .filter(({ item }) => item.pin != null && (item.sourcePhotoIndex ?? 0) === activeSourcePhotoIdx);
+
     return (
       <>
         <Stack.Screen
@@ -392,6 +448,7 @@ export default function ScanScreen() {
         />
         <View style={{ flex: 1, backgroundColor: colors.background }}>
           <FlatList
+            ref={flatListRef}
             data={detectedItems}
             keyExtractor={(_, i) => String(i)}
             contentContainerStyle={{
@@ -399,11 +456,85 @@ export default function ScanScreen() {
               gap: 10,
               paddingBottom: insets.bottom + 100,
             }}
+            onScrollToIndexFailed={() => {/* item not yet rendered — ignore */}}
             ListHeaderComponent={
               <View style={{ gap: 8, marginBottom: 4 }}>
-                <Text style={[revStyles.headerNote, { color: colors.mutedForeground }]}>
-                  {detectedItems.length} item{detectedItems.length !== 1 ? "s" : ""} detected — review and save
-                </Text>
+
+                {/* ── Source photo with pin overlay ───────────────────────── */}
+                {sourceUri && (
+                  <View style={{ gap: 6 }}>
+                    {/* Photo navigation for multi-photo scans */}
+                    {images.length > 1 && (
+                      <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                        <Pressable
+                          onPress={() => setActiveSourcePhotoIdx(i => Math.max(0, i - 1))}
+                          disabled={activeSourcePhotoIdx === 0}
+                          style={{ opacity: activeSourcePhotoIdx === 0 ? 0.3 : 1, padding: 4 }}
+                        >
+                          <Feather name="chevron-left" size={18} color={colors.foreground} />
+                        </Pressable>
+                        <Text style={[revStyles.headerNote, { flex: 1, textAlign: "center", color: colors.mutedForeground }]}>
+                          Photo {activeSourcePhotoIdx + 1} of {images.length}
+                        </Text>
+                        <Pressable
+                          onPress={() => setActiveSourcePhotoIdx(i => Math.min(images.length - 1, i + 1))}
+                          disabled={activeSourcePhotoIdx === images.length - 1}
+                          style={{ opacity: activeSourcePhotoIdx === images.length - 1 ? 0.3 : 1, padding: 4 }}
+                        >
+                          <Feather name="chevron-right" size={18} color={colors.foreground} />
+                        </Pressable>
+                      </View>
+                    )}
+
+                    {/* Photo frame */}
+                    <View style={{
+                      width: PHOTO_W, height: PHOTO_H,
+                      borderRadius: 10, overflow: "hidden",
+                      backgroundColor: colors.secondary,
+                    }}>
+                      <Image source={{ uri: sourceUri }} style={{ width: PHOTO_W, height: PHOTO_H }} contentFit="cover" />
+                      {/* Numbered pin markers */}
+                      {visiblePins.map(({ item, idx }) => (
+                        <Pressable
+                          key={idx}
+                          onPress={() => {
+                            setActivePinIndex(idx);
+                            try {
+                              flatListRef.current?.scrollToIndex({ index: idx, animated: true, viewOffset: 8 });
+                            } catch { /* not yet rendered */ }
+                          }}
+                          style={[
+                            pinStyles.pin,
+                            {
+                              left: (item.pin!.x / 100) * PHOTO_W - PIN_R,
+                              top: (item.pin!.y / 100) * PHOTO_H - PIN_R,
+                              width: PIN_R * 2, height: PIN_R * 2, borderRadius: PIN_R,
+                              backgroundColor: activePinIndex === idx ? "#1D9E75" : "#085041",
+                              transform: [{ scale: activePinIndex === idx ? 1.2 : 1 }],
+                            },
+                          ]}
+                        >
+                          <Text style={pinStyles.pinLabel}>{idx + 1}</Text>
+                        </Pressable>
+                      ))}
+                    </View>
+
+                    {/* Summary below the photo */}
+                    <Text style={[revStyles.headerNote, { color: colors.mutedForeground }]}>
+                      {detectedItems.length} item{detectedItems.length !== 1 ? "s" : ""} detected
+                      {visiblePins.length > 0
+                        ? ` · ${visiblePins.length} pinned — tap a pin or card`
+                        : " — review and save"}
+                    </Text>
+                  </View>
+                )}
+
+                {/* Fallback note when no source image (shouldn't normally occur) */}
+                {!sourceUri && (
+                  <Text style={[revStyles.headerNote, { color: colors.mutedForeground }]}>
+                    {detectedItems.length} item{detectedItems.length !== 1 ? "s" : ""} detected — review and save
+                  </Text>
+                )}
 
                 {/* Partial failure list */}
                 {partialFailures.length > 0 && (
@@ -436,26 +567,42 @@ export default function ScanScreen() {
             renderItem={({ item, index }) => {
               const isSaving = savingIds.has(index);
               const badge = confidenceBadgeStyle(item.confidence);
+              const isActive = activePinIndex === index;
 
               return (
-                <View
+                <Pressable
+                  onPress={() => setActivePinIndex(isActive ? null : index)}
                   style={[
                     revStyles.card,
-                    { backgroundColor: "#FFFFFF", borderColor: colors.border, borderRadius: colors.radius },
+                    {
+                      backgroundColor: "#FFFFFF",
+                      borderColor: isActive ? "#1D9E75" : colors.border,
+                      borderLeftColor: isActive ? "#1D9E75" : colors.border,
+                      borderLeftWidth: isActive ? 3 : 1,
+                      borderRadius: colors.radius,
+                    },
                   ]}
                 >
-                  {/* Thumbnail */}
-                  {item.sourceImageUri ? (
-                    <Image
-                      source={{ uri: item.sourceImageUri }}
-                      style={[revStyles.thumb, { borderTopLeftRadius: colors.radius, borderBottomLeftRadius: colors.radius }]}
-                      contentFit="cover"
-                    />
-                  ) : (
-                    <View style={[revStyles.thumbPlaceholder, { backgroundColor: colors.secondary, borderTopLeftRadius: colors.radius, borderBottomLeftRadius: colors.radius }]}>
-                      <Feather name="image" size={18} color={colors.border} />
-                    </View>
-                  )}
+                  {/* Thumbnail with optional pin number badge */}
+                  <View style={{ position: "relative" }}>
+                    {item.sourceImageUri ? (
+                      <Image
+                        source={{ uri: item.sourceImageUri }}
+                        style={[revStyles.thumb, { borderTopLeftRadius: colors.radius, borderBottomLeftRadius: colors.radius }]}
+                        contentFit="cover"
+                      />
+                    ) : (
+                      <View style={[revStyles.thumbPlaceholder, { backgroundColor: colors.secondary, borderTopLeftRadius: colors.radius, borderBottomLeftRadius: colors.radius }]}>
+                        <Feather name="image" size={18} color={colors.border} />
+                      </View>
+                    )}
+                    {/* Pin number badge — only shown when item has a pin */}
+                    {item.pin != null && (
+                      <View style={[pinStyles.cardBadge, { backgroundColor: isActive ? "#1D9E75" : "#085041" }]}>
+                        <Text style={pinStyles.cardBadgeLabel}>{index + 1}</Text>
+                      </View>
+                    )}
+                  </View>
 
                   {/* Card body */}
                   <View style={revStyles.cardBody}>
@@ -535,7 +682,7 @@ export default function ScanScreen() {
                       )}
                     </Pressable>
                   </View>
-                </View>
+                </Pressable>
               );
             }}
           />
@@ -921,4 +1068,43 @@ const revStyles = StyleSheet.create({
   saveAllBar: { position: "absolute", bottom: 0, left: 0, right: 0, borderTopWidth: 1, padding: 16 },
   saveAllBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, paddingVertical: 14 },
   saveAllText: { fontSize: 15, fontFamily: "Inter_600SemiBold" },
+});
+
+/** Styles for the pin overlay on the source photo and card badge. */
+const pinStyles = StyleSheet.create({
+  pin: {
+    position: "absolute",
+    alignItems: "center",
+    justifyContent: "center",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.35,
+    shadowRadius: 2,
+  },
+  pinLabel: {
+    fontSize: 10,
+    fontFamily: "Inter_700Bold",
+    color: "#FFFFFF",
+    lineHeight: 13,
+  },
+  cardBadge: {
+    position: "absolute",
+    top: 6,
+    left: 6,
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    alignItems: "center",
+    justifyContent: "center",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.3,
+    shadowRadius: 1.5,
+  },
+  cardBadgeLabel: {
+    fontSize: 9,
+    fontFamily: "Inter_700Bold",
+    color: "#FFFFFF",
+    lineHeight: 12,
+  },
 });

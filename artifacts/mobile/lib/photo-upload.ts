@@ -1,0 +1,87 @@
+/**
+ * Shared photo upload helper for scan-created inventory items.
+ *
+ * Uploads local device images to the `inventory-photos` Supabase storage bucket
+ * and returns a public URL. Includes an in-memory dedupe cache so save-all
+ * workflows upload each unique source image only once per session.
+ *
+ * NOTE: This helper targets the `inventory-photos` bucket only. The existing
+ * add-item / edit-item flows use `item-photos` — do not change those.
+ */
+
+import { supabase } from "@/lib/supabase";
+
+const SCAN_PHOTOS_BUCKET = "inventory-photos";
+
+/** Per-session upload cache: localUri → public URL */
+const uploadCache = new Map<string, string>();
+
+/**
+ * Upload a local image URI to `inventory-photos` and return its public URL.
+ *
+ * @param localUri   - Local device URI (file:// or content://) from ImagePicker.
+ * @param userId     - Supabase user ID used as the storage path prefix.
+ * @param dedupeKey  - Optional key for de-duplication (default: localUri).
+ *                     Pass the same key for multiple items sharing the same source photo.
+ * @returns The public HTTPS URL of the uploaded file, or null on failure.
+ */
+export async function uploadScanPhoto(
+  localUri: string,
+  userId: string,
+  dedupeKey?: string
+): Promise<string | null> {
+  const cacheKey = dedupeKey ?? localUri;
+
+  // Return cached result if this image was already uploaded in this session
+  const cached = uploadCache.get(cacheKey);
+  if (cached) return cached;
+
+  try {
+    const response = await fetch(localUri);
+    if (!response.ok) {
+      console.warn("[photoUpload] fetch failed for:", localUri, response.status);
+      return null;
+    }
+    const blob = await response.blob();
+
+    // Derive extension from MIME type; fallback to jpg
+    const mime = blob.type || "image/jpeg";
+    const ext = mime.split("/")[1]?.replace("jpeg", "jpg") ?? "jpg";
+
+    // Path: {userId}/scan-{timestamp}-{random}.{ext}
+    const timestamp = Date.now();
+    const rand = Math.random().toString(36).slice(2, 7);
+    const path = `${userId}/scan-${timestamp}-${rand}.${ext}`;
+
+    const { data: uploadData, error: uploadError } = await supabase.storage
+      .from(SCAN_PHOTOS_BUCKET)
+      .upload(path, blob, { contentType: mime, upsert: false });
+
+    if (uploadError) {
+      console.warn("[photoUpload] upload error:", uploadError.message, "path:", path);
+      return null;
+    }
+
+    const { data: urlData } = supabase.storage
+      .from(SCAN_PHOTOS_BUCKET)
+      .getPublicUrl(uploadData.path);
+
+    const publicUrl = urlData?.publicUrl ?? null;
+    if (publicUrl) {
+      uploadCache.set(cacheKey, publicUrl);
+    }
+    return publicUrl;
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.warn("[photoUpload] unexpected error:", msg);
+    return null;
+  }
+}
+
+/**
+ * Clear the upload cache. Call this when the scan session resets so the next
+ * scan session doesn't reuse stale URLs from a previous session.
+ */
+export function clearScanPhotoUploadCache(): void {
+  uploadCache.clear();
+}

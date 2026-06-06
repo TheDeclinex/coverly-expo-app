@@ -121,43 +121,60 @@ export async function runAiScan(input: ScanInput): Promise<ScanResult> {
 
     const rawItems: unknown[] = Array.isArray(data?.items) ? data.items : [];
 
-    // TODO: map sourcePhotoIndex from rawItems when multi-photo per-item thumbnail routing is needed.
-    // TODO: production inventory_items has image_pin jsonb. Map pin {x,y} here when the Edge Function
-    //       returns coordinates and the review screen supports it. Currently image_pin is not saved
-    //       unless the response includes a valid pin object.
     const items: ScanDetectedItem[] = rawItems
       .filter(
         (r): r is Record<string, unknown> =>
           typeof r === "object" && r !== null && typeof (r as Record<string, unknown>).name === "string"
       )
-      .map((raw) => ({
-        name: (raw.name as string).trim(),
-        description:
-          typeof raw.description === "string" ? raw.description.trim() || null : null,
-        category:
-          typeof raw.category === "string" ? raw.category : null,
-        quantity:
-          typeof raw.quantity === "number" && raw.quantity >= 1
-            ? Math.round(raw.quantity)
-            : 1,
-        estimatedPrice:
-          typeof raw.estimatedPrice === "number" ? raw.estimatedPrice : null,
-        unitEstimatedPrice:
-          typeof raw.unitEstimatedPrice === "number" ? raw.unitEstimatedPrice : null,
-        brandMaker:
-          typeof raw.brand_guess === "string" ? raw.brand_guess : null,
-        modelSeries: null,
-        conditionLabel: null,
-        confidence:
-          typeof raw.confidence === "number"
-            ? confidenceToLabel(raw.confidence)
-            : null,
-        valuationBasis: "ai_estimate",
-        priceSourceType: "ai_scan",
-        imageUrl: null,
-        photoUrl: null,
-        sourceImageUri: null,
-      }));
+      .map((raw) => {
+        // Validate pin: must be object with finite x/y numbers in 0–100 range
+        const rawPin = raw.pin as { x?: unknown; y?: unknown } | undefined;
+        const pin =
+          rawPin &&
+          typeof rawPin.x === "number" &&
+          typeof rawPin.y === "number" &&
+          isFinite(rawPin.x) &&
+          isFinite(rawPin.y)
+            ? { x: Math.min(100, Math.max(0, rawPin.x)), y: Math.min(100, Math.max(0, rawPin.y)) }
+            : null;
+
+        // sourcePhotoIndex: 0-based integer returned by Edge Function
+        const sourcePhotoIndex =
+          typeof raw.sourcePhotoIndex === "number" && isFinite(raw.sourcePhotoIndex)
+            ? Math.max(0, Math.round(raw.sourcePhotoIndex))
+            : null;
+
+        return {
+          name: (raw.name as string).trim(),
+          description:
+            typeof raw.description === "string" ? raw.description.trim() || null : null,
+          category:
+            typeof raw.category === "string" ? raw.category : null,
+          quantity:
+            typeof raw.quantity === "number" && raw.quantity >= 1
+              ? Math.round(raw.quantity)
+              : 1,
+          estimatedPrice:
+            typeof raw.estimatedPrice === "number" ? raw.estimatedPrice : null,
+          unitEstimatedPrice:
+            typeof raw.unitEstimatedPrice === "number" ? raw.unitEstimatedPrice : null,
+          brandMaker:
+            typeof raw.brand_guess === "string" ? raw.brand_guess : null,
+          modelSeries: null,
+          conditionLabel: null,
+          confidence:
+            typeof raw.confidence === "number"
+              ? confidenceToLabel(raw.confidence)
+              : null,
+          valuationBasis: "ai_estimate",
+          priceSourceType: "ai_scan",
+          imageUrl: null,
+          photoUrl: null,
+          sourceImageUri: null,
+          pin,
+          sourcePhotoIndex,
+        };
+      });
 
     return { status: "success", items };
   } catch (err) {

@@ -58,6 +58,14 @@ export interface ItemFormData {
   purchaseSource?: string | null;
   originalPurchasePrice?: number | null;
   purchaseYearApprox?: string | null;
+  /**
+   * AI-detected visual pin for this item in the source photo.
+   * Coordinates are in 0–100 percentage space from top-left.
+   * Stored as 0–1 in inventory_items.image_pin after normalisation.
+   */
+  pin?: { x: number; y: number } | null;
+  /** 0-based index into the scan images array for the source photo. */
+  sourcePhotoIndex?: number | null;
 }
 
 /**
@@ -76,6 +84,23 @@ function confidenceLabelToNumber(v: string | number | null | undefined): number 
       return isNaN(n) ? null : Math.min(1, Math.max(0, n));
     }
   }
+}
+
+/**
+ * Build the image_pin jsonb value from form data.
+ * Normalises Edge Function coords (0–100) to 0–1 range for storage.
+ * Returns null if no valid pin exists.
+ */
+function buildImagePin(form: ItemFormData): Record<string, unknown> | null {
+  const p = form.pin;
+  if (!p) return null;
+  if (!isFinite(p.x) || !isFinite(p.y)) return null;
+  return {
+    x: Math.min(1, Math.max(0, p.x / 100)),
+    y: Math.min(1, Math.max(0, p.y / 100)),
+    sourcePhotoIndex: form.sourcePhotoIndex ?? 0,
+    type: "ai",
+  };
 }
 
 function generateItemId(): string {
@@ -113,7 +138,7 @@ export function buildItemInsertPayload(form: ItemFormData): InventoryItem {
     purchase_source: form.purchaseSource ?? null,
     original_purchase_price: form.originalPurchasePrice ?? null,
     purchase_year_approx: form.purchaseYearApprox ?? null,
-    image_pin: null,
+    image_pin: buildImagePin(form),
     attachments: null,
   };
 }
