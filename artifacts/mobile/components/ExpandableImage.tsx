@@ -2,12 +2,12 @@ import { Feather } from "@expo/vector-icons";
 import { Image } from "expo-image";
 import type { ImageContentFit } from "expo-image";
 import React, { useState } from "react";
-import { Pressable, View } from "react-native";
+import { Pressable, StyleSheet, View } from "react-native";
 import type { StyleProp, ViewStyle } from "react-native";
 
 import { ImageViewerModal } from "@/components/ImageViewerModal";
 
-const THUMB_PIN_SIZE = 22;
+const THUMB_PIN_SIZE = 20;
 
 interface ExpandableImageProps {
   uri: string | null | undefined;
@@ -63,7 +63,7 @@ export function ExpandableImage({
   allUris,
   initialPhotoIndex = 0,
   pin,
-  pinColor = "#085041",
+  pinColor = "#1D9E75",
 }: ExpandableImageProps) {
   const [lightboxVisible, setLightboxVisible] = useState(false);
   const [dims, setDims] = useState({ w: 0, h: 0 });
@@ -114,21 +114,27 @@ export function ExpandableImage({
         {hasPin && (
           <View
             pointerEvents="none"
-            style={{
-              position: "absolute",
-              left: pin!.x * dims.w - THUMB_PIN_SIZE / 2,
-              top: pin!.y * dims.h - THUMB_PIN_SIZE,
-            }}
+            style={[
+              styles.pinWrap,
+              {
+                left: pin!.x * dims.w - (THUMB_PIN_SIZE + 4) / 2,
+                top: pin!.y * dims.h - THUMB_PIN_SIZE - 2,
+              },
+            ]}
           >
+            {/* White halo layer for contrast on any background */}
+            <Feather
+              name="map-pin"
+              size={THUMB_PIN_SIZE + 4}
+              color="white"
+              style={styles.pinHalo}
+            />
+            {/* Colored icon on top */}
             <Feather
               name="map-pin"
               size={THUMB_PIN_SIZE}
-              color={pinColor ?? "#1D9E75"}
-              style={{
-                textShadowColor: "rgba(0,0,0,0.55)",
-                textShadowRadius: 3,
-                textShadowOffset: { width: 0, height: 1 },
-              }}
+              color={pinColor}
+              style={styles.pinIcon}
             />
           </View>
         )}
@@ -145,3 +151,17 @@ export function ExpandableImage({
     </>
   );
 }
+
+const styles = StyleSheet.create({
+  pinWrap: {
+    position: "absolute",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  pinHalo: {
+    position: "absolute",
+  },
+  pinIcon: {
+    position: "absolute",
+  },
+});

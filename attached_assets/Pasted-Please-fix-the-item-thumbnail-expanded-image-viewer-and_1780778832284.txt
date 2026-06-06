@@ -1,0 +1,62 @@
+Please fix the item thumbnail expanded image viewer and improve pin contrast.
+
+Current issues:
+
+1. Tapping an item thumbnail still does not show the expanded image correctly.
+
+* The screen darkens and the close button appears.
+* The pin appears.
+* But the selected image itself is not displayed clearly in the foreground.
+* It looks like the modal is only dimming the current screen instead of opening the tapped image.
+
+2. The pin-drop shape is good now, but it is too hard to see.
+
+* The dark green/teal pin blends into photos and dark overlays.
+* Keep the pin-drop shape, but make it higher contrast.
+
+Required fix for expanded thumbnail/lightbox:
+
+* When a user taps an item thumbnail, open a proper image viewer/lightbox.
+* The selected item image should be displayed clearly in the foreground, not hidden behind the dark overlay.
+* The image should be centered and sized appropriately within the screen.
+* Preserve aspect ratio.
+* Add a loading state while the image loads.
+* Add a fallback/error state if the image URL is missing or fails to load.
+* Do not open a blank dark overlay if there is no valid image.
+* Confirm the image URI passed into the modal is the same URI used by the visible thumbnail.
+* If thumbnail uses a resolved Supabase/public/signed URL helper, reuse that exact resolved URL for the expanded image.
+* Avoid duplicating image URL resolution logic.
+
+Required fix for pin visibility:
+
+* Keep the map-pin/drop shape.
+* Make the pin more visible on all image backgrounds.
+* Use a bright Coverly teal/aqua fill or white-filled marker with teal outline.
+* Add a thick white outer stroke/border and subtle shadow.
+* Consider a small white centre dot or inner highlight.
+* The marker should remain visible on dark, light, and busy images.
+* Use the same pin marker styling on:
+
+  * thumbnails
+  * expanded image viewer
+  * any saved item image view
+* Pin placement must continue using the stored item pin coordinates and scale correctly to the rendered image.
+
+Important:
+
+* Inspect the current thumbnail component, ExpandableImage component, image modal/lightbox component, and pin overlay component.
+* Do not change stored pin data.
+* Do not change item save logic.
+* Do not change Supabase schema, auth, RLS, routes, or storage buckets.
+* Do not break scan review.
+* Do not break existing thumbnail rendering.
+
+Acceptance criteria:
+
+* Tapping an item thumbnail opens the actual item/source image in a clear foreground lightbox.
+* The expanded image is visible, not hidden behind the overlay.
+* The pin appears on top of the expanded image in the correct position.
+* The pin is easy to see on dark and busy photos.
+* The thumbnail pin is also easy to see.
+* If an image is missing or fails to load, the app shows a friendly fallback instead of a blank black overlay.
+* TypeScript passes.

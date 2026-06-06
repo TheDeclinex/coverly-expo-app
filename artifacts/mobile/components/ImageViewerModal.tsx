@@ -3,18 +3,20 @@ import { Image } from "expo-image";
 import type { ImageLoadEventData } from "expo-image";
 import React, { useCallback, useMemo, useRef, useState } from "react";
 import {
+  ActivityIndicator,
   Dimensions,
   FlatList,
   Modal,
   Pressable,
   StatusBar,
   StyleSheet,
+  Text,
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get("window");
-const PIN_ICON_SIZE = 28;
+const PIN_ICON_SIZE = 30;
 
 interface ImageViewerModalProps {
   uris: string[];
@@ -33,11 +35,32 @@ interface ImageViewerModalProps {
   pinColor?: string;
 }
 
+function PinMarker({ color }: { color: string }) {
+  return (
+    <View style={styles.pinMarker} pointerEvents="none">
+      {/* White halo behind the icon for contrast on all backgrounds */}
+      <Feather
+        name="map-pin"
+        size={PIN_ICON_SIZE + 6}
+        color="white"
+        style={[styles.pinHalo]}
+      />
+      {/* Colored icon on top */}
+      <Feather
+        name="map-pin"
+        size={PIN_ICON_SIZE}
+        color={color}
+        style={styles.pinIcon}
+      />
+    </View>
+  );
+}
+
 function ImagePage({
   uri,
   onClose,
   pin,
-  pinColor,
+  pinColor = "#1D9E75",
 }: {
   uri: string;
   onClose: () => void;
@@ -45,6 +68,8 @@ function ImagePage({
   pinColor?: string;
 }) {
   const [imgSize, setImgSize] = useState<{ w: number; h: number } | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
 
   const pinPos = useMemo(() => {
     if (!pin || !imgSize) return null;
@@ -54,43 +79,48 @@ function ImagePage({
     const ox = (SCREEN_W - rw) / 2;
     const oy = (SCREEN_H - rh) / 2;
     return {
-      // horizontal: center of icon over pin point
-      left: ox + pin.x * rw - PIN_ICON_SIZE / 2,
-      // vertical: tip of map-pin (bottom of icon) at pin point
-      top: oy + pin.y * rh - PIN_ICON_SIZE,
+      // Center of icon horizontally, tip (bottom) anchors pin point vertically
+      left: ox + pin.x * rw - (PIN_ICON_SIZE + 6) / 2,
+      top: oy + pin.y * rh - PIN_ICON_SIZE - 6,
     };
   }, [pin, imgSize]);
 
   return (
     <Pressable style={styles.page} onPress={onClose}>
-      <Image
-        source={{ uri }}
-        style={styles.image}
-        contentFit="contain"
-        onLoad={(e: ImageLoadEventData) => {
-          const { width, height } = e.source;
-          if (width > 0 && height > 0) setImgSize({ w: width, h: height });
-        }}
-      />
-      {pinPos && (
-        <View
-          pointerEvents="none"
-          style={{
-            position: "absolute",
-            left: pinPos.left,
-            top: pinPos.top,
-          }}
-        >
-          <Feather
-            name="map-pin"
-            size={PIN_ICON_SIZE}
-            color={pinColor ?? "#1D9E75"}
-            style={{
-              textShadowColor: "rgba(0,0,0,0.6)",
-              textShadowRadius: 4,
-              textShadowOffset: { width: 0, height: 1 },
+      {error ? (
+        <View style={styles.errorState}>
+          <Feather name="image" size={48} color="rgba(255,255,255,0.4)" />
+          <Text style={styles.errorText}>Image unavailable</Text>
+        </View>
+      ) : (
+        <>
+          <Image
+            source={{ uri }}
+            style={styles.image}
+            contentFit="contain"
+            onLoad={(e: ImageLoadEventData) => {
+              setLoading(false);
+              const { width, height } = e.source;
+              if (width > 0 && height > 0) setImgSize({ w: width, h: height });
+            }}
+            onError={() => {
+              setLoading(false);
+              setError(true);
             }}
           />
+          {loading && (
+            <View style={styles.loadingOverlay} pointerEvents="none">
+              <ActivityIndicator size="large" color="rgba(255,255,255,0.7)" />
+            </View>
+          )}
+        </>
+      )}
+      {pinPos && !error && (
+        <View
+          pointerEvents="none"
+          style={[styles.pinWrap, { left: pinPos.left, top: pinPos.top }]}
+        >
+          <PinMarker color={pinColor} />
         </View>
       )}
     </Pressable>
@@ -113,7 +143,7 @@ export function ImageViewerModal({
   onClose,
   pin,
   pinPhotoIndex,
-  pinColor = "#085041",
+  pinColor = "#1D9E75",
 }: ImageViewerModalProps) {
   const insets = useSafeAreaInsets();
   const [currentIndex, setCurrentIndex] = useState(initialIndex);
@@ -147,7 +177,6 @@ export function ImageViewerModal({
   return (
     <Modal
       visible={visible}
-      transparent
       animationType="fade"
       onRequestClose={onClose}
       statusBarTranslucent
@@ -243,23 +272,57 @@ export function ImageViewerModal({
 const styles = StyleSheet.create({
   backdrop: {
     flex: 1,
-    backgroundColor: "rgba(0,0,0,0.93)",
+    backgroundColor: "#000",
   },
   page: {
     width: SCREEN_W,
     flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
   },
   image: {
-    width: "100%",
-    height: "100%",
+    width: SCREEN_W,
+    height: SCREEN_H,
   },
+  loadingOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  errorState: {
+    alignItems: "center",
+    gap: 12,
+  },
+  errorText: {
+    color: "rgba(255,255,255,0.5)",
+    fontSize: 15,
+    fontFamily: "Inter_400Regular",
+  },
+  /* ── Pin marker ── */
+  pinWrap: {
+    position: "absolute",
+  },
+  pinMarker: {
+    width: PIN_ICON_SIZE + 6,
+    height: PIN_ICON_SIZE + 6,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  pinHalo: {
+    position: "absolute",
+    opacity: 0.95,
+  },
+  pinIcon: {
+    position: "absolute",
+  },
+  /* ── Controls ── */
   closeBtn: {
     position: "absolute",
     right: 16,
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: "rgba(0,0,0,0.45)",
+    backgroundColor: "rgba(0,0,0,0.55)",
     alignItems: "center",
     justifyContent: "center",
   },
