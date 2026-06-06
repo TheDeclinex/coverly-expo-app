@@ -1,0 +1,235 @@
+You are working on the existing Coverly Expo / React Native mobile app.
+
+Important:
+Do not rebuild the app from scratch.
+Do not replace the existing login, property, room, or item navigation flow unless there is a clear bug.
+First inspect the current structure and preserve what already works.
+
+Current app already has:
+
+* Supabase login
+* properties flow
+* rooms flow
+* items flow
+* item detail flow
+
+Goal for this batch:
+Build the next core mobile product layer around the existing flow:
+
+1. Dashboard/statistics layer
+2. Manual add item with photo upload
+3. Edit item details
+4. Move item between rooms
+5. Better empty/loading/error states
+6. Reusable data/mapping helpers for future scan/claim-pack work
+
+Work in priority order. If time/token budget is limited, complete Priority 1 and 2 cleanly before starting later items.
+
+PRIORITY 1 — Dashboard/statistics layer
+
+Create reusable dashboard calculation logic, ideally in:
+
+* lib/dashboard-stats.ts
+* lib/inventory-mappers.ts if needed
+
+Calculate per property:
+
+* total contents value
+* total item count
+* room count
+* value by room
+* items by room
+* top 5 highest-value items
+* recorded insured/cover value if available
+* contents value vs recorded cover percentage
+* percentage of items with photos/evidence
+* percentage of items with estimated/replacement values
+* count of items needing review
+
+Be defensive with field names:
+
+* estimatedPrice, estimated_price, replacementPrice, replacement_price
+* photoUrl, photo_url, imageUrl, image_url, evidenceUrl, evidence_url
+* property_id, file_id, room_id, id
+* property name may be name, title, property_name, file_name
+* room name may be name, title, room_name
+
+Do not spread alias checks throughout screens. Use mapper/helper functions.
+
+Home dashboard:
+Enhance the existing home screen or app/(tabs)/index.tsx.
+Show:
+
+* selected/default property
+* total contents value
+* total item count
+* room count
+* contents vs recorded cover progress bar if cover value exists
+* value by room using lightweight horizontal bars
+* items by room using lightweight horizontal bars
+* top 5 highest-value items
+* claim readiness card
+* quick actions:
+
+  * Scan more photos
+  * Add item/photo manually
+  * Generate claim pack
+
+Property dashboard:
+Enhance the existing property detail screen without breaking room navigation.
+Show:
+
+* property name/address if available
+* total contents value
+* item count
+* room count
+* contents vs recorded cover progress bar if cover value exists
+* room cards showing room name, item count, and total room value
+* existing tap-through to rooms must keep working
+
+Use plain React Native horizontal bars. Do not add a heavy chart library unless already installed.
+
+Insurance wording:
+Do not give insurance or financial advice.
+Use neutral wording:
+
+* “Recorded contents value”
+* “Recorded cover value”
+* “Approaching recorded cover value”
+* “Review with your insurer if needed”
+
+Avoid:
+
+* “You are underinsured”
+* “You need more cover”
+* “Increase your policy”
+
+PRIORITY 2 — Manual add item with photo upload
+
+Add a mobile-friendly “Add item/photo manually” flow.
+
+It should be reachable from:
+
+* Home dashboard quick action
+* Property detail
+* Room item list
+
+User should be able to:
+
+* choose property/room if launched from Home
+* auto-select room if launched from a room
+* enter item name
+* enter description
+* enter category
+* enter estimated/replacement value
+* enter quantity if existing item model supports it
+* add/take/upload a photo using Expo ImagePicker if available
+* save item to Supabase
+* upload image to the existing Supabase storage bucket if the app already has one configured
+* store the resulting photo URL in the correct item image field
+
+Important:
+
+* Inspect existing storage/photo patterns before adding a new one.
+* Do not invent a new bucket unless no existing bucket can be found.
+* If bucket name is uncertain, centralise it in one config constant and leave a clear comment.
+* If photo upload is too much for this batch, still complete the manual item form and add a clear TODO for photo upload.
+
+PRIORITY 3 — Edit item details
+
+Enhance or add the item edit flow.
+
+User should be able to edit:
+
+* item name
+* description
+* category
+* estimated/replacement value
+* quantity if supported
+* photo if photo upload is available
+* room assignment if simple to include
+
+After save:
+
+* update Supabase
+* return to item detail or room item list
+* refresh local screen data
+* show clear success/error state
+
+Do not break the existing item detail screen.
+
+PRIORITY 4 — Move item between rooms
+
+Add a simple “Move to another room” action.
+
+Requirements:
+
+* available from item detail or edit item screen
+* show rooms in the same property
+* update the item’s room_id / equivalent field
+* after move, update UI so the item appears in the new room
+* do not delete and recreate the item
+* preserve item photo, value, description, and other fields
+
+PRIORITY 5 — Loading, empty, and error states
+
+Add reusable states if not already present:
+
+* components/LoadingState.tsx
+* components/ErrorState.tsx
+* components/EmptyState.tsx
+
+Use them on:
+
+* Home dashboard
+* Property list/detail
+* Room list/detail
+* Item list/detail
+* Add/edit item screens
+
+Avoid blank screens.
+If Supabase query fails, show a safe readable error and a retry button.
+Never expose full API keys or secrets.
+
+Design style:
+
+* soft off-white background
+* white rounded cards
+* slate/dark text
+* teal primary accents
+* clean spacing
+* mobile-first
+* safe area support
+* large tap targets
+* no heavy animations
+
+Performance:
+
+* Reuse existing Supabase fetch functions where possible.
+* Avoid duplicate queries from every component.
+* Keep dashboard calculations outside UI components.
+* Keep the structure ready for future cache-first loading, but do not build full offline mode in this batch.
+
+Do not build in this batch:
+
+* native AI scan processing
+* RevenueCat billing
+* claim pack generation
+* full offline sync
+* admin console
+* complex chart libraries
+* major navigation rewrite
+
+Acceptance criteria:
+
+1. Existing login still works.
+2. Existing property → room → item flow still works.
+3. Home dashboard shows real calculated data.
+4. Property dashboard shows real calculated data.
+5. Room value and item count bars render without a chart library.
+6. Manual item creation works and saves to Supabase.
+7. Manual item photo upload works if storage config is discoverable, otherwise form works with a clear TODO.
+8. Item edit works and saves to Supabase.
+9. Item can be moved between rooms without deleting/recreating it.
+10. No blank screens when data is missing.
+11. Code remains organised for later scan, claim pack, RevenueCat, and cache-first work.

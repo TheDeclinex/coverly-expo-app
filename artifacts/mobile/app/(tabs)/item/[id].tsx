@@ -1,10 +1,9 @@
 import { Feather } from "@expo/vector-icons";
 import { Image } from "expo-image";
-import { Stack, useLocalSearchParams } from "expo-router";
+import { Stack, router, useLocalSearchParams } from "expo-router";
 import { useQuery } from "@tanstack/react-query";
 import React from "react";
 import {
-  ActivityIndicator,
   Platform,
   Pressable,
   ScrollView,
@@ -14,18 +13,13 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+import { ErrorState } from "@/components/ErrorState";
+import { LoadingState } from "@/components/LoadingState";
 import { useAuth } from "@/context/AuthContext";
 import { useColors } from "@/hooks/useColors";
+import { formatCurrencyFull } from "@/lib/inventory-mappers";
 import { supabase } from "@/lib/supabase";
 import type { InventoryItem } from "@/types";
-
-function formatCurrency(value: number | null): string {
-  if (value === null || value === undefined) return "—";
-  return `£${value.toLocaleString("en-GB", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  })}`;
-}
 
 function DetailRow({
   label,
@@ -107,43 +101,40 @@ export default function ItemDetailScreen() {
 
   const imageUri = item?.image_url ?? item?.photo_url;
 
+  const handleEdit = async () => {
+    router.push({
+      pathname: "/(tabs)/edit-item/[id]",
+      params: { id: id! },
+    });
+  };
+
   return (
     <>
-      <Stack.Screen options={{ title: name ?? "Item Detail" }} />
+      <Stack.Screen
+        options={{
+          title: name ?? "Item Detail",
+          headerRight: () => (
+            <Pressable onPress={handleEdit} style={{ padding: 4 }} hitSlop={8}>
+              <Feather name="edit-2" size={18} color={colors.primary} />
+            </Pressable>
+          ),
+        }}
+      />
       {isLoading ? (
-        <View style={styles.center}>
-          <ActivityIndicator size="large" color={colors.primary} />
-        </View>
+        <LoadingState />
       ) : error ? (
-        <View style={styles.center}>
-          <Feather name="alert-circle" size={40} color={colors.destructive} />
-          <Text style={[styles.errorText, { color: colors.destructive }]}>
-            Failed to load item
-          </Text>
-          <Text style={[styles.errorSub, { color: colors.mutedForeground }]}>
-            {(error as Error).message}
-          </Text>
-          <Pressable
-            onPress={() => refetch()}
-            style={[
-              styles.retryButton,
-              { backgroundColor: colors.primary, borderRadius: colors.radius },
-            ]}
-          >
-            <Text style={[styles.retryText, { color: colors.primaryForeground }]}>
-              Retry
-            </Text>
-          </Pressable>
-        </View>
+        <ErrorState
+          message="Failed to load item"
+          detail={(error as Error).message}
+          onRetry={refetch}
+        />
       ) : item ? (
         <ScrollView
           contentContainerStyle={[
             styles.scrollContent,
             {
               paddingBottom: insets.bottom + 32,
-              ...(Platform.OS === "web"
-                ? { paddingTop: 16 }
-                : {}),
+              ...(Platform.OS === "web" ? { paddingTop: 16 } : {}),
             },
           ]}
           showsVerticalScrollIndicator={false}
@@ -156,10 +147,7 @@ export default function ItemDetailScreen() {
             />
           ) : (
             <View
-              style={[
-                styles.heroPlaceholder,
-                { backgroundColor: colors.secondary },
-              ]}
+              style={[styles.heroPlaceholder, { backgroundColor: colors.secondary }]}
             >
               <Feather name="package" size={48} color={colors.primary} />
             </View>
@@ -167,26 +155,18 @@ export default function ItemDetailScreen() {
 
           <View style={styles.content}>
             <View style={styles.titleRow}>
-              <Text
-                style={[styles.itemName, { color: colors.foreground }]}
-              >
+              <Text style={[styles.itemName, { color: colors.foreground }]}>
                 {item.name}
               </Text>
               {item.category && (
                 <View
                   style={[
                     styles.categoryBadge,
-                    {
-                      backgroundColor: colors.accent,
-                      borderRadius: 8,
-                    },
+                    { backgroundColor: colors.accent, borderRadius: 8 },
                   ]}
                 >
                   <Text
-                    style={[
-                      styles.categoryText,
-                      { color: colors.accentForeground },
-                    ]}
+                    style={[styles.categoryText, { color: colors.accentForeground }]}
                   >
                     {item.category}
                   </Text>
@@ -195,29 +175,41 @@ export default function ItemDetailScreen() {
             </View>
 
             {item.description && (
-              <Text
-                style={[styles.description, { color: colors.mutedForeground }]}
-              >
+              <Text style={[styles.description, { color: colors.mutedForeground }]}>
                 {item.description}
               </Text>
             )}
 
+            <Pressable
+              onPress={handleEdit}
+              style={({ pressed }) => [
+                styles.editBtn,
+                {
+                  backgroundColor: colors.secondary,
+                  borderRadius: colors.radius,
+                  borderColor: colors.border,
+                  opacity: pressed ? 0.8 : 1,
+                },
+              ]}
+            >
+              <Feather name="edit-2" size={15} color={colors.primary} />
+              <Text style={[styles.editBtnText, { color: colors.primary }]}>
+                Edit item
+              </Text>
+            </Pressable>
+
             <Section title="VALUATION" colors={colors}>
               <DetailRow
                 label="Estimated replacement"
-                value={formatCurrency(item.estimated_price)}
+                value={formatCurrencyFull(item.estimated_price)}
                 colors={colors}
               />
               <DetailRow
                 label="Unit price"
-                value={formatCurrency(item.unit_estimated_price)}
+                value={formatCurrencyFull(item.unit_estimated_price)}
                 colors={colors}
               />
-              <DetailRow
-                label="Quantity"
-                value={item.quantity}
-                colors={colors}
-              />
+              <DetailRow label="Quantity" value={item.quantity} colors={colors} />
               <DetailRow
                 label="Quantity estimate"
                 value={item.quantity_estimate}
@@ -228,16 +220,10 @@ export default function ItemDetailScreen() {
                 value={item.valuation_basis}
                 colors={colors}
               />
-              <DetailRow
-                label="Confidence"
-                value={item.confidence}
-                colors={colors}
-              />
+              <DetailRow label="Confidence" value={item.confidence} colors={colors} />
             </Section>
 
-            {(item.brand_maker ||
-              item.model_series ||
-              item.condition_label) && (
+            {(item.brand_maker || item.model_series || item.condition_label) && (
               <Section title="PRODUCT INFO" colors={colors}>
                 <DetailRow
                   label="Brand / Maker"
@@ -263,7 +249,7 @@ export default function ItemDetailScreen() {
               <Section title="PURCHASE HISTORY" colors={colors}>
                 <DetailRow
                   label="Original price"
-                  value={formatCurrency(item.original_purchase_price)}
+                  value={formatCurrencyFull(item.original_purchase_price)}
                   colors={colors}
                 />
                 <DetailRow
@@ -288,7 +274,7 @@ export default function ItemDetailScreen() {
                 />
                 <DetailRow
                   label="Listed price"
-                  value={formatCurrency(item.web_listing_price)}
+                  value={formatCurrencyFull(item.web_listing_price)}
                   colors={colors}
                 />
                 <DetailRow
@@ -301,9 +287,7 @@ export default function ItemDetailScreen() {
 
             {item.notes && (
               <Section title="NOTES" colors={colors}>
-                <Text
-                  style={[styles.notes, { color: colors.foreground }]}
-                >
+                <Text style={[styles.notes, { color: colors.foreground }]}>
                   {item.notes}
                 </Text>
               </Section>
@@ -316,26 +300,16 @@ export default function ItemDetailScreen() {
 }
 
 const styles = StyleSheet.create({
-  scrollContent: {
-    flexGrow: 1,
-  },
-  heroImage: {
-    width: "100%",
-    height: 280,
-  },
+  scrollContent: { flexGrow: 1 },
+  heroImage: { width: "100%", height: 280 },
   heroPlaceholder: {
     width: "100%",
     height: 220,
     alignItems: "center",
     justifyContent: "center",
   },
-  content: {
-    padding: 16,
-    gap: 12,
-  },
-  titleRow: {
-    gap: 8,
-  },
+  content: { padding: 16, gap: 12 },
+  titleRow: { gap: 8 },
   itemName: {
     fontSize: 22,
     fontFamily: "Inter_700Bold",
@@ -356,6 +330,19 @@ const styles = StyleSheet.create({
     fontFamily: "Inter_400Regular",
     lineHeight: 22,
     marginTop: 4,
+  },
+  editBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderWidth: 1,
+    alignSelf: "flex-start",
+  },
+  editBtnText: {
+    fontSize: 14,
+    fontFamily: "Inter_500Medium",
   },
   section: {
     borderWidth: 1,
@@ -393,31 +380,5 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontFamily: "Inter_400Regular",
     lineHeight: 22,
-  },
-  center: {
-    flex: 1,
-    alignItems: "center",
-    justifyContent: "center",
-    padding: 32,
-    gap: 12,
-  },
-  errorText: {
-    fontSize: 16,
-    fontFamily: "Inter_600SemiBold",
-    textAlign: "center",
-  },
-  errorSub: {
-    fontSize: 13,
-    fontFamily: "Inter_400Regular",
-    textAlign: "center",
-  },
-  retryButton: {
-    marginTop: 8,
-    paddingHorizontal: 24,
-    paddingVertical: 10,
-  },
-  retryText: {
-    fontSize: 15,
-    fontFamily: "Inter_500Medium",
   },
 });

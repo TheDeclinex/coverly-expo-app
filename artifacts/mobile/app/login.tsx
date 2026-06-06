@@ -34,7 +34,7 @@ export default function LoginScreen() {
   const [testLoading, setTestLoading] = useState(false);
 
   if (session) {
-    return <Redirect href="/(tabs)/" />;
+    return <Redirect href="/(tabs)" />;
   }
 
   const HEALTH_URL = "https://krbrmskfvpjukcbkbegc.supabase.co/auth/v1/health";

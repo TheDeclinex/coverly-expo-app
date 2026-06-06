@@ -3,9 +3,8 @@ import { Image } from "expo-image";
 import * as Haptics from "expo-haptics";
 import { Stack, router, useLocalSearchParams } from "expo-router";
 import { useQuery } from "@tanstack/react-query";
-import React from "react";
+import React, { useMemo } from "react";
 import {
-  ActivityIndicator,
   FlatList,
   Platform,
   Pressable,
@@ -16,10 +15,15 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+import { EmptyState } from "@/components/EmptyState";
+import { ErrorState } from "@/components/ErrorState";
+import { LoadingState } from "@/components/LoadingState";
 import { useAuth } from "@/context/AuthContext";
 import { useColors } from "@/hooks/useColors";
+import { calcPropertyStats } from "@/lib/dashboard-stats";
+import { formatCurrency } from "@/lib/inventory-mappers";
 import { supabase } from "@/lib/supabase";
-import type { InventoryRoom } from "@/types";
+import type { InventoryFile, InventoryItem, InventoryRoom } from "@/types";
 
 const ROOM_ICONS: Record<string, string> = {
   kitchen: "coffee",
@@ -42,18 +46,125 @@ function roomIcon(roomType: string | null): string {
   return ROOM_ICONS[key] ?? "square";
 }
 
+function MiniBar({
+  value,
+  max,
+  color,
+}: {
+  value: number;
+  max: number;
+  color: string;
+}) {
+  const pct = max > 0 ? Math.min(value / max, 1) : 0;
+  return (
+    <View
+      style={{
+        height: 6,
+        borderRadius: 3,
+        backgroundColor: "#E2E8F0",
+        overflow: "hidden",
+        flex: 1,
+      }}
+    >
+      <View
+        style={{
+          height: 6,
+          borderRadius: 3,
+          width: `${pct * 100}%` as any,
+          backgroundColor: color,
+        }}
+      />
+    </View>
+  );
+}
+
+function CoverageBar({
+  percent,
+  colors,
+}: {
+  percent: number;
+  colors: ReturnType<typeof import("@/hooks/useColors").useColors>;
+}) {
+  const clamped = Math.min(percent, 100);
+  const isHigh = percent >= 90;
+  const fillColor = isHigh ? colors.warning : colors.primary;
+  const label =
+    percent >= 100
+      ? "Recorded cover reached — review with your insurer"
+      : percent >= 90
+        ? "Approaching recorded cover value"
+        : `${Math.round(percent)}% of recorded cover value`;
+
+  return (
+    <View style={{ gap: 6 }}>
+      <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
+        <Text
+          style={{
+            fontSize: 12,
+            fontFamily: "Inter_400Regular",
+            color: colors.mutedForeground,
+          }}
+        >
+          Recorded contents value vs cover
+        </Text>
+        <Text
+          style={{
+            fontSize: 12,
+            fontFamily: "Inter_500Medium",
+            color: isHigh ? colors.warning : colors.mutedForeground,
+          }}
+        >
+          {Math.round(percent)}%
+        </Text>
+      </View>
+      <View
+        style={{
+          height: 8,
+          borderRadius: 4,
+          backgroundColor: colors.border,
+          overflow: "hidden",
+        }}
+      >
+        <View
+          style={{
+            height: 8,
+            borderRadius: 4,
+            width: `${clamped}%` as any,
+            backgroundColor: fillColor,
+          }}
+        />
+      </View>
+      <Text
+        style={{
+          fontSize: 11,
+          fontFamily: "Inter_400Regular",
+          color: colors.mutedForeground,
+        }}
+      >
+        {label}
+      </Text>
+    </View>
+  );
+}
+
 function RoomCard({
   item,
+  itemCount,
+  totalValue,
+  maxValue,
   colors,
 }: {
   item: InventoryRoom;
+  itemCount: number;
+  totalValue: number;
+  maxValue: number;
   colors: ReturnType<typeof import("@/hooks/useColors").useColors>;
 }) {
   const handlePress = async () => {
     await Haptics.selectionAsync();
     router.push({
       pathname: "/(tabs)/room/[id]",
-      params: { id: item.id, name: item.name },
+      params: { id: item.id, name: item.name, fileId: item.file_id },
     });
   };
 
@@ -70,29 +181,28 @@ function RoomCard({
         },
       ]}
     >
-      {item.cover_photo_url ? (
-        <Image
-          source={{ uri: item.cover_photo_url }}
-          style={[styles.cardImage, { borderRadius: colors.radius }]}
-          contentFit="cover"
-        />
-      ) : (
-        <View
-          style={[
-            styles.cardImagePlaceholder,
-            {
-              backgroundColor: colors.secondary,
-              borderRadius: colors.radius,
-            },
-          ]}
-        >
-          <Feather
-            name={roomIcon(item.room_type) as any}
-            size={28}
-            color={colors.primary}
+      <View style={styles.cardLeft}>
+        {item.cover_photo_url ? (
+          <Image
+            source={{ uri: item.cover_photo_url }}
+            style={styles.roomThumb}
+            contentFit="cover"
           />
-        </View>
-      )}
+        ) : (
+          <View
+            style={[
+              styles.roomThumbPlaceholder,
+              { backgroundColor: colors.secondary },
+            ]}
+          >
+            <Feather
+              name={roomIcon(item.room_type) as any}
+              size={20}
+              color={colors.primary}
+            />
+          </View>
+        )}
+      </View>
       <View style={styles.cardBody}>
         <View style={styles.cardRow}>
           <Text
@@ -103,31 +213,27 @@ function RoomCard({
           </Text>
           <Feather
             name="chevron-right"
-            size={18}
+            size={16}
             color={colors.mutedForeground}
           />
         </View>
-        {item.room_type && (
-          <Text
-            style={[styles.cardType, { color: colors.mutedForeground }]}
-          >
-            {item.room_type.replace(/_/g, " ")}
+        <View style={styles.cardMeta}>
+          <Text style={[styles.metaText, { color: colors.mutedForeground }]}>
+            {itemCount} {itemCount === 1 ? "item" : "items"}
           </Text>
-        )}
-        {item.notes && (
-          <Text
-            style={[styles.cardNotes, { color: colors.mutedForeground }]}
-            numberOfLines={2}
-          >
-            {item.notes}
+          <Text style={[styles.metaValue, { color: colors.primary }]}>
+            {formatCurrency(totalValue || null)}
           </Text>
-        )}
+        </View>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginTop: 4 }}>
+          <MiniBar value={totalValue} max={maxValue} color={colors.primary} />
+        </View>
       </View>
     </Pressable>
   );
 }
 
-export default function RoomsScreen() {
+export default function PropertyDetailScreen() {
   const { id, name } = useLocalSearchParams<{ id: string; name: string }>();
   const { session } = useAuth();
   const colors = useColors();
@@ -135,66 +241,239 @@ export default function RoomsScreen() {
 
   const {
     data: rooms,
-    isLoading,
-    error,
+    isLoading: roomsLoading,
+    error: roomsError,
     refetch,
     isRefetching,
   } = useQuery({
     queryKey: ["rooms", id, session?.user.id],
     queryFn: async () => {
-      const { data, error: queryError } = await supabase
+      const { data, error } = await supabase
         .from("inventory_rooms")
         .select("*")
         .eq("file_id", id)
         .is("archived_at", null)
         .order("sort_order", { ascending: true });
-      if (queryError) throw queryError;
+      if (error) throw error;
       return (data ?? []) as InventoryRoom[];
     },
     enabled: !!session && !!id,
   });
 
-  return (
-    <>
-      <Stack.Screen options={{ title: name ?? "Rooms" }} />
-      {isLoading ? (
-        <View style={styles.center}>
-          <ActivityIndicator size="large" color={colors.primary} />
+  const { data: items, isLoading: itemsLoading } = useQuery({
+    queryKey: ["property-items", id, session?.user.id],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("inventory_items")
+        .select(
+          "id, file_id, room_id, name, estimated_price, unit_estimated_price, quantity, image_url, photo_url"
+        )
+        .eq("file_id", id);
+      if (error) throw error;
+      return (data ?? []) as InventoryItem[];
+    },
+    enabled: !!session && !!id,
+  });
+
+  const { data: property } = useQuery({
+    queryKey: ["property", id, session?.user.id],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("inventory_files")
+        .select("*")
+        .eq("id", id)
+        .single();
+      if (error) throw error;
+      return data as InventoryFile;
+    },
+    enabled: !!session && !!id,
+  });
+
+  const stats = useMemo(() => {
+    if (!property || !rooms || !items) return null;
+    return calcPropertyStats(property, rooms, items);
+  }, [property, rooms, items]);
+
+  const maxRoomValue = stats
+    ? Math.max(...stats.roomStats.map((r) => r.totalValue), 1)
+    : 1;
+
+  const isLoading = roomsLoading || itemsLoading;
+
+  const renderHeader = () => {
+    if (!stats) return null;
+    return (
+      <View style={{ gap: 12, paddingHorizontal: 16, paddingTop: 16 }}>
+        <View
+          style={[
+            styles.statsCard,
+            {
+              backgroundColor: colors.card,
+              borderColor: colors.border,
+              borderRadius: colors.radius,
+            },
+          ]}
+        >
+          <Text
+            style={[styles.sectionLabel, { color: colors.mutedForeground }]}
+          >
+            PROPERTY SUMMARY
+          </Text>
+          <View style={styles.statsRow}>
+            <View style={styles.statCell}>
+              <Text style={[styles.bigValue, { color: colors.foreground }]}>
+                {formatCurrency(stats.totalValue || null)}
+              </Text>
+              <Text style={[styles.bigLabel, { color: colors.mutedForeground }]}>
+                Inventory value
+              </Text>
+            </View>
+            <View
+              style={[styles.statDivider, { backgroundColor: colors.border }]}
+            />
+            <View style={styles.statCell}>
+              <Text style={[styles.bigValue, { color: colors.foreground }]}>
+                {stats.itemCount}
+              </Text>
+              <Text style={[styles.bigLabel, { color: colors.mutedForeground }]}>
+                Items
+              </Text>
+            </View>
+            <View
+              style={[styles.statDivider, { backgroundColor: colors.border }]}
+            />
+            <View style={styles.statCell}>
+              <Text style={[styles.bigValue, { color: colors.foreground }]}>
+                {stats.roomCount}
+              </Text>
+              <Text style={[styles.bigLabel, { color: colors.mutedForeground }]}>
+                Rooms
+              </Text>
+            </View>
+          </View>
+
+          {stats.coveragePercent != null && (
+            <View style={{ marginTop: 12 }}>
+              <CoverageBar percent={stats.coveragePercent} colors={colors} />
+            </View>
+          )}
+
+          {stats.itemCount > 0 && (
+            <View style={styles.claimRow}>
+              <View style={styles.claimStat}>
+                <Feather
+                  name="camera"
+                  size={14}
+                  color={
+                    stats.photoPercent >= 80
+                      ? colors.success
+                      : colors.mutedForeground
+                  }
+                />
+                <Text
+                  style={[styles.claimText, { color: colors.mutedForeground }]}
+                >
+                  {Math.round(stats.photoPercent)}% have photos
+                </Text>
+              </View>
+              <View style={styles.claimStat}>
+                <Feather
+                  name="tag"
+                  size={14}
+                  color={
+                    stats.valuePercent >= 80
+                      ? colors.success
+                      : colors.mutedForeground
+                  }
+                />
+                <Text
+                  style={[styles.claimText, { color: colors.mutedForeground }]}
+                >
+                  {Math.round(stats.valuePercent)}% valued
+                </Text>
+              </View>
+              {stats.itemsNeedingReview > 0 && (
+                <View style={styles.claimStat}>
+                  <Feather
+                    name="alert-circle"
+                    size={14}
+                    color={colors.warning}
+                  />
+                  <Text
+                    style={[styles.claimText, { color: colors.mutedForeground }]}
+                  >
+                    {stats.itemsNeedingReview} need review
+                  </Text>
+                </View>
+              )}
+            </View>
+          )}
         </View>
-      ) : error ? (
-        <View style={styles.center}>
-          <Feather name="alert-circle" size={40} color={colors.destructive} />
-          <Text style={[styles.errorText, { color: colors.destructive }]}>
-            Failed to load rooms
-          </Text>
-          <Text style={[styles.errorSub, { color: colors.mutedForeground }]}>
-            {(error as Error).message}
-          </Text>
+
+        <View style={{ flexDirection: "row", gap: 10 }}>
           <Pressable
-            onPress={() => refetch()}
-            style={[
-              styles.retryButton,
-              { backgroundColor: colors.primary, borderRadius: colors.radius },
+            onPress={() =>
+              router.push({
+                pathname: "/(tabs)/add-item",
+                params: { fileId: id, fileName: name },
+              })
+            }
+            style={({ pressed }) => [
+              styles.actionBtn,
+              {
+                backgroundColor: colors.primary,
+                borderRadius: colors.radius,
+                opacity: pressed ? 0.85 : 1,
+              },
             ]}
           >
-            <Text style={[styles.retryText, { color: colors.primaryForeground }]}>
-              Retry
+            <Feather name="plus" size={16} color={colors.primaryForeground} />
+            <Text
+              style={[styles.actionBtnText, { color: colors.primaryForeground }]}
+            >
+              Add item
             </Text>
           </Pressable>
         </View>
+
+        <Text style={[styles.sectionHeading, { color: colors.foreground }]}>
+          Rooms
+        </Text>
+      </View>
+    );
+  };
+
+  return (
+    <>
+      <Stack.Screen options={{ title: name ?? "Property" }} />
+      {isLoading ? (
+        <LoadingState />
+      ) : roomsError ? (
+        <ErrorState
+          message="Failed to load rooms"
+          detail={(roomsError as Error).message}
+          onRetry={refetch}
+        />
       ) : (
         <FlatList
-          data={rooms}
-          keyExtractor={(item) => item.id}
-          renderItem={({ item }) => <RoomCard item={item} colors={colors} />}
-          contentContainerStyle={[
-            styles.list,
-            {
-              paddingBottom: insets.bottom + 24,
-              ...(Platform.OS === "web" ? { paddingTop: 16 } : {}),
-            },
-          ]}
-          scrollEnabled={!!(rooms && rooms.length > 0)}
+          data={stats ? stats.roomStats.map((rs) => rs) : []}
+          keyExtractor={(rs) => rs.room.id}
+          renderItem={({ item: rs }) => (
+            <View style={{ paddingHorizontal: 16, marginBottom: 10 }}>
+              <RoomCard
+                item={rs.room}
+                itemCount={rs.itemCount}
+                totalValue={rs.totalValue}
+                maxValue={maxRoomValue}
+                colors={colors}
+              />
+            </View>
+          )}
+          ListHeaderComponent={renderHeader}
+          contentContainerStyle={{
+            paddingBottom: insets.bottom + 24,
+            ...(Platform.OS === "web" ? { paddingTop: 0 } : {}),
+          }}
           refreshControl={
             <RefreshControl
               refreshing={isRefetching}
@@ -203,19 +482,12 @@ export default function RoomsScreen() {
             />
           }
           ListEmptyComponent={
-            <View style={styles.empty}>
-              <Feather name="layers" size={48} color={colors.border} />
-              <Text style={[styles.emptyTitle, { color: colors.foreground }]}>
-                No rooms found
-              </Text>
-              <Text
-                style={[
-                  styles.emptySubtitle,
-                  { color: colors.mutedForeground },
-                ]}
-              >
-                Rooms will appear here once added
-              </Text>
+            <View style={{ paddingHorizontal: 16, paddingTop: 16 }}>
+              <EmptyState
+                icon="layers"
+                title="No rooms found"
+                subtitle="Rooms will appear here once added"
+              />
             </View>
           }
         />
@@ -225,27 +497,96 @@ export default function RoomsScreen() {
 }
 
 const styles = StyleSheet.create({
-  list: {
+  statsCard: {
+    borderWidth: 1,
     padding: 16,
+    gap: 4,
+  },
+  sectionLabel: {
+    fontSize: 11,
+    fontFamily: "Inter_600SemiBold",
+    letterSpacing: 0.8,
+    marginBottom: 8,
+  },
+  sectionHeading: {
+    fontSize: 18,
+    fontFamily: "Inter_700Bold",
+    marginTop: 4,
+    marginBottom: 2,
+  },
+  statsRow: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  statCell: {
+    flex: 1,
+    alignItems: "center",
+    gap: 2,
+  },
+  statDivider: {
+    width: 1,
+    height: 36,
+    marginHorizontal: 4,
+  },
+  bigValue: {
+    fontSize: 20,
+    fontFamily: "Inter_700Bold",
+  },
+  bigLabel: {
+    fontSize: 11,
+    fontFamily: "Inter_400Regular",
+    textAlign: "center",
+  },
+  claimRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 12,
+    marginTop: 12,
+    paddingTop: 12,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: "rgba(0,0,0,0.08)",
+  },
+  claimStat: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+  },
+  claimText: {
+    fontSize: 12,
+    fontFamily: "Inter_400Regular",
+  },
+  actionBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+  },
+  actionBtnText: {
+    fontSize: 14,
+    fontFamily: "Inter_600SemiBold",
   },
   card: {
     borderWidth: 1,
     overflow: "hidden",
-    marginBottom: 12,
+    flexDirection: "row",
+    alignItems: "center",
   },
-  cardImage: {
-    width: "100%",
-    height: 120,
+  cardLeft: {},
+  roomThumb: {
+    width: 72,
+    height: 72,
   },
-  cardImagePlaceholder: {
-    width: "100%",
-    height: 120,
+  roomThumbPlaceholder: {
+    width: 72,
+    height: 72,
     alignItems: "center",
     justifyContent: "center",
   },
   cardBody: {
-    padding: 14,
-    gap: 4,
+    flex: 1,
+    padding: 12,
+    gap: 2,
   },
   cardRow: {
     flexDirection: "row",
@@ -253,60 +594,22 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
   },
   cardName: {
-    fontSize: 16,
-    fontFamily: "Inter_600SemiBold",
-    flex: 1,
-    marginRight: 8,
-  },
-  cardType: {
-    fontSize: 13,
-    fontFamily: "Inter_400Regular",
-    textTransform: "capitalize",
-  },
-  cardNotes: {
-    fontSize: 13,
-    fontFamily: "Inter_400Regular",
-    marginTop: 2,
-  },
-  center: {
-    flex: 1,
-    alignItems: "center",
-    justifyContent: "center",
-    padding: 32,
-    gap: 12,
-  },
-  errorText: {
-    fontSize: 16,
-    fontFamily: "Inter_600SemiBold",
-    textAlign: "center",
-  },
-  errorSub: {
-    fontSize: 13,
-    fontFamily: "Inter_400Regular",
-    textAlign: "center",
-  },
-  retryButton: {
-    marginTop: 8,
-    paddingHorizontal: 24,
-    paddingVertical: 10,
-  },
-  retryText: {
     fontSize: 15,
-    fontFamily: "Inter_500Medium",
-  },
-  empty: {
-    alignItems: "center",
-    justifyContent: "center",
-    paddingTop: 80,
-    gap: 12,
-  },
-  emptyTitle: {
-    fontSize: 18,
     fontFamily: "Inter_600SemiBold",
+    flex: 1,
+    marginRight: 4,
   },
-  emptySubtitle: {
-    fontSize: 14,
+  cardMeta: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+  },
+  metaText: {
+    fontSize: 12,
     fontFamily: "Inter_400Regular",
-    textAlign: "center",
+  },
+  metaValue: {
+    fontSize: 13,
+    fontFamily: "Inter_600SemiBold",
   },
 });

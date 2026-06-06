@@ -1,0 +1,2 @@
+- [Supabase iOS fetch fix](supabase-ios-fetch.md) — must pass `global: { fetch: fetch.bind(globalThis) }` to createClient or signIn fails on iOS
+- [Coverly app architecture](coverly-architecture.md) — Supabase tables, navigation structure, and storage bucket TODO

@@ -5,7 +5,6 @@ import { Stack, router, useLocalSearchParams } from "expo-router";
 import { useQuery } from "@tanstack/react-query";
 import React from "react";
 import {
-  ActivityIndicator,
   FlatList,
   Platform,
   Pressable,
@@ -16,18 +15,14 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+import { EmptyState } from "@/components/EmptyState";
+import { ErrorState } from "@/components/ErrorState";
+import { LoadingState } from "@/components/LoadingState";
 import { useAuth } from "@/context/AuthContext";
 import { useColors } from "@/hooks/useColors";
+import { formatCurrency } from "@/lib/inventory-mappers";
 import { supabase } from "@/lib/supabase";
 import type { InventoryItem } from "@/types";
-
-function formatCurrency(value: number | null): string {
-  if (value === null || value === undefined) return "—";
-  return `£${value.toLocaleString("en-GB", {
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 0,
-  })}`;
-}
 
 function ItemCard({
   item,
@@ -60,18 +55,9 @@ function ItemCard({
       ]}
     >
       {imageUri ? (
-        <Image
-          source={{ uri: imageUri }}
-          style={styles.cardImage}
-          contentFit="cover"
-        />
+        <Image source={{ uri: imageUri }} style={styles.cardImage} contentFit="cover" />
       ) : (
-        <View
-          style={[
-            styles.cardImagePlaceholder,
-            { backgroundColor: colors.muted },
-          ]}
-        >
+        <View style={[styles.cardImagePlaceholder, { backgroundColor: colors.muted }]}>
           <Feather name="package" size={22} color={colors.mutedForeground} />
         </View>
       )}
@@ -84,15 +70,8 @@ function ItemCard({
         </Text>
         <View style={styles.cardMeta}>
           {item.category && (
-            <View
-              style={[
-                styles.badge,
-                { backgroundColor: colors.accent, borderRadius: 6 },
-              ]}
-            >
-              <Text
-                style={[styles.badgeText, { color: colors.accentForeground }]}
-              >
+            <View style={[styles.badge, { backgroundColor: colors.accent, borderRadius: 6 }]}>
+              <Text style={[styles.badgeText, { color: colors.accentForeground }]}>
                 {item.category}
               </Text>
             </View>
@@ -117,7 +96,11 @@ function ItemCard({
 }
 
 export default function ItemsScreen() {
-  const { id, name } = useLocalSearchParams<{ id: string; name: string }>();
+  const { id, name, fileId } = useLocalSearchParams<{
+    id: string;
+    name: string;
+    fileId?: string;
+  }>();
   const { session } = useAuth();
   const colors = useColors();
   const insets = useSafeAreaInsets();
@@ -142,71 +125,86 @@ export default function ItemsScreen() {
     enabled: !!session && !!id,
   });
 
+  const handleAddItem = async () => {
+    await Haptics.selectionAsync();
+    router.push({
+      pathname: "/(tabs)/add-item",
+      params: { roomId: id, roomName: name, fileId: fileId ?? "" },
+    });
+  };
+
   return (
     <>
-      <Stack.Screen options={{ title: name ?? "Items" }} />
+      <Stack.Screen
+        options={{
+          title: name ?? "Items",
+          headerRight: () => (
+            <Pressable onPress={handleAddItem} style={{ padding: 4 }} hitSlop={8}>
+              <Feather name="plus" size={22} color={colors.primary} />
+            </Pressable>
+          ),
+        }}
+      />
       {isLoading ? (
-        <View style={styles.center}>
-          <ActivityIndicator size="large" color={colors.primary} />
-        </View>
+        <LoadingState />
       ) : error ? (
-        <View style={styles.center}>
-          <Feather name="alert-circle" size={40} color={colors.destructive} />
-          <Text style={[styles.errorText, { color: colors.destructive }]}>
-            Failed to load items
-          </Text>
-          <Text style={[styles.errorSub, { color: colors.mutedForeground }]}>
-            {(error as Error).message}
-          </Text>
-          <Pressable
-            onPress={() => refetch()}
+        <ErrorState
+          message="Failed to load items"
+          detail={(error as Error).message}
+          onRetry={refetch}
+        />
+      ) : (
+        <>
+          <FlatList
+            data={items}
+            keyExtractor={(item) => item.id}
+            renderItem={({ item }) => <ItemCard item={item} colors={colors} />}
+            contentContainerStyle={[
+              styles.list,
+              {
+                paddingBottom: insets.bottom + 88,
+                ...(Platform.OS === "web" ? { paddingTop: 16 } : {}),
+              },
+            ]}
+            refreshControl={
+              <RefreshControl
+                refreshing={isRefetching}
+                onRefresh={refetch}
+                tintColor={colors.primary}
+              />
+            }
+            ListEmptyComponent={
+              <EmptyState
+                icon="package"
+                title="No items in this room"
+                subtitle="Tap + to add your first item"
+              />
+            }
+          />
+          <View
             style={[
-              styles.retryButton,
-              { backgroundColor: colors.primary, borderRadius: colors.radius },
+              styles.fab,
+              {
+                bottom: insets.bottom + 20,
+                backgroundColor: colors.primary,
+              },
             ]}
           >
-            <Text style={[styles.retryText, { color: colors.primaryForeground }]}>
-              Retry
-            </Text>
-          </Pressable>
-        </View>
-      ) : (
-        <FlatList
-          data={items}
-          keyExtractor={(item) => item.id}
-          renderItem={({ item }) => <ItemCard item={item} colors={colors} />}
-          contentContainerStyle={[
-            styles.list,
-            {
-              paddingBottom: insets.bottom + 24,
-              ...(Platform.OS === "web" ? { paddingTop: 16 } : {}),
-            },
-          ]}
-          scrollEnabled={!!(items && items.length > 0)}
-          refreshControl={
-            <RefreshControl
-              refreshing={isRefetching}
-              onRefresh={refetch}
-              tintColor={colors.primary}
-            />
-          }
-          ListEmptyComponent={
-            <View style={styles.empty}>
-              <Feather name="package" size={48} color={colors.border} />
-              <Text style={[styles.emptyTitle, { color: colors.foreground }]}>
-                No items in this room
+            <Pressable
+              onPress={handleAddItem}
+              style={({ pressed }) => [
+                styles.fabInner,
+                { opacity: pressed ? 0.85 : 1 },
+              ]}
+              hitSlop={8}
+            >
+              <Feather name="plus" size={24} color={colors.primaryForeground} />
+              <Text style={[styles.fabText, { color: colors.primaryForeground }]}>
+                Add item
               </Text>
-              <Text
-                style={[
-                  styles.emptySubtitle,
-                  { color: colors.mutedForeground },
-                ]}
-              >
-                Items will appear here once added
-              </Text>
-            </View>
-          }
-        />
+            </Pressable>
+          </View>
+        </>
       )}
     </>
   );
@@ -223,92 +221,47 @@ const styles = StyleSheet.create({
     marginBottom: 10,
     alignItems: "center",
   },
-  cardImage: {
-    width: 72,
-    height: 72,
-  },
+  cardImage: { width: 72, height: 72 },
   cardImagePlaceholder: {
     width: 72,
     height: 72,
     alignItems: "center",
     justifyContent: "center",
   },
-  cardBody: {
-    flex: 1,
-    padding: 12,
-    gap: 4,
-  },
-  cardName: {
-    fontSize: 15,
-    fontFamily: "Inter_600SemiBold",
-    lineHeight: 20,
-  },
+  cardBody: { flex: 1, padding: 12, gap: 4 },
+  cardName: { fontSize: 15, fontFamily: "Inter_600SemiBold", lineHeight: 20 },
   cardMeta: {
     flexDirection: "row",
     alignItems: "center",
     gap: 8,
     flexWrap: "wrap",
   },
-  badge: {
-    paddingHorizontal: 7,
-    paddingVertical: 2,
-  },
+  badge: { paddingHorizontal: 7, paddingVertical: 2 },
   badgeText: {
     fontSize: 11,
     fontFamily: "Inter_500Medium",
     textTransform: "capitalize",
   },
-  qty: {
-    fontSize: 12,
-    fontFamily: "Inter_400Regular",
+  qty: { fontSize: 12, fontFamily: "Inter_400Regular" },
+  price: { fontSize: 15, fontFamily: "Inter_600SemiBold", marginTop: 2 },
+  chevron: { paddingRight: 12 },
+  fab: {
+    position: "absolute",
+    right: 20,
+    borderRadius: 28,
+    overflow: "hidden",
+    elevation: 4,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.18,
+    shadowRadius: 6,
   },
-  price: {
-    fontSize: 15,
-    fontFamily: "Inter_600SemiBold",
-    marginTop: 2,
-  },
-  chevron: {
-    paddingRight: 12,
-  },
-  center: {
-    flex: 1,
+  fabInner: {
+    flexDirection: "row",
     alignItems: "center",
-    justifyContent: "center",
-    padding: 32,
-    gap: 12,
+    gap: 8,
+    paddingHorizontal: 20,
+    paddingVertical: 14,
   },
-  errorText: {
-    fontSize: 16,
-    fontFamily: "Inter_600SemiBold",
-    textAlign: "center",
-  },
-  errorSub: {
-    fontSize: 13,
-    fontFamily: "Inter_400Regular",
-    textAlign: "center",
-  },
-  retryButton: {
-    marginTop: 8,
-    paddingHorizontal: 24,
-    paddingVertical: 10,
-  },
-  retryText: {
-    fontSize: 15,
-    fontFamily: "Inter_500Medium",
-  },
-  empty: {
-    alignItems: "center",
-    justifyContent: "center",
-    paddingTop: 80,
-    gap: 12,
-  },
-  emptyTitle: {
-    fontSize: 18,
-    fontFamily: "Inter_600SemiBold",
-  },
-  emptySubtitle: {
-    fontSize: 14,
-    fontFamily: "Inter_400Regular",
-    textAlign: "center",
-  },
+  fabText: { fontSize: 15, fontFamily: "Inter_600SemiBold" },
 });
