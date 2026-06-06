@@ -1,0 +1,107 @@
+Use Planner mode first. Do not edit files until I approve the plan.
+
+Goal:
+Align the Expo mobile scan implementation with the existing production Supabase Edge Function naming and contract.
+
+Current issue:
+Replit created a new Edge Function named:
+
+* coverly-scan
+
+But production already has an existing scan function:
+
+* scan-room-photo
+
+The mobile app should not hardcode coverly-scan if production uses scan-room-photo. Otherwise mobile will fail when pointed at production.
+
+Do not deploy coverly-scan.
+Do not overwrite the production scan-room-photo function.
+Do not change database schema.
+Do not touch working Add/Edit/Move/Photo save logic.
+Do not expose OpenAI keys in mobile.
+
+Tasks:
+
+1. Inspect current mobile scan code
+   Find:
+
+* SCAN_EDGE_FUNCTION_NAME
+* runAiScan()
+* uploadScanImages()
+* scan.tsx call path
+* expected request payload
+* expected response shape
+
+2. Inspect UI Bakery export/reference code if available
+   Find how the existing web app calls:
+
+* scan-room-photo
+
+Identify:
+
+* endpoint name
+* request payload shape
+* response shape
+* whether it expects image URLs, base64, uploaded paths, fileId, roomId, mode, etc.
+* how returned fields map to inventory_items
+
+3. Compare mobile payload vs existing scan-room-photo contract
+   Current mobile may send:
+
+* mode
+* fileId
+* roomId
+* roomName
+* imagePaths
+
+Existing scan-room-photo may expect something else.
+
+Produce a compatibility plan:
+
+* Option A: mobile adapts to existing scan-room-photo payload
+* Option B: scan-room-photo is extended to support both legacy UI Bakery payload and new mobile payload
+* Option C: keep coverly-scan only as dev experiment, but set production mobile to scan-room-photo later
+
+Preferred direction:
+Use scan-room-photo as the canonical shared endpoint for both UI Bakery and Expo mobile.
+
+4. Edge Function safety
+   Do not overwrite production scan-room-photo blindly.
+   If function changes are required, plan a backwards-compatible update:
+
+* existing UI Bakery calls must keep working
+* mobile imagePaths/signed URL flow can be added as an additional supported payload shape
+* OpenAI key stays only in Supabase function secrets
+* mobile never calls OpenAI directly
+
+5. Mobile code changes to plan
+   Plan changes to:
+
+* set SCAN_EDGE_FUNCTION_NAME to "scan-room-photo"
+* keep function name configurable in one place
+* ensure upload uses inventory-photos
+* ensure mobile sends the correct payload expected by scan-room-photo
+* ensure review/save still uses existing buildItemInsertPayload
+
+6. Output required
+   Provide:
+
+* current mobile endpoint name
+* production endpoint name
+* payload expected by mobile code
+* payload expected by existing UI Bakery scan-room-photo, if discoverable
+* recommended alignment approach
+* files to change
+* whether a function rename is enough or payload compatibility work is needed
+* risks
+* acceptance criteria
+
+Acceptance criteria after execution:
+
+* mobile scan calls scan-room-photo, not coverly-scan
+* function name is centralised/configurable
+* mobile scan still uploads to inventory-photos
+* no OpenAI key in mobile
+* existing UI Bakery scan-room-photo behaviour is not broken
+* review/save still uses existing item insert helper
+* TypeScript passes

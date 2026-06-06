@@ -9,16 +9,26 @@ export type ScanMode =
   | "video_room"          // video → frame extraction + dedup (coming soon)
   | "single_item";        // close-up → 1 item with rich brand/model/value detail (1 credit)
 
+/**
+ * A single image captured or picked by the user, ready to send to the Edge Function.
+ * base64 is encoded at pick time using ImagePicker's base64 option — no separate upload needed.
+ */
+export interface ScanEncodedImage {
+  /** Local device URI — used for thumbnail display only */
+  uri: string;
+  /** Base64-encoded image data (no data: prefix) for Edge Function payload */
+  base64: string;
+  /** MIME type e.g. "image/jpeg" */
+  mimeType: string;
+}
+
 export interface ScanInput {
   mode: ScanMode;
   fileId: string;
   roomId: string;
   roomName?: string;
-  /**
-   * Supabase Storage object paths after upload to inventory-photos bucket.
-   * These are NOT local device file:// URIs — upload first, then pass paths.
-   */
-  imagePaths: string[];
+  /** Pre-encoded images captured/picked by the user */
+  images: ScanEncodedImage[];
   /** Local URI for video (mode: video_room only) */
   videoUri?: string;
 }
@@ -41,7 +51,6 @@ export interface ScanDetectedItem {
   confidence?: string | null;
   valuationBasis?: string | null;
   priceSourceType?: string | null;
-  /** Supabase storage path for the item's photo (set for single_item scans) */
   imageUrl?: string | null;
   photoUrl?: string | null;
   /** Source image local URI for thumbnail preview in review screen */
@@ -51,7 +60,6 @@ export interface ScanDetectedItem {
 export type ScanStatus =
   | "idle"
   | "picking"
-  | "uploading"
   | "scanning"
   | "reviewing"
   | "saving"

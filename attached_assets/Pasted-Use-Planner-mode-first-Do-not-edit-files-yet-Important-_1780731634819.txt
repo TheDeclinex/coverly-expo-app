@@ -1,0 +1,46 @@
+Use Planner mode first. Do not edit files yet.
+
+Important correction:
+For valid mobile testing, the Replit Spike `scan-room-photo` Edge Function must match the existing production `scan-room-photo` function, or be a deliberate backwards-compatible upgrade intended to replace production.
+
+Do not test mobile against a different custom scan function implementation that will not exist in production.
+
+Goal:
+Align the Expo mobile scan flow to the existing production `scan-room-photo` function contract.
+
+Do not deploy anything.
+Do not overwrite production.
+Do not change database schema.
+Do not touch Add/Edit/Move/Photo save logic.
+Do not invent a new Edge Function name.
+Do not use `coverly-scan`.
+
+Tasks:
+
+1. Stop treating the Replit-generated `scan-room-photo` implementation as automatically correct.
+2. Inspect whether the production `scan-room-photo` function source/code is available in this project, the UI Bakery export, or provided files.
+3. If production function code is available:
+
+   * compare it to the Replit-generated function
+   * identify the exact request payload production expects
+   * identify the exact response payload production returns
+   * identify how production handles images
+   * identify whether production saves items directly or only returns detections
+4. Compare the current Expo mobile scan payload to the production function contract.
+5. Plan the required mobile-side changes so Expo calls the existing production contract.
+6. If the mobile feature requires a function change, plan it as a backwards-compatible extension to `scan-room-photo` that keeps existing UI Bakery/web calls working.
+7. Do not execute changes until I approve.
+
+Output required:
+
+* whether production `scan-room-photo` code was found
+* current production request payload
+* current production response payload
+* current mobile request payload
+* differences between them
+* recommended path:
+  A. adapt mobile to existing production function, or
+  B. extend production function backwards-compatibly
+* files that would change
+* risks
+* acceptance criteria

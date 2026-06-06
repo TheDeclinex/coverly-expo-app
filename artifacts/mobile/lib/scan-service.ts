@@ -3,100 +3,66 @@
  *
  * ARCHITECTURE RULES (do not violate):
  * - The mobile app MUST NOT call OpenAI directly. All AI processing goes through
- *   a Supabase Edge Function so API keys never leave the backend.
- * - Images are uploaded to inventory-photos (private bucket) first. Storage paths
- *   are sent to the Edge Function, which creates short-lived signed URLs server-side
- *   before passing them to OpenAI Vision.
+ *   the scan-room-photo Supabase Edge Function so API keys never leave the backend.
+ * - Images are base64-encoded at pick time (ImagePicker base64:true option).
+ *   The encoded data is sent directly in the Edge Function request body.
+ *   No storage upload is required for AI scanning.
  * - Scan results are normalised to ScanDetectedItem[] then saved via
  *   buildItemInsertPayload — the same path as Manual Add Item.
  *
- * Deployment checklist (manual steps required after code is merged):
- *   1. supabase functions deploy coverly-scan
+ * Deployment checklist (manual steps required):
+ *   1. supabase functions deploy scan-room-photo --no-verify-jwt
  *   2. Set OPENAI_API_KEY in Supabase dashboard → Edge Functions → Secrets
- *   3. Confirm inventory-photos bucket policies allow:
- *        - authenticated upload (for mobile upload step)
- *        - service-role signed URL generation (for Edge Function)
- *   4. Set SCAN_EDGE_FUNCTION_NAME = "coverly-scan" below (already done)
+ *   3. After deployment, SCAN_EDGE_FUNCTION_NAME below is already set correctly.
  */
 
 import { supabase } from "@/lib/supabase";
-import type { ScanInput, ScanResult } from "@/types/scan";
+import type { ScanDetectedItem, ScanInput, ScanResult } from "@/types/scan";
 
 /**
  * Name of the Supabase Edge Function that handles AI scan processing.
- * Set to null until the function is deployed.
- * After deploying coverly-scan, this constant activates the AI call.
+ * Set to null to show the "not configured" state without throwing.
  */
-const SCAN_EDGE_FUNCTION_NAME: string | null = "coverly-scan";
-
-/**
- * Supabase Storage bucket for inventory photos (private/prod-style).
- * Images are uploaded here; the Edge Function creates signed URLs server-side.
- */
-const SCAN_PHOTOS_BUCKET = "inventory-photos";
+const SCAN_EDGE_FUNCTION_NAME: string | null = "scan-room-photo";
 
 /**
  * Maximum images allowed per multi-photo scan batch.
- * Single photo and single item modes always send exactly 1 image.
  */
 export const MAX_MULTI_PHOTO_IMAGES = 5;
 
 /**
- * Upload local image URIs to Supabase Storage.
- * Returns storage object paths (not public URLs) for the Edge Function.
- *
- * @param imageUris   Local device file:// URIs selected by the user
- * @param fileId      Property (inventory_files) ID — used in storage path
- * @param userId      Authenticated user ID — used in storage path
+ * Map mobile ScanMode values to the production scan-room-photo mode strings.
+ * single_item has no dedicated production mode — single_photo detects what is visible.
  */
-export async function uploadScanImages(
-  imageUris: string[],
-  fileId: string,
-  userId: string
-): Promise<{ uploadedPaths: string[]; failedCount: number }> {
-  const uploadedPaths: string[] = [];
-  let failedCount = 0;
-
-  for (let i = 0; i < imageUris.length; i++) {
-    const uri = imageUris[i];
-    try {
-      const response = await fetch(uri);
-      const blob = await response.blob();
-      const filename = uri.split("/").pop()?.split("?")[0] ?? "";
-      const ext = filename.includes(".")
-        ? (filename.split(".").pop()?.toLowerCase() ?? "jpeg")
-        : "jpeg";
-      const path = `${userId}/${fileId}/scan-${Date.now()}-${i}.${ext}`;
-
-      const { data: uploadData, error: uploadError } = await supabase.storage
-        .from(SCAN_PHOTOS_BUCKET)
-        .upload(path, blob, { contentType: `image/${ext}`, upsert: false });
-
-      if (uploadError) {
-        console.warn("[Scan] Image upload failed:", uploadError.message, "path:", path);
-        failedCount++;
-      } else {
-        uploadedPaths.push(uploadData.path);
-      }
-    } catch (err) {
-      console.warn(
-        "[Scan] Image upload error:",
-        err instanceof Error ? err.message : String(err)
-      );
-      failedCount++;
-    }
+function toProductionMode(
+  mode: ScanInput["mode"]
+): "single_photo" | "multi_photo" | "video_frames" {
+  switch (mode) {
+    case "single_photo_room":
+    case "single_item":
+      return "single_photo";
+    case "multi_photo_room":
+      return "multi_photo";
+    case "video_room":
+      return "video_frames";
   }
-
-  return { uploadedPaths, failedCount };
 }
 
 /**
- * Run an AI-assisted inventory scan via the Supabase Edge Function.
+ * Convert a production confidence float (0.0–1.0) to a display string.
+ */
+function confidenceToLabel(n: number): string {
+  if (n >= 0.75) return "high";
+  if (n >= 0.45) return "medium";
+  return "low";
+}
+
+/**
+ * Run an AI-assisted inventory scan via the scan-room-photo Edge Function.
  *
- * Expects ScanInput.imagePaths to contain Supabase Storage paths (after upload).
- * The Edge Function creates signed URLs server-side and passes them to OpenAI.
- *
- * If the Edge Function is not yet configured, returns a clear not_configured result.
+ * ScanInput.images must be pre-encoded (base64 from ImagePicker base64:true option).
+ * The function maps the mobile payload to the production contract, handles
+ * success/error envelopes, and normalises returned items to ScanDetectedItem[].
  */
 export async function runAiScan(input: ScanInput): Promise<ScanResult> {
   if (!SCAN_EDGE_FUNCTION_NAME) {
@@ -104,22 +70,36 @@ export async function runAiScan(input: ScanInput): Promise<ScanResult> {
       status: "not_configured",
       items: [],
       errorMessage:
-        "AI scan endpoint not configured. Deploy the coverly-scan Edge Function and update SCAN_EDGE_FUNCTION_NAME.",
+        "AI scan endpoint not configured. Deploy the scan-room-photo Edge Function and update SCAN_EDGE_FUNCTION_NAME.",
+    };
+  }
+
+  if (input.images.length === 0) {
+    return {
+      status: "error",
+      items: [],
+      errorMessage: "No images to scan.",
     };
   }
 
   try {
+    const productionPayload = {
+      mode: toProductionMode(input.mode),
+      images: input.images.map((img, i) => ({
+        id: `photo_${i + 1}`,
+        imageBase64: img.base64,
+        mimeType: img.mimeType,
+        sourceName: `photo_${i + 1}`,
+      })),
+      context: {
+        fileId: input.fileId,
+        roomName: input.roomName ?? undefined,
+      },
+    };
+
     const { data, error } = await supabase.functions.invoke(
       SCAN_EDGE_FUNCTION_NAME,
-      {
-        body: {
-          mode: input.mode,
-          fileId: input.fileId,
-          roomId: input.roomId,
-          roomName: input.roomName ?? null,
-          imagePaths: input.imagePaths,
-        },
-      }
+      { body: productionPayload }
     );
 
     if (error) {
@@ -130,18 +110,52 @@ export async function runAiScan(input: ScanInput): Promise<ScanResult> {
       };
     }
 
-    if (data?.error) {
+    // Production function returns { success: bool, items?, errorCode?, message? }
+    if (data?.success === false) {
       return {
         status: "error",
         items: [],
-        errorMessage: data.error,
+        errorMessage: data.message ?? data.errorCode ?? "Scan failed",
       };
     }
 
-    return {
-      status: "success",
-      items: data?.items ?? [],
-    };
+    const rawItems: unknown[] = Array.isArray(data?.items) ? data.items : [];
+
+    const items: ScanDetectedItem[] = rawItems
+      .filter(
+        (r): r is Record<string, unknown> =>
+          typeof r === "object" && r !== null && typeof (r as Record<string, unknown>).name === "string"
+      )
+      .map((raw) => ({
+        name: (raw.name as string).trim(),
+        description:
+          typeof raw.description === "string" ? raw.description.trim() || null : null,
+        category:
+          typeof raw.category === "string" ? raw.category : null,
+        quantity:
+          typeof raw.quantity === "number" && raw.quantity >= 1
+            ? Math.round(raw.quantity)
+            : 1,
+        estimatedPrice:
+          typeof raw.estimatedPrice === "number" ? raw.estimatedPrice : null,
+        unitEstimatedPrice:
+          typeof raw.unitEstimatedPrice === "number" ? raw.unitEstimatedPrice : null,
+        brandMaker:
+          typeof raw.brand_guess === "string" ? raw.brand_guess : null,
+        modelSeries: null,
+        conditionLabel: null,
+        confidence:
+          typeof raw.confidence === "number"
+            ? confidenceToLabel(raw.confidence)
+            : null,
+        valuationBasis: "ai_estimate",
+        priceSourceType: "ai_scan",
+        imageUrl: null,
+        photoUrl: null,
+        sourceImageUri: null,
+      }));
+
+    return { status: "success", items };
   } catch (err) {
     return {
       status: "error",
@@ -153,7 +167,6 @@ export async function runAiScan(input: ScanInput): Promise<ScanResult> {
 
 /**
  * Validate a scan input before submitting.
- * Call this after upload (imagePaths must be populated).
  */
 export function validateScanInput(input: ScanInput): string | null {
   if (!input.fileId) return "Property required";
@@ -164,11 +177,11 @@ export function validateScanInput(input: ScanInput): string | null {
     return null;
   }
 
-  if (input.imagePaths.length === 0) return "At least one photo required";
+  if (input.images.length === 0) return "At least one photo required";
 
   if (
     input.mode === "multi_photo_room" &&
-    input.imagePaths.length > MAX_MULTI_PHOTO_IMAGES
+    input.images.length > MAX_MULTI_PHOTO_IMAGES
   ) {
     return `Maximum ${MAX_MULTI_PHOTO_IMAGES} photos per multi-photo scan`;
   }

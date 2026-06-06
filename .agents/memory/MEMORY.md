@@ -1,1 +1,2 @@
 - [Coverly Supabase insert rules](coverly-supabase-inserts.md) — inventory_items inserts MUST include user_id from session (RLS rejects without it)
+- [Coverly scan-room-photo contract](coverly-scan-contract.md) — production function expects base64 images, not storage paths; mode names differ from mobile; confidence is float 0-1
