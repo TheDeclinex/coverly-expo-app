@@ -14,7 +14,7 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get("window");
-const PIN_R = 9;
+const PIN_ICON_SIZE = 28;
 
 interface ImageViewerModalProps {
   uris: string[];
@@ -54,8 +54,10 @@ function ImagePage({
     const ox = (SCREEN_W - rw) / 2;
     const oy = (SCREEN_H - rh) / 2;
     return {
-      left: ox + pin.x * rw - PIN_R,
-      top: oy + pin.y * rh - PIN_R,
+      // horizontal: center of icon over pin point
+      left: ox + pin.x * rw - PIN_ICON_SIZE / 2,
+      // vertical: tip of map-pin (bottom of icon) at pin point
+      top: oy + pin.y * rh - PIN_ICON_SIZE,
     };
   }, [pin, imgSize]);
 
@@ -73,15 +75,23 @@ function ImagePage({
       {pinPos && (
         <View
           pointerEvents="none"
-          style={[
-            styles.pin,
-            {
-              left: pinPos.left,
-              top: pinPos.top,
-              backgroundColor: pinColor ?? "#085041",
-            },
-          ]}
-        />
+          style={{
+            position: "absolute",
+            left: pinPos.left,
+            top: pinPos.top,
+          }}
+        >
+          <Feather
+            name="map-pin"
+            size={PIN_ICON_SIZE}
+            color={pinColor ?? "#1D9E75"}
+            style={{
+              textShadowColor: "rgba(0,0,0,0.6)",
+              textShadowRadius: 4,
+              textShadowOffset: { width: 0, height: 1 },
+            }}
+          />
+        </View>
       )}
     </Pressable>
   );
@@ -242,14 +252,6 @@ const styles = StyleSheet.create({
   image: {
     width: "100%",
     height: "100%",
-  },
-  pin: {
-    position: "absolute",
-    width: PIN_R * 2,
-    height: PIN_R * 2,
-    borderRadius: PIN_R,
-    borderWidth: 2,
-    borderColor: "#fff",
   },
   closeBtn: {
     position: "absolute",

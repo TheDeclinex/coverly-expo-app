@@ -7,7 +7,7 @@ import type { StyleProp, ViewStyle } from "react-native";
 
 import { ImageViewerModal } from "@/components/ImageViewerModal";
 
-const THUMB_PIN_R = 8;
+const THUMB_PIN_SIZE = 22;
 
 interface ExpandableImageProps {
   uri: string | null | undefined;
@@ -116,16 +116,21 @@ export function ExpandableImage({
             pointerEvents="none"
             style={{
               position: "absolute",
-              left: pin!.x * dims.w - THUMB_PIN_R,
-              top: pin!.y * dims.h - THUMB_PIN_R,
-              width: THUMB_PIN_R * 2,
-              height: THUMB_PIN_R * 2,
-              borderRadius: THUMB_PIN_R,
-              backgroundColor: pinColor,
-              borderWidth: 1.5,
-              borderColor: "#fff",
+              left: pin!.x * dims.w - THUMB_PIN_SIZE / 2,
+              top: pin!.y * dims.h - THUMB_PIN_SIZE,
             }}
-          />
+          >
+            <Feather
+              name="map-pin"
+              size={THUMB_PIN_SIZE}
+              color={pinColor ?? "#1D9E75"}
+              style={{
+                textShadowColor: "rgba(0,0,0,0.55)",
+                textShadowRadius: 3,
+                textShadowOffset: { width: 0, height: 1 },
+              }}
+            />
+          </View>
         )}
       </Pressable>
       <ImageViewerModal

@@ -185,12 +185,29 @@ function ItemCard({
 
         {/* Text block */}
         <View style={styles.cardBody}>
-          <Text
-            style={[styles.cardName, { color: colors.foreground }]}
-            numberOfLines={2}
-          >
-            {item.name}
-          </Text>
+          {/* Name (left) + Price (right) — same row */}
+          <View style={styles.nameRow}>
+            <Text
+              style={[styles.cardName, { color: colors.foreground }]}
+              numberOfLines={2}
+            >
+              {item.name}
+            </Text>
+            {totalValue > 0 && (
+              <View style={styles.priceBlock}>
+                <Text style={[styles.price, { color: colors.foreground }]}>
+                  {formatCurrency(totalValue)}
+                </Text>
+                {valLabel && (
+                  <Text
+                    style={[styles.valLabel, { color: colors.mutedForeground }]}
+                  >
+                    {valLabel}
+                  </Text>
+                )}
+              </View>
+            )}
+          </View>
 
           {/* Category chip */}
           <View style={styles.chipRow}>
@@ -208,22 +225,6 @@ function ItemCard({
               </Text>
             )}
           </View>
-
-          {/* Price + valuation */}
-          {totalValue > 0 && (
-            <View style={styles.priceRow}>
-              <Text style={[styles.price, { color: colors.foreground }]}>
-                {formatCurrency(totalValue)}
-              </Text>
-              {valLabel && (
-                <Text
-                  style={[styles.valLabel, { color: colors.mutedForeground }]}
-                >
-                  {valLabel}
-                </Text>
-              )}
-            </View>
-          )}
         </View>
 
         <Feather
@@ -594,8 +595,25 @@ const styles = StyleSheet.create({
     overflow: "hidden",
   },
   thumb: { width: "100%", height: "100%" },
-  cardBody: { flex: 1, gap: 3 },
-  cardName: { fontSize: 15, fontFamily: "Inter_600SemiBold", lineHeight: 20 },
+  cardBody: { flex: 1, gap: 4 },
+  nameRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 8,
+  },
+  cardName: {
+    fontSize: 15,
+    fontFamily: "Inter_600SemiBold",
+    lineHeight: 20,
+    flex: 1,
+  },
+  priceBlock: { alignItems: "flex-end", gap: 1, flexShrink: 0 },
+  price: { fontSize: 14, fontFamily: "Inter_700Bold" },
+  valLabel: {
+    fontSize: 10,
+    fontFamily: "Inter_400Regular",
+    textAlign: "right",
+  },
   chipRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -605,9 +623,6 @@ const styles = StyleSheet.create({
   dot: { width: 8, height: 8, borderRadius: 4 },
   chipText: { fontSize: 12, fontFamily: "Inter_400Regular", flexShrink: 1 },
   qty: { fontSize: 12, fontFamily: "Inter_400Regular" },
-  priceRow: { flexDirection: "row", alignItems: "baseline", gap: 6 },
-  price: { fontSize: 15, fontFamily: "Inter_700Bold" },
-  valLabel: { fontSize: 11, fontFamily: "Inter_400Regular" },
   /* ── Divider ── */
   divider: { height: StyleSheet.hairlineWidth, marginHorizontal: 12 },
   /* ── Actions ── */
