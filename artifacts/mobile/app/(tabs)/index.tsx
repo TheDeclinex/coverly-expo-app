@@ -389,9 +389,18 @@ export default function HomeScreen() {
         options={{
           title: "Coverly",
           headerRight: () => (
-            <Pressable onPress={handleSignOut} style={{ padding: 4 }} hitSlop={8}>
-              <Feather name="log-out" size={20} color={colors.mutedForeground} />
-            </Pressable>
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
+              <Pressable
+                onPress={() => router.push("/(tabs)/add-property")}
+                style={{ padding: 4 }}
+                hitSlop={8}
+              >
+                <Feather name="plus" size={22} color={colors.primary} />
+              </Pressable>
+              <Pressable onPress={handleSignOut} style={{ padding: 4 }} hitSlop={8}>
+                <Feather name="log-out" size={20} color={colors.mutedForeground} />
+              </Pressable>
+            </View>
           ),
         }}
       />

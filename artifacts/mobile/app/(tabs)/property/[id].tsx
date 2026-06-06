@@ -1191,7 +1191,25 @@ export default function PropertyDetailScreen() {
 
   return (
     <>
-      <Stack.Screen options={{ title: name ?? "Property" }} />
+      <Stack.Screen
+        options={{
+          title: name ?? "Property",
+          headerRight: () => (
+            <Pressable
+              onPress={() =>
+                router.push({
+                  pathname: "/(tabs)/edit-property/[id]",
+                  params: { id },
+                })
+              }
+              style={{ padding: 4 }}
+              hitSlop={8}
+            >
+              <Feather name="edit-2" size={19} color={colors.primary} />
+            </Pressable>
+          ),
+        }}
+      />
       {isLoading ? (
         <LoadingState />
       ) : roomsError ? (
