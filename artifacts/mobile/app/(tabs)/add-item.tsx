@@ -25,8 +25,6 @@ import { buildItemInsertPayload } from "@/lib/item-insert-helpers";
 import { supabase } from "@/lib/supabase";
 import type { InventoryFile, InventoryRoom } from "@/types";
 
-// TODO: Confirm the correct Supabase storage bucket name for item photos
-// Check Supabase dashboard → Storage → Buckets and update this constant
 const ITEM_PHOTOS_BUCKET = "item-photos";
 
 function FormField({
@@ -42,17 +40,21 @@ function FormField({
 }) {
   return (
     <View style={{ gap: 6 }}>
-      <Text
-        style={{
-          fontSize: 12,
-          fontFamily: "Inter_500Medium",
-          letterSpacing: 0.3,
-          color: colors.mutedForeground,
-        }}
-      >
-        {label}
-        {required && <Text style={{ color: colors.destructive }}> *</Text>}
-      </Text>
+      <View style={{ flexDirection: "row" }}>
+        <Text
+          style={{
+            fontSize: 12,
+            fontFamily: "Inter_500Medium",
+            letterSpacing: 0.3,
+            color: colors.mutedForeground,
+          }}
+        >
+          {label}
+          {required ? (
+            <Text style={{ color: colors.destructive }}>{" *"}</Text>
+          ) : null}
+        </Text>
+      </View>
       {children}
     </View>
   );
@@ -119,6 +121,8 @@ export default function AddItemScreen() {
   const [quantity, setQuantity] = useState("1");
   const [photoUri, setPhotoUri] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [photoWarning, setPhotoWarning] = useState<string | null>(null);
 
   const { data: properties } = useQuery({
     queryKey: ["properties", session?.user.id],
@@ -188,7 +192,7 @@ export default function AddItemScreen() {
     try {
       const response = await fetch(uri);
       const blob = await response.blob();
-      const ext = uri.split(".").pop() ?? "jpg";
+      const ext = (uri.split(".").pop() ?? "jpg").split("?")[0];
       const path = `${itemFileId}/${Date.now()}.${ext}`;
       const { data: uploadData, error: uploadError } = await supabase.storage
         .from(ITEM_PHOTOS_BUCKET)
@@ -208,39 +212,54 @@ export default function AddItemScreen() {
   };
 
   const handleSave = async () => {
+    setErrorMsg(null);
+    setPhotoWarning(null);
+
+    // --- Inline validation (no Alert — works in web iframe too) ---
     if (!name.trim()) {
-      Alert.alert("Name required", "Please enter an item name.");
+      setErrorMsg("Item name is required.");
       return;
     }
     if (!selectedFileId) {
-      Alert.alert("Property required", "Please select a property.");
+      setErrorMsg("Please select a property above.");
       return;
     }
     if (!selectedRoomId) {
-      Alert.alert("Room required", "Please select a room.");
+      setErrorMsg("Please select a room above.");
       return;
     }
     if (!session?.user.id) {
-      Alert.alert("Not signed in", "Please sign in again.");
+      setErrorMsg("Not signed in — please sign in again.");
       return;
     }
 
     setSaving(true);
-    await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
 
-    let photoUploadWarning = false;
-    let uploadedPhotoUrl: string | null = null;
-
-    if (photoUri) {
-      uploadedPhotoUrl = await uploadPhoto(photoUri, selectedFileId);
-      if (!uploadedPhotoUrl) photoUploadWarning = true;
+    try {
+      await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    } catch (_) {
+      // Haptics not available on web — ignore
     }
 
-    const price =
-      estimatedPrice.trim()
-        ? parseFloat(estimatedPrice.replace(/[^0-9.]/g, "")) || null
-        : null;
+    let uploadedPhotoUrl: string | null = null;
+    if (photoUri) {
+      uploadedPhotoUrl = await uploadPhoto(photoUri, selectedFileId);
+      if (!uploadedPhotoUrl) {
+        setPhotoWarning("Photo could not be uploaded — item will be saved without a photo.");
+      }
+    }
+
+    const price = estimatedPrice.trim()
+      ? parseFloat(estimatedPrice.replace(/[^0-9.]/g, "")) || null
+      : null;
     const qty = parseInt(quantity, 10) || 1;
+
+    console.log("[AddItem] Inserting into inventory_items", {
+      fileId: selectedFileId,
+      roomId: selectedRoomId,
+      userId: session.user.id ? "present" : "MISSING",
+      name: name.trim(),
+    });
 
     const payload = buildItemInsertPayload({
       fileId: selectedFileId,
@@ -259,64 +278,39 @@ export default function AddItemScreen() {
     setSaving(false);
 
     if (error) {
-      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-      // Diagnostics shown on failure — no secrets included
-      Alert.alert(
-        "Save failed",
-        [
-          `Error: ${error.message}`,
-          `Code: ${error.code ?? "—"}`,
-          `Table: inventory_items`,
-          `Property ID: ${selectedFileId || "not set"}`,
-          `Room ID: ${selectedRoomId || "not set"}`,
-          `User: ${session.user.id ? "present" : "missing"}`,
-        ].join("\n")
+      console.error("[AddItem] Insert failed:", error.message, error.code);
+      try {
+        await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      } catch (_) {}
+      setErrorMsg(
+        `Save failed: ${error.message}` +
+          (error.code ? ` (${error.code})` : "")
       );
       return;
     }
 
-    await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    console.log("[AddItem] Insert succeeded — navigating to room", selectedRoomId);
 
-    // Invalidate all relevant caches
+    try {
+      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    } catch (_) {}
+
     queryClient.invalidateQueries({ queryKey: ["items", selectedRoomId] });
     queryClient.invalidateQueries({ queryKey: ["all-items"] });
-    queryClient.invalidateQueries({
-      queryKey: ["property-items", selectedFileId],
-    });
+    queryClient.invalidateQueries({ queryKey: ["property-items", selectedFileId] });
 
-    // Navigate to the room so the user can see the new item
     const destRoomName =
       rooms?.find((r) => r.id === selectedRoomId)?.name ?? roomName ?? "Room";
 
-    if (photoUploadWarning) {
-      Alert.alert(
-        "Item saved",
-        "Photo could not be uploaded (bucket not configured). Item was saved without a photo.",
-        [
-          {
-            text: "OK",
-            onPress: () =>
-              router.replace({
-                pathname: "/(tabs)/room/[id]",
-                params: {
-                  id: selectedRoomId,
-                  name: destRoomName,
-                  fileId: selectedFileId,
-                },
-              }),
-          },
-        ]
-      );
-    } else {
-      router.replace({
-        pathname: "/(tabs)/room/[id]",
-        params: {
-          id: selectedRoomId,
-          name: destRoomName,
-          fileId: selectedFileId,
-        },
-      });
-    }
+    // Always navigate immediately — no Alert wrapper
+    router.replace({
+      pathname: "/(tabs)/room/[id]",
+      params: {
+        id: selectedRoomId,
+        name: destRoomName,
+        fileId: selectedFileId,
+      },
+    });
   };
 
   const selectedPropertyName =
@@ -326,27 +320,7 @@ export default function AddItemScreen() {
 
   return (
     <>
-      <Stack.Screen
-        options={{
-          title: "Add Item",
-          headerRight: () =>
-            saving ? (
-              <ActivityIndicator color={colors.primary} />
-            ) : (
-              <Pressable onPress={handleSave} hitSlop={8} style={{ padding: 4 }}>
-                <Text
-                  style={{
-                    fontSize: 16,
-                    fontFamily: "Inter_600SemiBold",
-                    color: colors.primary,
-                  }}
-                >
-                  Save
-                </Text>
-              </Pressable>
-            ),
-        }}
-      />
+      <Stack.Screen options={{ title: "Add Item" }} />
       <KeyboardAvoidingView
         style={{ flex: 1 }}
         behavior={Platform.OS === "ios" ? "padding" : undefined}
@@ -369,7 +343,7 @@ export default function AddItemScreen() {
                 <ScrollView
                   horizontal
                   showsHorizontalScrollIndicator={false}
-                  contentContainerStyle={{ gap: 8 }}
+                  contentContainerStyle={{ gap: 8, paddingVertical: 2 }}
                 >
                   {(properties ?? []).map((p) => (
                     <Pressable
@@ -377,8 +351,9 @@ export default function AddItemScreen() {
                       onPress={() => {
                         setSelectedFileId(p.id);
                         setSelectedRoomId("");
+                        setErrorMsg(null);
                       }}
-                      style={[
+                      style={({ pressed }) => [
                         styles.chip,
                         {
                           backgroundColor:
@@ -386,19 +361,19 @@ export default function AddItemScreen() {
                               ? colors.primary
                               : colors.secondary,
                           borderRadius: 20,
+                          opacity: pressed ? 0.8 : 1,
                         },
                       ]}
                     >
                       <Text
-                        style={[
-                          styles.chipText,
-                          {
-                            color:
-                              selectedFileId === p.id
-                                ? colors.primaryForeground
-                                : colors.foreground,
-                          },
-                        ]}
+                        style={{
+                          fontSize: 13,
+                          fontFamily: "Inter_500Medium",
+                          color:
+                            selectedFileId === p.id
+                              ? colors.primaryForeground
+                              : colors.foreground,
+                        }}
                       >
                         {p.name}
                       </Text>
@@ -436,13 +411,16 @@ export default function AddItemScreen() {
                 <ScrollView
                   horizontal
                   showsHorizontalScrollIndicator={false}
-                  contentContainerStyle={{ gap: 8 }}
+                  contentContainerStyle={{ gap: 8, paddingVertical: 2 }}
                 >
                   {(rooms ?? []).map((r) => (
                     <Pressable
                       key={r.id}
-                      onPress={() => setSelectedRoomId(r.id)}
-                      style={[
+                      onPress={() => {
+                        setSelectedRoomId(r.id);
+                        setErrorMsg(null);
+                      }}
+                      style={({ pressed }) => [
                         styles.chip,
                         {
                           backgroundColor:
@@ -450,19 +428,19 @@ export default function AddItemScreen() {
                               ? colors.primary
                               : colors.secondary,
                           borderRadius: 20,
+                          opacity: pressed ? 0.8 : 1,
                         },
                       ]}
                     >
                       <Text
-                        style={[
-                          styles.chipText,
-                          {
-                            color:
-                              selectedRoomId === r.id
-                                ? colors.primaryForeground
-                                : colors.foreground,
-                          },
-                        ]}
+                        style={{
+                          fontSize: 13,
+                          fontFamily: "Inter_500Medium",
+                          color:
+                            selectedRoomId === r.id
+                              ? colors.primaryForeground
+                              : colors.foreground,
+                        }}
                       >
                         {r.name}
                       </Text>
@@ -495,7 +473,10 @@ export default function AddItemScreen() {
             <FormField label="Name" required colors={colors}>
               <StyledInput
                 value={name}
-                onChangeText={setName}
+                onChangeText={(t) => {
+                  setName(t);
+                  setErrorMsg(null);
+                }}
                 placeholder='e.g. Samsung TV 65"'
                 colors={colors}
               />
@@ -551,22 +532,15 @@ export default function AddItemScreen() {
             <Text style={[styles.sectionTitle, { color: colors.mutedForeground }]}>
               PHOTO
             </Text>
-            <Text
-              style={{
-                fontSize: 11,
-                fontFamily: "Inter_400Regular",
-                color: colors.mutedForeground,
-              }}
-            >
-              Photo upload requires a configured storage bucket. Item saves
-              without a photo if upload fails.
-            </Text>
 
             {photoUri ? (
               <View style={{ gap: 10 }}>
                 <Image
                   source={{ uri: photoUri }}
-                  style={[styles.photoPreview, { borderRadius: colors.radius }]}
+                  style={[
+                    styles.photoPreview,
+                    { borderRadius: colors.radius },
+                  ]}
                   contentFit="cover"
                 />
                 <Pressable
@@ -644,6 +618,59 @@ export default function AddItemScreen() {
             )}
           </View>
 
+          {/* PHOTO UPLOAD WARNING */}
+          {photoWarning ? (
+            <View
+              style={[
+                styles.warningBanner,
+                {
+                  backgroundColor: colors.card,
+                  borderColor: colors.warning ?? "#f59e0b",
+                  borderRadius: colors.radius,
+                },
+              ]}
+            >
+              <Feather name="alert-triangle" size={14} color={colors.warning ?? "#f59e0b"} />
+              <Text
+                style={{
+                  fontSize: 13,
+                  fontFamily: "Inter_400Regular",
+                  color: colors.foreground,
+                  flex: 1,
+                }}
+              >
+                {photoWarning}
+              </Text>
+            </View>
+          ) : null}
+
+          {/* INLINE ERROR BANNER */}
+          {errorMsg ? (
+            <View
+              style={[
+                styles.errorBanner,
+                {
+                  backgroundColor: colors.card,
+                  borderColor: colors.destructive,
+                  borderRadius: colors.radius,
+                },
+              ]}
+            >
+              <Feather name="alert-circle" size={14} color={colors.destructive} />
+              <Text
+                style={{
+                  fontSize: 13,
+                  fontFamily: "Inter_500Medium",
+                  color: colors.destructive,
+                  flex: 1,
+                }}
+              >
+                {errorMsg}
+              </Text>
+            </View>
+          ) : null}
+
+          {/* SAVE BUTTON */}
           <Pressable
             onPress={handleSave}
             disabled={saving}
@@ -688,7 +715,6 @@ const styles = StyleSheet.create({
     letterSpacing: 0.8,
   },
   chip: { paddingHorizontal: 14, paddingVertical: 8 },
-  chipText: { fontSize: 13, fontFamily: "Inter_500Medium" },
   photoPreview: { width: "100%", height: 200 },
   removePhotoBtn: {
     flexDirection: "row",
@@ -708,12 +734,26 @@ const styles = StyleSheet.create({
     paddingVertical: 16,
     borderWidth: 1,
   },
+  errorBanner: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 8,
+    padding: 12,
+    borderWidth: 1,
+  },
+  warningBanner: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 8,
+    padding: 12,
+    borderWidth: 1,
+  },
   saveBtn: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
     gap: 8,
     paddingVertical: 15,
-    marginTop: 8,
+    marginTop: 4,
   },
 });
