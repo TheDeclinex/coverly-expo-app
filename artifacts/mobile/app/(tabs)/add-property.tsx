@@ -112,32 +112,32 @@ export default function AddPropertyScreen() {
     setError(null);
 
     const now = new Date().toISOString();
-    const payload: Record<string, unknown> = {
-      user_id: session.user.id,
-      name: name.trim(),
-      status: "active",
-      property_type: propertyType ?? null,
-      created_by_email: session.user.email ?? null,
-      created_date: now,
-      last_modified: now,
-      contents_sum_insured: coverAmount ? parseFloat(coverAmount) : null,
-    };
 
-    // Store address in the name field isn't right — we serialise it into a
-    // notes-style column. inventory_files has no dedicated address column yet,
-    // so we prefix the name until a migration adds one.
-    // We pass address separately as a comment for now and store it as part of
-    // the property_type if needed. Actually the safest approach: just keep it
-    // in state and concatenate into the name only if user wants. Since
-    // inventory_files has no address column we'll skip persisting it for now
-    // and only use what the schema supports. We surface the address field in
-    // the UI for future-proofing.
-    // (When the address column is added via migration, change the line below.)
-    void address; // not yet persisted — schema doesn't have this column
+    // address is not yet persisted — inventory_files has no dedicated address column
+    void address;
+
+    // Generate a UUID client-side for the id column.
+    // inventory_files.id may have no server default (like inventory_items.id),
+    // so we always supply one. A UUID string is valid for both text and uuid column types.
+    const newId = "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
+      const r = (Math.random() * 16) | 0;
+      const v = c === "x" ? r : (r & 0x3) | 0x8;
+      return v.toString(16);
+    });
 
     const { data, error: dbError } = await supabase
       .from("inventory_files")
-      .insert(payload)
+      .insert({
+        id: newId,
+        user_id: session.user.id,
+        name: name.trim(),
+        status: "active",
+        property_type: propertyType ?? null,
+        created_by_email: session.user.email ?? null,
+        created_date: now,
+        last_modified: now,
+        contents_sum_insured: coverAmount ? parseFloat(coverAmount) : null,
+      })
       .select()
       .single();
 

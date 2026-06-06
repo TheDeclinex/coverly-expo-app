@@ -1,0 +1,48 @@
+Creating a new property currently fails with:
+
+"new row violates row-level security policy for table inventory_files"
+
+Please fix the new property creation flow.
+
+Planner mode recommendation:
+Use Planner briefly first. Inspect the existing Supabase schema/types, current `inventory_files` table fields, existing RLS policies, existing property/file loading logic, and any existing helper that creates the first/default property for a user. Then make a targeted fix.
+
+Important:
+This is not a UI redesign task. The UI is mostly fine. The issue is that the insert into `inventory_files` does not satisfy the existing RLS policy.
+
+Likely cause:
+The new property insert payload is missing the authenticated user ownership field expected by RLS, or is using the wrong field name. For example, the policy may require `user_id = auth.uid()`, `owner_id = auth.uid()`, `created_by = auth.uid()`, or similar.
+
+Please:
+
+* Inspect the actual `inventory_files` columns and RLS policies.
+* Do not guess the ownership column name.
+* Find how existing/default property records are created and follow the same pattern.
+* Ensure the create-property insert includes the authenticated user ID in the correct ownership column.
+* Ensure all required columns are included.
+* Ensure the inserted row satisfies the existing `WITH CHECK` RLS policy.
+* Do not disable RLS.
+* Do not weaken RLS just to make the insert work.
+* Do not use a service-role key client-side.
+* Do not create a duplicate property table.
+* Keep using the existing `inventory_files` structure if that is the current property/home table.
+
+Expected hierarchy:
+User → inventory_files/properties → rooms → inventory_items
+
+Also check:
+
+* After successful property creation, the app should navigate to or select the new property.
+* Existing users with one property should continue to work.
+* Rooms/items must remain scoped to the correct property.
+* Free/paid property limits should use existing entitlement logic if already present, not RLS.
+* If there is a property limit, show a friendly app-level message before insert rather than relying on an RLS failure.
+
+Acceptance criteria:
+
+* Creating a property from the New Property screen succeeds for an authenticated user.
+* The inserted `inventory_files` row has the correct owner/user field set.
+* RLS remains enabled and secure.
+* Existing property loading still works.
+* Existing rooms/items are not affected.
+* TypeScript passes.
