@@ -1,0 +1,54 @@
+Approve this plan with the following constraints before execution:
+
+1. Do not install new heavy chart/UI dependencies.
+   If react-native-svg is already installed, use it for the radial coverage arc.
+   If it is not installed, use a lightweight View-based or simple progress-ring alternative instead.
+   Do not spend time adding/configuring a heavy chart library.
+
+2. Keep the work visual/UX only.
+   Do not touch:
+
+   * Supabase save logic
+   * item insert/update helpers
+   * photo upload logic
+   * RLS logic
+   * scan backend/endpoint logic
+   * navigation structure
+
+3. Category picker must be safe with existing data.
+   If an existing item has a category that is not in the new ITEM_CATEGORIES list, still display that existing value and do not clear it.
+   Include “Miscellaneous” / “Other” style fallback.
+   Do not break saving existing categories.
+
+4. Do not remove schema fields from types.
+   The production inventory_items table includes optional fields such as sort_order and web_listing_* fields.
+   Do not remove or simplify schema/type fields as part of this UI pass.
+
+5. Keep the scan-first hierarchy clear:
+
+   * Scan items / Scan room = primary filled dark green/deep teal
+   * Add manually = secondary outlined/light treatment
+
+6. Use the agreed Coverly colour palette only:
+
+   * Primary dark green #085041
+   * Deep green #0F6E56
+   * Main teal #1D9E75
+   * Soft off-white #F5F8F6
+   * Very pale green surface tint #E1F5EE
+   * Card white #FFFFFF
+   * Deep slate text #172A27
+   * Muted slate text #64736F
+   * Slate green #314B45
+   * Soft border #DDE7E3
+   * Success #15803D
+   * Warning amber #D97706
+   * Danger #B91C1C
+
+7. Keep dashboard improvements lightweight.
+   Value by room and items by room bars should be plain horizontal bars unless an existing chart/ring component already exists.
+   The radial coverage indicator should be simple and reliable, not a complex custom animation.
+
+8. TypeScript must pass.
+
+Proceed with execution using these constraints.

@@ -1,0 +1,246 @@
+Do not add major new backend features.
+
+Focus this pass on UI/UX polish for the existing Coverly mobile app:
+
+1. apply the agreed Coverly colour palette
+2. improve dashboard richness
+3. improve action hierarchy
+4. replace free-text category entry with a dropdown using a shared category list
+
+Do not rebuild navigation.
+Do not change database schema.
+Do not change working save/photo/upload/RLS logic.
+Do not add claim pack, billing, offline sync, or full AI scan endpoint yet.
+
+Current app already has:
+
+* login
+* dashboard
+* property/room/item flow
+* add manually
+* edit item
+* move item
+* photo upload
+* scan scaffold
+
+GOAL:
+Make the app feel more premium, calm, modern, insurance-ready, and distinctly Coverly.
+
+TASK 1 — Apply agreed Coverly colour palette
+
+Use the agreed Coverly palette direction:
+
+* dark green
+* deep teal
+* slate green
+* white / warm off-white
+* subtle green-grey borders
+* muted slate text
+
+Use these brand tokens centrally, preferably in constants/colors.ts or constants/theme.ts:
+
+Primary dark green:
+#085041
+
+Deep green / hover / pressed:
+#0F6E56
+
+Main teal accent:
+#1D9E75
+
+Soft off-white background:
+#F5F8F6
+
+Very pale green surface tint:
+#E1F5EE
+
+Card white:
+#FFFFFF
+
+Deep slate text:
+#172A27
+
+Muted slate text:
+#64736F
+
+Slate green:
+#314B45
+
+Soft border:
+#DDE7E3
+
+Success:
+#15803D
+
+Warning amber:
+#D97706
+
+Danger:
+#B91C1C
+
+Important:
+Do not use bright blue as the main action colour.
+Do not use bright aqua.
+Do not use soft mint as a dominant brand colour.
+Avoid generic app-builder blue styling.
+
+Apply globally:
+
+* primary buttons should use dark green / deep teal
+* scan actions should use the strongest brand treatment
+* secondary buttons should use white/off-white with green border/text
+* selected chips should use dark green/deep teal fill with white text
+* unselected chips should use soft off-white or pale green-grey
+* progress bars should use teal/green unless warning states apply
+* section headings should use dark green or deep slate
+* body text should use slate tones
+* cards should be white with subtle green-grey border/shadow
+* app background should be soft off-white
+
+Do not scatter hardcoded colours throughout screens if avoidable. Use shared tokens.
+
+TASK 2 — Improve action hierarchy
+
+Scanning is the primary inventory creation action. Manual add is secondary.
+
+Update action styling so:
+
+* “Scan items” / “Scan room” is visually dominant
+* “Add manually” is clearly secondary, lighter, outlined, or soft-filled
+* scan actions are the most prominent inventory-creation actions on Home, Property, and Room screens
+
+Context labels:
+
+* Home: “Scan items” + “Add manually”
+* Property: “Scan items” + “Add manually”
+* Room: “Scan room” + “Add manually”
+
+Make the layout polished and intentional:
+
+* scan button should be wider/stronger where space allows
+* add manually should not compete visually with scan
+* maintain large mobile tap targets
+* avoid clutter
+
+TASK 3 — Property dashboard richness
+
+Enhance the Property dashboard with:
+
+* a circular/radial coverage indicator for contents value vs recorded cover
+* a clearer inventory value / item count / room count summary
+* value by room horizontal bars
+* items by room horizontal bars
+* clearer readiness summary:
+
+  * % with photos
+  * % valued
+  * items needing review
+
+Use lightweight custom React Native views/SVG if possible.
+Do not pull in a heavy chart library unless already installed.
+
+TASK 4 — Inventory vs recorded cover visual scale
+
+Improve the “Recorded contents value vs cover” visual treatment.
+
+Requirements:
+
+* keep neutral wording
+* add colour scale logic:
+
+  * low/moderate usage: teal/green
+  * approaching cover value: amber
+  * near/exceeding: orange/red
+* use the same logic on home and property summary views
+
+Use neutral insurance wording only:
+
+* “Recorded contents value”
+* “Recorded cover value”
+* “Approaching recorded cover value”
+* “Review with your insurer if needed”
+
+Do not say:
+
+* “underinsured”
+* “you need more cover”
+* “increase your policy”
+
+TASK 5 — Category dropdown instead of free text
+
+Replace the free-text category field in Add Item and Edit Item with a dropdown/select.
+
+Requirements:
+
+* create one shared category list constant/module
+* use that same list in:
+
+  * Add Item
+  * Edit Item
+  * Scan review/edit if applicable
+* the list should be easy to update later
+* keep a searchable or scrollable picker if needed
+
+Important:
+The category list must align with the existing Coverly/UI Bakery category list as closely as possible.
+If the exact UI Bakery list is not already available in the Expo code, create a shared placeholder list with a clear TODO comment saying it must be replaced/aligned with the canonical UI Bakery category list.
+
+Starter categories if needed:
+
+* Electronics
+* Furniture
+* Appliances
+* Kitchenware
+* Bedroom
+* Clothing
+* Jewellery
+* Sports & Outdoors
+* Tools & Garage
+* Home Decor
+* Office
+* Toys & Games
+* Collectibles
+* Books & Media
+* Outdoor / Garden
+* Miscellaneous
+
+TASK 6 — Small polish items
+
+Polish these if needed:
+
+* spacing between dashboard cards and action buttons
+* card corner radius consistency
+* property cards
+* section headings
+* stat labels
+* room cards with clearer item count + room value
+* item category pill styling
+* progress/radial chart styling
+* button spacing and text wrapping
+
+Do not break:
+
+* add manually flow
+* edit item flow
+* photo upload
+* move item between rooms
+* scan scaffold open flow
+* preselection of file/room params
+
+Acceptance:
+
+1. Bright blue is removed/reduced as the main brand colour.
+2. Primary actions use Coverly dark green/deep teal.
+3. App background uses soft off-white.
+4. Cards remain clean white with subtle green-grey borders.
+5. Text uses dark slate/slate green.
+6. Scan is visually the primary action across Home, Property, and Room.
+7. Add manually is clearly secondary.
+8. Property dashboard has a radial/circular coverage visual.
+9. Value by room bars are shown.
+10. Items by room bars are shown.
+11. Coverage bar has a meaningful colour scale.
+12. Add/Edit Item uses a dropdown/select for category.
+13. Category list is centralised in one shared constant/module.
+14. TypeScript passes.
+15. Final response lists files changed and any placeholder category list that still needs alignment with the UI Bakery canonical list.
