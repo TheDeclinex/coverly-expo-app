@@ -58,6 +58,12 @@ const miniBarStyles = StyleSheet.create({
   fill: { height: 6, borderRadius: 3 },
 });
 
+function coverageColor(percent: number): string {
+  if (percent >= 90) return "#B91C1C";
+  if (percent >= 70) return "#D97706";
+  return "#1D9E75";
+}
+
 function CoverageBar({
   percent,
   colors,
@@ -66,14 +72,15 @@ function CoverageBar({
   colors: ReturnType<typeof import("@/hooks/useColors").useColors>;
 }) {
   const clamped = Math.min(percent, 100);
-  const isHigh = percent >= 90;
-  const fillColor = isHigh ? colors.warning : colors.primary;
+  const fill = coverageColor(percent);
   const label =
     percent >= 100
-      ? "Recorded cover reached — review with your insurer"
+      ? "Recorded cover value reached — review with your insurer if needed"
       : percent >= 90
-        ? "Approaching recorded cover value"
-        : `${Math.round(percent)}% of recorded cover value`;
+        ? "Approaching recorded cover value — review with your insurer if needed"
+        : percent >= 70
+          ? "Moderate usage of recorded cover value"
+          : `${Math.round(percent)}% of recorded cover value`;
 
   return (
     <View style={{ gap: 6 }}>
@@ -90,8 +97,8 @@ function CoverageBar({
         <Text
           style={{
             fontSize: 12,
-            fontFamily: "Inter_500Medium",
-            color: isHigh ? colors.warning : colors.mutedForeground,
+            fontFamily: "Inter_600SemiBold",
+            color: fill,
           }}
         >
           {Math.round(percent)}%
@@ -110,7 +117,7 @@ function CoverageBar({
             height: 8,
             borderRadius: 4,
             width: `${clamped}%` as any,
-            backgroundColor: fillColor,
+            backgroundColor: fill,
           }}
         />
       </View>

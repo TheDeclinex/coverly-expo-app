@@ -19,6 +19,7 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+import { CategoryPicker } from "@/components/CategoryPicker";
 import { useAuth } from "@/context/AuthContext";
 import { useColors } from "@/hooks/useColors";
 import { buildItemInsertPayload } from "@/lib/item-insert-helpers";
@@ -521,12 +522,7 @@ export default function AddItemScreen() {
             </FormField>
 
             <FormField label="Category" colors={colors}>
-              <StyledInput
-                value={category}
-                onChangeText={setCategory}
-                placeholder="e.g. Electronics, Furniture"
-                colors={colors}
-              />
+              <CategoryPicker value={category} onChange={setCategory} />
             </FormField>
 
             <View style={{ flexDirection: "row", gap: 12 }}>
