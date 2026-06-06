@@ -21,7 +21,7 @@ import {
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import Svg, { Circle, Line, Polyline } from "react-native-svg";
+import Svg, { Circle, Line, Path, Polyline } from "react-native-svg";
 
 import { EmptyState } from "@/components/EmptyState";
 import { ErrorState } from "@/components/ErrorState";
@@ -30,11 +30,10 @@ import { useAuth } from "@/context/AuthContext";
 import { useColors } from "@/hooks/useColors";
 import {
   buildSparklinePoints,
-  calcPeriodGrowth,
   calcPropertyStats,
   type RoomStat,
 } from "@/lib/dashboard-stats";
-import { formatCurrency } from "@/lib/inventory-mappers";
+import { formatCurrency, getItemTotalValue } from "@/lib/inventory-mappers";
 import { uploadCoverPhoto } from "@/lib/photo-upload";
 import { supabase } from "@/lib/supabase";
 import type { InventoryFile, InventoryItem, InventoryRoom } from "@/types";
@@ -45,9 +44,6 @@ const BRAND_DANGER = "#B91C1C";
 const BRAND_BORDER = "#DDE7E3";
 const BRAND_DARK = "#0B6F66";
 const BRAND_DARK_DEEP = "#0A5C55";
-
-type Period = 1 | 3 | 6 | 12;
-const PERIODS: Period[] = [1, 3, 6, 12];
 
 function coverageColor(percent: number): string {
   if (percent >= 90) return BRAND_DANGER;
@@ -82,15 +78,20 @@ function SparkLine({
   points,
   width,
   height = 36,
+  light = false,
 }: {
   points: { x: number; y: number }[];
   width: number;
   height?: number;
+  /** Render white strokes for use on teal/dark card backgrounds */
+  light?: boolean;
 }) {
   if (width <= 0) return null;
   const pad = 6;
   const w = width - pad * 2;
   const h = height - pad * 2;
+  const stroke = light ? "rgba(255,255,255,0.9)" : BRAND_TEAL;
+  const dashStroke = light ? "rgba(255,255,255,0.3)" : BRAND_BORDER;
 
   if (points.length < 2) {
     return (
@@ -100,7 +101,7 @@ function SparkLine({
           y1={height / 2}
           x2={width - pad}
           y2={height / 2}
-          stroke={BRAND_BORDER}
+          stroke={dashStroke}
           strokeWidth={1.5}
           strokeDasharray="4 4"
         />
@@ -120,7 +121,7 @@ function SparkLine({
       <Polyline
         points={pts}
         fill="none"
-        stroke={BRAND_TEAL}
+        stroke={stroke}
         strokeWidth={2}
         strokeLinecap="round"
         strokeLinejoin="round"
@@ -250,6 +251,82 @@ function CompactSummary({
   );
 }
 
+// ─── Donut chart helpers ───────────────────────────────────────────────────────
+
+/** Pastel palette for donut segments (works on the teal card background) */
+const DONUT_COLORS = [
+  "#80CBC4", // teal-mint  — Furniture
+  "#81D4A8", // green      — Electronics
+  "#FFB74D", // amber      — Appliances
+  "#CE93D8", // purple     — General
+  "#90CAF9", // blue       — Other
+  "#F48FB1", // pink
+  "#A5D6A7", // light green
+  "#BCAAA4", // warm grey
+];
+
+function segmentPath(
+  cx: number, cy: number,
+  outerR: number, innerR: number,
+  sa: number, ea: number
+): string {
+  const x1 = cx + outerR * Math.cos(sa), y1 = cy + outerR * Math.sin(sa);
+  const x2 = cx + outerR * Math.cos(ea), y2 = cy + outerR * Math.sin(ea);
+  const ix1 = cx + innerR * Math.cos(ea), iy1 = cy + innerR * Math.sin(ea);
+  const ix2 = cx + innerR * Math.cos(sa), iy2 = cy + innerR * Math.sin(sa);
+  const large = ea - sa > Math.PI ? 1 : 0;
+  return [
+    `M${x1.toFixed(2)} ${y1.toFixed(2)}`,
+    `A${outerR} ${outerR} 0 ${large} 1 ${x2.toFixed(2)} ${y2.toFixed(2)}`,
+    `L${ix1.toFixed(2)} ${iy1.toFixed(2)}`,
+    `A${innerR} ${innerR} 0 ${large} 0 ${ix2.toFixed(2)} ${iy2.toFixed(2)}`,
+    "Z",
+  ].join(" ");
+}
+
+function CategoryDonut({
+  data,
+  total,
+  size = 110,
+}: {
+  data: { name: string; value: number }[];
+  total: number;
+  size?: number;
+}) {
+  const cx = size / 2, cy = size / 2;
+  const outerR = size / 2 - 3;
+  const innerR = outerR * 0.56;
+
+  if (total <= 0 || data.length === 0) {
+    return (
+      <Svg width={size} height={size}>
+        <Circle
+          cx={cx} cy={cy}
+          r={(outerR + innerR) / 2}
+          fill="none"
+          stroke="rgba(255,255,255,0.2)"
+          strokeWidth={outerR - innerR}
+        />
+      </Svg>
+    );
+  }
+
+  const GAP = 0.02;
+  let angle = -Math.PI / 2;
+  return (
+    <Svg width={size} height={size}>
+      {data.map((seg, i) => {
+        const sweep = Math.max((seg.value / total) * 2 * Math.PI - GAP, 0.01);
+        const ea = angle + sweep;
+        const d = segmentPath(cx, cy, outerR, innerR, angle, ea);
+        angle += (seg.value / total) * 2 * Math.PI;
+        return <Path key={i} d={d} fill={DONUT_COLORS[i % DONUT_COLORS.length]} />;
+      })}
+      <Circle cx={cx} cy={cy} r={innerR - 1} fill="rgba(255,255,255,0.1)" />
+    </Svg>
+  );
+}
+
 // ─── Insight card ─────────────────────────────────────────────────────────────
 
 function InsightCard({
@@ -261,90 +338,97 @@ function InsightCard({
   totalValue: number;
   colors: ReturnType<typeof import("@/hooks/useColors").useColors>;
 }) {
-  const [period, setPeriod] = useState<Period>(3);
-  const [cardWidth, setCardWidth] = useState(0);
+  const [innerW, setInnerW] = useState(0);
+  const sparkPoints = useMemo(() => buildSparklinePoints(items, 6), [items]);
 
-  const growth = useMemo(
-    () => calcPeriodGrowth(items, period),
-    [items, period]
-  );
-
-  const sparkPoints = useMemo(
-    () => buildSparklinePoints(items, 12),
-    [items]
-  );
+  // Build category breakdown sorted by value desc
+  const categoryData = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const item of items) {
+      const raw = item.category ?? "Other";
+      const cat = raw.charAt(0).toUpperCase() + raw.slice(1).replace(/_/g, " ");
+      map.set(cat, (map.get(cat) ?? 0) + getItemTotalValue(item));
+    }
+    return [...map.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .map(([name, value]) => ({ name, value }));
+  }, [items]);
 
   const insightText = useMemo(() => {
-    if (growth !== null) {
-      const parts: string[] = [];
-      if (growth.itemsAdded > 0) {
-        parts.push(
-          `+${growth.itemsAdded} item${growth.itemsAdded === 1 ? "" : "s"}`
-        );
-      }
-      if (growth.valueAdded > 0) {
-        parts.push(`${formatCurrency(growth.valueAdded)}`);
-      }
-      if (parts.length === 0) {
-        return `No new items in the last ${period}m — keep going to grow your record`;
-      }
-      return `${parts.join(" and ")} documented in the last ${period}m`;
+    if (categoryData.length === 0 || totalValue === 0) {
+      return items.length === 0
+        ? "Start scanning or adding items to build your record."
+        : "Keep adding items to see a category breakdown.";
     }
-    const count = items.length;
-    if (count === 0) {
-      return "Start scanning or adding items to build your record";
-    }
-    return `You've recorded ${count} item${count === 1 ? "" : "s"} in this property`;
-  }, [growth, period, items]);
+    const top = categoryData[0];
+    const pct = Math.round((top.value / totalValue) * 100);
+    return `Your biggest category is ${top.name}, making up ${pct}% of your total.`;
+  }, [categoryData, totalValue, items.length]);
+
+  const LEGEND_MAX = 4;
+  const legendItems = categoryData.slice(0, LEGEND_MAX);
+  const moreCount = Math.max(0, categoryData.length - LEGEND_MAX);
 
   return (
-    <View
+    <LinearGradient
+      colors={["#0A6860", "#0F8F83"]}
+      start={{ x: 0, y: 0 }}
+      end={{ x: 1, y: 1 }}
       style={[styles.insightCard, { borderRadius: colors.radius + 2 }]}
-      onLayout={(e) =>
-        setCardWidth(e.nativeEvent.layout.width - styles.insightCard.padding * 2)
-      }
     >
-      <Text style={styles.insightLabel}>YOUR INVENTORY SO FAR</Text>
+      {/* ── Total header ──────────────────────────────── */}
+      <Text style={styles.insightLabel}>You've documented so far</Text>
       <Text style={styles.insightValue} numberOfLines={1} adjustsFontSizeToFit>
         {formatCurrency(totalValue || null)}
       </Text>
+      <Text style={styles.insightTagline}>
+        {totalValue > 0
+          ? "Keep going to make sure everything is covered"
+          : "Start scanning to build your record"}
+      </Text>
 
-      <View style={styles.periodRow}>
-        {PERIODS.map((p) => {
-          const selected = p === period;
-          return (
-            <Pressable
-              key={p}
-              onPress={() => setPeriod(p)}
-              style={({ pressed }) => [
-                styles.periodChip,
-                selected ? styles.periodChipSelected : styles.periodChipIdle,
-                { opacity: pressed ? 0.75 : 1 },
-              ]}
-            >
-              <Text
-                style={[
-                  styles.periodChipText,
-                  selected
-                    ? styles.periodChipTextSelected
-                    : styles.periodChipTextIdle,
-                ]}
-              >
-                {p}m
-              </Text>
-            </Pressable>
-          );
-        })}
-      </View>
+      {/* ── What's documented ────────────────────────── */}
+      <View style={styles.insightInner}>
+        <Text style={styles.insightSectionLabel}>WHAT'S DOCUMENTED</Text>
+        <View
+          style={styles.insightBody}
+          onLayout={(e) => setInnerW(e.nativeEvent.layout.width)}
+        >
+          {/* Pastel donut */}
+          <CategoryDonut data={categoryData} total={totalValue} size={110} />
 
-      {cardWidth > 0 && (
-        <View style={{ marginTop: 8, marginHorizontal: -2 }}>
-          <SparkLine points={sparkPoints} width={cardWidth + 4} height={34} />
+          {/* Legend */}
+          <View style={styles.insightLegend}>
+            {legendItems.map((item, i) => (
+              <View key={i} style={styles.insightLegendRow}>
+                <View
+                  style={[
+                    styles.insightLegendDot,
+                    { backgroundColor: DONUT_COLORS[i % DONUT_COLORS.length] },
+                  ]}
+                />
+                <Text style={styles.insightLegendText} numberOfLines={1}>
+                  {item.name}
+                </Text>
+              </View>
+            ))}
+            {moreCount > 0 && (
+              <Text style={styles.insightMoreText}>+{moreCount} more</Text>
+            )}
+          </View>
+
+          {/* Mini sparkline */}
+          {innerW > 0 && (
+            <View style={styles.insightSparkWrap}>
+              <Text style={styles.insightSparkLabel}>GROWTH</Text>
+              <SparkLine points={sparkPoints} width={68} height={40} light />
+            </View>
+          )}
         </View>
-      )}
 
-      <Text style={styles.insightSubtext}>{insightText}</Text>
-    </View>
+        <Text style={styles.insightSubtext}>{insightText}</Text>
+      </View>
+    </LinearGradient>
   );
 }
 
@@ -1477,63 +1561,91 @@ const styles = StyleSheet.create({
     fontFamily: "Inter_700Bold",
   },
 
-  // Insight card — light surface, green accent on value only
+  // Insight card — teal gradient, donut + sparkline
   insightCard: {
-    backgroundColor: "#FFFFFF",
-    borderWidth: 1,
-    borderColor: BRAND_BORDER,
-    borderLeftWidth: 3,
-    borderLeftColor: BRAND_TEAL,
     padding: 16,
-    gap: 0,
+    overflow: "hidden",
   },
   insightLabel: {
-    fontSize: 10,
-    fontFamily: "Inter_600SemiBold",
-    letterSpacing: 0.9,
-    color: "#64736F",
+    fontSize: 12,
+    fontFamily: "Inter_400Regular",
+    color: "rgba(255,255,255,0.75)",
   },
   insightValue: {
-    fontSize: 28,
+    fontSize: 30,
     fontFamily: "Inter_700Bold",
-    color: BRAND_DARK,
+    color: "#FFFFFF",
     marginTop: 2,
+    lineHeight: 36,
+  },
+  insightTagline: {
+    fontSize: 12,
+    fontFamily: "Inter_400Regular",
+    color: "rgba(255,255,255,0.65)",
+    marginTop: 5,
+  },
+  insightInner: {
+    backgroundColor: "rgba(255,255,255,0.12)",
+    borderRadius: 10,
+    padding: 12,
+    marginTop: 14,
+    gap: 10,
+  },
+  insightSectionLabel: {
+    fontSize: 9,
+    fontFamily: "Inter_700Bold",
+    letterSpacing: 1.1,
+    color: "rgba(255,255,255,0.6)",
+  },
+  insightBody: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  insightLegend: {
+    flex: 1,
+    gap: 5,
+  },
+  insightLegendRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+  },
+  insightLegendDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    flexShrink: 0,
+  },
+  insightLegendText: {
+    fontSize: 11,
+    fontFamily: "Inter_400Regular",
+    color: "rgba(255,255,255,0.9)",
+    flex: 1,
+  },
+  insightMoreText: {
+    fontSize: 10,
+    fontFamily: "Inter_400Regular",
+    color: "rgba(255,255,255,0.5)",
+    marginTop: 1,
+  },
+  insightSparkWrap: {
+    backgroundColor: "rgba(255,255,255,0.12)",
+    borderRadius: 8,
+    padding: 6,
+    alignItems: "center",
+    gap: 3,
+  },
+  insightSparkLabel: {
+    fontSize: 8,
+    fontFamily: "Inter_700Bold",
+    letterSpacing: 0.8,
+    color: "rgba(255,255,255,0.55)",
   },
   insightSubtext: {
     fontSize: 12,
     fontFamily: "Inter_400Regular",
-    color: "#64736F",
-    marginTop: 6,
-  },
-  periodRow: {
-    flexDirection: "row",
-    gap: 6,
-    marginTop: 10,
-  },
-  periodChip: {
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 20,
-    borderWidth: 1,
-  },
-  periodChipSelected: {
-    backgroundColor: BRAND_DARK,
-    borderColor: BRAND_DARK,
-  },
-  periodChipIdle: {
-    backgroundColor: "#E1F5EE",
-    borderColor: BRAND_BORDER,
-  },
-  periodChipText: {
-    fontSize: 12,
-  },
-  periodChipTextSelected: {
-    fontFamily: "Inter_600SemiBold",
-    color: "#FFFFFF",
-  },
-  periodChipTextIdle: {
-    fontFamily: "Inter_400Regular",
-    color: "#314B45",
+    color: "rgba(255,255,255,0.75)",
   },
 
   // Action buttons
