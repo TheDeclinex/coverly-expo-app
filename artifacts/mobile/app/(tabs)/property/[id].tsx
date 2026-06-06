@@ -1,6 +1,7 @@
 import { Feather } from "@expo/vector-icons";
 import { Image } from "expo-image";
 import * as Haptics from "expo-haptics";
+import * as ImagePicker from "expo-image-picker";
 import { Stack, router, useLocalSearchParams } from "expo-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import React, { useMemo, useState } from "react";
@@ -33,6 +34,7 @@ import {
   type RoomStat,
 } from "@/lib/dashboard-stats";
 import { formatCurrency } from "@/lib/inventory-mappers";
+import { uploadCoverPhoto } from "@/lib/photo-upload";
 import { supabase } from "@/lib/supabase";
 import type { InventoryFile, InventoryItem, InventoryRoom } from "@/types";
 
@@ -890,6 +892,7 @@ export default function PropertyDetailScreen() {
   const insets = useSafeAreaInsets();
   const queryClient = useQueryClient();
   const [coverModalVisible, setCoverModalVisible] = useState(false);
+  const [coverPhotoUploading, setCoverPhotoUploading] = useState(false);
 
   const {
     data: rooms,
@@ -992,9 +995,92 @@ export default function PropertyDetailScreen() {
     });
   };
 
+  const handlePickPropertyCover = async () => {
+    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (status !== "granted") {
+      Alert.alert(
+        "Permission needed",
+        "Allow access to your photos to set a property cover image."
+      );
+      return;
+    }
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ["images"],
+      quality: 0.85,
+      allowsEditing: true,
+      aspect: [16, 9],
+    });
+    if (result.canceled || !result.assets[0]) return;
+    if (!session?.user.id) return;
+    setCoverPhotoUploading(true);
+    try {
+      const publicUrl = await uploadCoverPhoto(
+        result.assets[0].uri,
+        session.user.id
+      );
+      if (!publicUrl) {
+        Alert.alert("Upload failed", "Could not upload cover photo. Please try again.");
+        return;
+      }
+      const { error: updateError } = await supabase
+        .from("inventory_files")
+        .update({ property_cover_image_url: publicUrl })
+        .eq("id", id);
+      if (updateError) {
+        Alert.alert("Save failed", updateError.message);
+        return;
+      }
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["property", id] }),
+        queryClient.invalidateQueries({ queryKey: ["files"] }),
+        queryClient.invalidateQueries({ queryKey: ["inventory-files"] }),
+      ]);
+    } finally {
+      setCoverPhotoUploading(false);
+    }
+  };
+
   const renderHeader = () => {
     if (!stats) return null;
     return (
+      <>
+        {/* Property cover photo hero */}
+        <View style={{ height: 200, overflow: "hidden", backgroundColor: colors.secondary }}>
+          {property?.property_cover_image_url ? (
+            <Image
+              source={{ uri: property.property_cover_image_url }}
+              style={StyleSheet.absoluteFill}
+              contentFit="cover"
+            />
+          ) : (
+            <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
+              <Feather name="home" size={72} color={colors.primary} style={{ opacity: 0.5 }} />
+            </View>
+          )}
+          <Pressable
+            onPress={handlePickPropertyCover}
+            disabled={coverPhotoUploading}
+            style={{
+              position: "absolute",
+              bottom: 12,
+              right: 12,
+              width: 36,
+              height: 36,
+              borderRadius: 18,
+              backgroundColor: "rgba(0,0,0,0.45)",
+              alignItems: "center",
+              justifyContent: "center",
+            }}
+            hitSlop={8}
+          >
+            {coverPhotoUploading ? (
+              <ActivityIndicator size="small" color="#fff" />
+            ) : (
+              <Feather name="camera" size={16} color="#fff" />
+            )}
+          </Pressable>
+        </View>
+
       <View style={{ gap: 10, paddingHorizontal: 16, paddingTop: 14 }}>
         {/* 1 — Compact summary */}
         <CompactSummary
@@ -1065,6 +1151,7 @@ export default function PropertyDetailScreen() {
           Rooms
         </Text>
       </View>
+      </>
     );
   };
 

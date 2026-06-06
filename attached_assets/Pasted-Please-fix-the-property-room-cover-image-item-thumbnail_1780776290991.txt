@@ -1,0 +1,85 @@
+Please fix the property/room cover image, item thumbnail expansion, and pin overlay behaviour.
+
+Planner mode recommendation:
+Use Planner first. Before editing, inspect the existing Expo/React Native image components, scan review pin rendering, item card thumbnail rendering, image expand/lightbox modal, Supabase storage helpers, inventory_files/property model, inventory_rooms model, and inventory_items image/pin fields. This should be a targeted image/evidence/pin pipeline fix, not a redesign.
+
+Issues to fix:
+
+1. Property and room cover images
+   Newly created properties and rooms currently show blank/empty cover areas.
+
+Required behaviour:
+
+* If a property has no real cover photo, show a polished default property/home placeholder icon.
+* If a room has no real cover photo, show a polished default room placeholder icon.
+* Use suitable defaults, for example:
+
+  * Property/home: home icon
+  * Lounge/living room: sofa or room icon if available
+  * Bedroom: bed icon if available
+  * Kitchen: kitchen/utensils icon if available
+  * Bathroom: bath icon if available
+  * Generic room fallback: room/grid/home icon
+* Do not leave large empty pale blocks with only a tiny icon unless intentionally styled.
+* Add a user option to set or replace a real photo for a property and for a room.
+* The user should be able to take a photo or upload/select from device gallery, using the existing Expo/image picker pattern if already present.
+* Store the image in the existing Supabase storage convention if one already exists.
+* Use existing database columns for cover images if they already exist.
+* If property/room cover image columns do not exist, do not invent silently. Add a clear migration/SQL file and explain what column is needed, using existing naming conventions.
+
+2. Item thumbnail expansion opens black overlay with no image
+   When tapping an item thumbnail, the app opens a black overlay but does not show the image.
+
+Required behaviour:
+
+* Tapping an item thumbnail should open the real item/source image in the image viewer.
+* If the item has `photoUrl`, `imageUrl`, `photo_url`, `image_url`, `source_image_url`, or similar, normalize and pass the correct URI into the modal.
+* Reuse the same image URL logic that works elsewhere in the app.
+* Do not open the black overlay if there is no valid image. Show a friendly fallback instead.
+* Add loading/error states for the expanded image so failed image loads are visible and diagnosable.
+* Make sure Supabase storage URLs are converted to usable public/signed URLs using the existing helper pattern.
+* Avoid duplicating image URL logic across screens if a shared helper already exists.
+
+3. Pins visible on scan review but missing on thumbnail and expanded view
+   Pins are visible on the scan review screen, but not on item thumbnails or expanded images. This should work like the existing UI Bakery behaviour.
+
+Required behaviour:
+
+* Inspect the scan review screen and reuse its pin overlay logic where possible.
+* Item thumbnails should show the item’s pin marker over the image when pin data exists.
+* Expanded image view should show the pin marker over the full image when pin data exists.
+* Pin placement must scale correctly to the rendered image size.
+* Do not hard-code positions.
+* Support whatever pin format already exists, for example:
+
+  * `{ x, y }`
+  * `{ xPercent, yPercent }`
+  * `pin_x`, `pin_y`
+  * normalized 0–1 coordinates
+  * percentage coordinates
+* If the scan review uses a different shape than stored item data, normalize it in one helper.
+* If an item has no pin, show the image normally without an overlay.
+* If multiple items share the same source scan photo, each item thumbnail/detail should show that item’s own pin on that source photo.
+
+4. Keep current flows stable
+
+* Do not break AI scan review.
+* Do not break item save.
+* Do not break item detail.
+* Do not break property/room navigation.
+* Do not create duplicate storage buckets, duplicate tables, or new backend dependencies.
+* Preserve current Supabase table names, RLS patterns, storage bucket names, route names, and auth logic.
+* Do not use service-role keys client-side.
+* Keep this aligned with future production migration.
+
+Acceptance criteria:
+
+* New properties show a sensible default cover placeholder if no photo exists.
+* New rooms show a sensible default room placeholder if no photo exists.
+* User can add/replace a real cover photo for a property and for a room.
+* Tapping an item thumbnail opens the actual image, not a blank black overlay.
+* Item thumbnail images display pins where pin data exists.
+* Expanded item images display pins where pin data exists.
+* Pin positions match the scan review behaviour and scale correctly.
+* Existing saved items and existing scan review behaviour still work.
+* TypeScript passes.

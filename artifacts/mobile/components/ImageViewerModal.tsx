@@ -1,6 +1,7 @@
 import { Feather } from "@expo/vector-icons";
 import { Image } from "expo-image";
-import React, { useCallback, useRef, useState } from "react";
+import type { ImageLoadEventData } from "expo-image";
+import React, { useCallback, useMemo, useRef, useState } from "react";
 import {
   Dimensions,
   FlatList,
@@ -12,13 +13,78 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-const SCREEN_WIDTH = Dimensions.get("window").width;
+const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get("window");
+const PIN_R = 9;
 
 interface ImageViewerModalProps {
   uris: string[];
   initialIndex?: number;
   visible: boolean;
   onClose: () => void;
+  /**
+   * Optional pin to overlay on one photo. Coordinates are 0–1 (normalized),
+   * matching what is stored in inventory_items.image_pin.
+   * Position is computed accurately from the natural image dimensions using
+   * the expo-image onLoad event so it accounts for contentFit="contain" letterboxing.
+   */
+  pin?: { x: number; y: number } | null;
+  /** Which URI index the pin belongs to. Defaults to initialIndex. */
+  pinPhotoIndex?: number;
+  pinColor?: string;
+}
+
+function ImagePage({
+  uri,
+  onClose,
+  pin,
+  pinColor,
+}: {
+  uri: string;
+  onClose: () => void;
+  pin?: { x: number; y: number } | null;
+  pinColor?: string;
+}) {
+  const [imgSize, setImgSize] = useState<{ w: number; h: number } | null>(null);
+
+  const pinPos = useMemo(() => {
+    if (!pin || !imgSize) return null;
+    const scale = Math.min(SCREEN_W / imgSize.w, SCREEN_H / imgSize.h);
+    const rw = imgSize.w * scale;
+    const rh = imgSize.h * scale;
+    const ox = (SCREEN_W - rw) / 2;
+    const oy = (SCREEN_H - rh) / 2;
+    return {
+      left: ox + pin.x * rw - PIN_R,
+      top: oy + pin.y * rh - PIN_R,
+    };
+  }, [pin, imgSize]);
+
+  return (
+    <Pressable style={styles.page} onPress={onClose}>
+      <Image
+        source={{ uri }}
+        style={styles.image}
+        contentFit="contain"
+        onLoad={(e: ImageLoadEventData) => {
+          const { width, height } = e.source;
+          if (width > 0 && height > 0) setImgSize({ w: width, h: height });
+        }}
+      />
+      {pinPos && (
+        <View
+          pointerEvents="none"
+          style={[
+            styles.pin,
+            {
+              left: pinPos.left,
+              top: pinPos.top,
+              backgroundColor: pinColor ?? "#085041",
+            },
+          ]}
+        />
+      )}
+    </Pressable>
+  );
 }
 
 /**
@@ -26,12 +92,18 @@ interface ImageViewerModalProps {
  * When multiple URIs are provided the user can swipe left/right or tap the
  * arrow buttons to navigate. Dot indicators show position in the set.
  * Single-photo usage hides all navigation UI.
+ *
+ * Pass `pin` + `pinPhotoIndex` to show a position marker on a specific photo.
+ * Pin coordinates must be normalized 0–1 (as stored in inventory_items.image_pin).
  */
 export function ImageViewerModal({
   uris,
   initialIndex = 0,
   visible,
   onClose,
+  pin,
+  pinPhotoIndex,
+  pinColor = "#085041",
 }: ImageViewerModalProps) {
   const insets = useSafeAreaInsets();
   const [currentIndex, setCurrentIndex] = useState(initialIndex);
@@ -39,6 +111,7 @@ export function ImageViewerModal({
 
   const safeInitial = Math.max(0, Math.min(initialIndex, uris.length - 1));
   const multi = uris.length > 1;
+  const pinIdx = pinPhotoIndex ?? initialIndex;
 
   const scrollToIndex = useCallback(
     (index: number) => {
@@ -79,25 +152,21 @@ export function ImageViewerModal({
           pagingEnabled
           showsHorizontalScrollIndicator={false}
           initialScrollIndex={safeInitial}
+          style={{ flex: 1 }}
           getItemLayout={(_, index) => ({
-            length: SCREEN_WIDTH,
-            offset: SCREEN_WIDTH * index,
+            length: SCREEN_W,
+            offset: SCREEN_W * index,
             index,
           })}
           onViewableItemsChanged={onViewableItemsChanged}
           viewabilityConfig={viewabilityConfig}
-          renderItem={({ item: uri }) => (
-            <Pressable
-              style={styles.page}
-              onPress={onClose}
-            >
-              <Image
-                source={{ uri }}
-                style={styles.image}
-                contentFit="contain"
-                pointerEvents="none"
-              />
-            </Pressable>
+          renderItem={({ item: uri, index }) => (
+            <ImagePage
+              uri={uri}
+              onClose={onClose}
+              pin={index === pinIdx ? pin : undefined}
+              pinColor={pinColor}
+            />
           )}
         />
 
@@ -112,7 +181,9 @@ export function ImageViewerModal({
               <Feather
                 name="chevron-left"
                 size={26}
-                color={currentIndex === 0 ? "rgba(255,255,255,0.25)" : "#FFFFFF"}
+                color={
+                  currentIndex === 0 ? "rgba(255,255,255,0.25)" : "#FFFFFF"
+                }
               />
             </Pressable>
             <Pressable
@@ -165,14 +236,20 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(0,0,0,0.93)",
   },
   page: {
-    width: SCREEN_WIDTH,
+    width: SCREEN_W,
     flex: 1,
-    alignItems: "center",
-    justifyContent: "center",
   },
   image: {
     width: "100%",
     height: "100%",
+  },
+  pin: {
+    position: "absolute",
+    width: PIN_R * 2,
+    height: PIN_R * 2,
+    borderRadius: PIN_R,
+    borderWidth: 2,
+    borderColor: "#fff",
   },
   closeBtn: {
     position: "absolute",

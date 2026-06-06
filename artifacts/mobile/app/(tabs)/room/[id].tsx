@@ -1,9 +1,13 @@
 import { Feather } from "@expo/vector-icons";
+import * as ImagePicker from "expo-image-picker";
 import * as Haptics from "expo-haptics";
+import { Image } from "expo-image";
 import { Stack, router, useLocalSearchParams } from "expo-router";
-import { useQuery } from "@tanstack/react-query";
-import React from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import React, { useState } from "react";
 import {
+  ActivityIndicator,
+  Alert,
   FlatList,
   Platform,
   Pressable,
@@ -21,8 +25,32 @@ import { LoadingState } from "@/components/LoadingState";
 import { useAuth } from "@/context/AuthContext";
 import { useColors } from "@/hooks/useColors";
 import { formatCurrency } from "@/lib/inventory-mappers";
+import { uploadCoverPhoto } from "@/lib/photo-upload";
 import { supabase } from "@/lib/supabase";
-import type { InventoryItem } from "@/types";
+import type { InventoryItem, InventoryRoom } from "@/types";
+
+const COVER_H = 200;
+
+const ROOM_ICONS: Record<string, string> = {
+  kitchen: "coffee",
+  bedroom: "moon",
+  bathroom: "droplet",
+  living_room: "tv",
+  lounge: "tv",
+  dining: "scissors",
+  office: "monitor",
+  garage: "truck",
+  garden: "sun",
+  utility: "tool",
+  hallway: "navigation",
+  loft: "archive",
+};
+
+function roomIconName(roomType: string | null): keyof typeof Feather.glyphMap {
+  if (!roomType) return "home";
+  const key = roomType.toLowerCase().replace(/\s+/g, "_");
+  return (ROOM_ICONS[key] ?? "home") as keyof typeof Feather.glyphMap;
+}
 
 function ItemCard({
   item,
@@ -32,6 +60,12 @@ function ItemCard({
   colors: ReturnType<typeof import("@/hooks/useColors").useColors>;
 }) {
   const imageUri = item.image_url ?? item.photo_url;
+
+  const rawPin = item.image_pin as Record<string, unknown> | null | undefined;
+  const pin =
+    rawPin && typeof rawPin.x === "number" && typeof rawPin.y === "number"
+      ? { x: rawPin.x, y: rawPin.y }
+      : null;
 
   const handlePress = async () => {
     await Haptics.selectionAsync();
@@ -62,6 +96,7 @@ function ItemCard({
         placeholderIconSize={22}
         placeholderIconColor={colors.mutedForeground}
         placeholderBackgroundColor={colors.muted}
+        pin={pin}
       />
       <View style={styles.cardBody}>
         <Text
@@ -106,6 +141,9 @@ export default function ItemsScreen() {
   const { session } = useAuth();
   const colors = useColors();
   const insets = useSafeAreaInsets();
+  const queryClient = useQueryClient();
+
+  const [coverUploading, setCoverUploading] = useState(false);
 
   const {
     data: items,
@@ -127,6 +165,20 @@ export default function ItemsScreen() {
     enabled: !!session && !!id,
   });
 
+  const { data: room } = useQuery({
+    queryKey: ["room", id, session?.user.id],
+    queryFn: async () => {
+      const { data, error: queryError } = await supabase
+        .from("inventory_rooms")
+        .select("*")
+        .eq("id", id)
+        .single();
+      if (queryError) throw queryError;
+      return data as InventoryRoom;
+    },
+    enabled: !!session && !!id,
+  });
+
   const handleScanRoom = async () => {
     await Haptics.selectionAsync();
     router.push({
@@ -142,6 +194,84 @@ export default function ItemsScreen() {
       params: { roomId: id, roomName: name, fileId: fileId ?? "" },
     });
   };
+
+  const handlePickRoomCover = async () => {
+    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (status !== "granted") {
+      Alert.alert(
+        "Permission needed",
+        "Allow access to your photos to set a room cover image."
+      );
+      return;
+    }
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ["images"],
+      quality: 0.85,
+      allowsEditing: true,
+      aspect: [16, 9],
+    });
+    if (result.canceled || !result.assets[0]) return;
+    if (!session?.user.id) return;
+    setCoverUploading(true);
+    try {
+      const publicUrl = await uploadCoverPhoto(
+        result.assets[0].uri,
+        session.user.id
+      );
+      if (!publicUrl) {
+        Alert.alert("Upload failed", "Could not upload cover photo. Please try again.");
+        return;
+      }
+      const { error: updateError } = await supabase
+        .from("inventory_rooms")
+        .update({ cover_photo_url: publicUrl })
+        .eq("id", id);
+      if (updateError) {
+        Alert.alert("Save failed", updateError.message);
+        return;
+      }
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["room", id] }),
+        queryClient.invalidateQueries({ queryKey: ["rooms", fileId] }),
+        queryClient.invalidateQueries({ queryKey: ["rooms", fileId, session.user.id] }),
+      ]);
+    } finally {
+      setCoverUploading(false);
+    }
+  };
+
+  const renderRoomCover = () => (
+    <View style={[styles.coverContainer, { backgroundColor: colors.secondary }]}>
+      {room?.cover_photo_url ? (
+        <Image
+          source={{ uri: room.cover_photo_url }}
+          style={StyleSheet.absoluteFill}
+          contentFit="cover"
+        />
+      ) : (
+        <View style={styles.coverPlaceholder}>
+          <Feather
+            name={roomIconName(room?.room_type ?? null)}
+            size={72}
+            color={colors.primary}
+            style={{ opacity: 0.55 }}
+          />
+        </View>
+      )}
+      <Pressable
+        onPress={handlePickRoomCover}
+        disabled={coverUploading}
+        style={[styles.cameraBtn, { backgroundColor: "rgba(0,0,0,0.45)" }]}
+        hitSlop={8}
+      >
+        {coverUploading ? (
+          <ActivityIndicator size="small" color="#fff" />
+        ) : (
+          <Feather name="camera" size={16} color="#fff" />
+        )}
+      </Pressable>
+    </View>
+  );
 
   return (
     <>
@@ -174,11 +304,12 @@ export default function ItemsScreen() {
             data={items}
             keyExtractor={(item) => item.id}
             renderItem={({ item }) => <ItemCard item={item} colors={colors} />}
+            ListHeaderComponent={renderRoomCover}
             contentContainerStyle={[
               styles.list,
               {
                 paddingBottom: insets.bottom + 88,
-                ...(Platform.OS === "web" ? { paddingTop: 16 } : {}),
+                ...(Platform.OS === "web" ? { paddingTop: 0 } : {}),
               },
             ]}
             refreshControl={
@@ -246,8 +377,28 @@ export default function ItemsScreen() {
 }
 
 const styles = StyleSheet.create({
+  coverContainer: {
+    height: COVER_H,
+    overflow: "hidden",
+  },
+  coverPlaceholder: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  cameraBtn: {
+    position: "absolute",
+    bottom: 12,
+    right: 12,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: "center",
+    justifyContent: "center",
+  },
   list: {
     padding: 16,
+    paddingTop: 12,
   },
   card: {
     flexDirection: "row",
@@ -278,29 +429,23 @@ const styles = StyleSheet.create({
     textTransform: "capitalize",
   },
   qty: { fontSize: 12, fontFamily: "Inter_400Regular" },
-  price: { fontSize: 15, fontFamily: "Inter_600SemiBold", marginTop: 2 },
+  price: { fontSize: 14, fontFamily: "Inter_700Bold" },
   chevron: { paddingRight: 12 },
   fabRow: {
     position: "absolute",
-    left: 20,
-    right: 20,
+    left: 16,
+    right: 16,
     flexDirection: "row",
     gap: 10,
-    elevation: 4,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.18,
-    shadowRadius: 6,
   },
   fabBtn: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    gap: 8,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    borderRadius: 28,
-    overflow: "hidden",
+    gap: 6,
+    height: 50,
+    borderRadius: 14,
+    paddingHorizontal: 18,
   },
   fabText: { fontSize: 15, fontFamily: "Inter_600SemiBold" },
 });

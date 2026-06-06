@@ -101,6 +101,12 @@ export default function ItemDetailScreen() {
 
   const primaryUri = item?.image_url ?? item?.photo_url;
 
+  const itemPin = React.useMemo(() => {
+    const raw = item?.image_pin as Record<string, unknown> | null | undefined;
+    if (!raw || typeof raw.x !== "number" || typeof raw.y !== "number") return null;
+    return { x: raw.x, y: raw.y };
+  }, [item?.image_pin]);
+
   const allPhotoUris: string[] = React.useMemo(() => {
     const uris: string[] = [];
     if (primaryUri) uris.push(primaryUri);
@@ -158,6 +164,7 @@ export default function ItemDetailScreen() {
             placeholderBackgroundColor={colors.secondary}
             allUris={allPhotoUris}
             initialPhotoIndex={0}
+            pin={itemPin}
           />
 
           <View style={styles.content}>

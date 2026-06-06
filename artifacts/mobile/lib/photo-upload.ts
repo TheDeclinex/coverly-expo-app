@@ -85,3 +85,43 @@ export async function uploadScanPhoto(
 export function clearScanPhotoUploadCache(): void {
   uploadCache.clear();
 }
+
+/**
+ * Upload a local image URI as a cover photo for a property or room.
+ * Stores in the same `inventory-photos` bucket as scan photos but uses
+ * a `cover-` path prefix to distinguish them.
+ *
+ * @param localUri  - Local device URI from ImagePicker (file:// or content://)
+ * @param userId    - Supabase user ID used as the storage path prefix.
+ * @returns The public HTTPS URL of the uploaded file, or null on failure.
+ */
+export async function uploadCoverPhoto(
+  localUri: string,
+  userId: string
+): Promise<string | null> {
+  try {
+    const response = await fetch(localUri);
+    if (!response.ok) return null;
+    const blob = await response.blob();
+    const mime = blob.type || "image/jpeg";
+    const ext = mime.split("/")[1]?.replace("jpeg", "jpg") ?? "jpg";
+    const timestamp = Date.now();
+    const rand = Math.random().toString(36).slice(2, 7);
+    const path = `${userId}/cover-${timestamp}-${rand}.${ext}`;
+    const { data: uploadData, error: uploadError } = await supabase.storage
+      .from(SCAN_PHOTOS_BUCKET)
+      .upload(path, blob, { contentType: mime, upsert: false });
+    if (uploadError) {
+      console.warn("[photoUpload] cover upload error:", uploadError.message);
+      return null;
+    }
+    const { data: urlData } = supabase.storage
+      .from(SCAN_PHOTOS_BUCKET)
+      .getPublicUrl(uploadData.path);
+    return urlData?.publicUrl ?? null;
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.warn("[photoUpload] cover upload unexpected error:", msg);
+    return null;
+  }
+}

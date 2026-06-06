@@ -7,6 +7,8 @@ import type { StyleProp, ViewStyle } from "react-native";
 
 import { ImageViewerModal } from "@/components/ImageViewerModal";
 
+const THUMB_PIN_R = 8;
+
 interface ExpandableImageProps {
   uri: string | null | undefined;
   /** Size/layout style applied to both the image container and the placeholder. */
@@ -31,6 +33,13 @@ interface ExpandableImageProps {
    * Only used when `allUris` is provided.
    */
   initialPhotoIndex?: number;
+  /**
+   * Optional pin marker to show over the image. Coordinates must be
+   * normalized 0–1 (as stored in inventory_items.image_pin).
+   * Shown on both the thumbnail and the expanded lightbox view.
+   */
+  pin?: { x: number; y: number } | null;
+  pinColor?: string;
 }
 
 /**
@@ -38,6 +47,8 @@ interface ExpandableImageProps {
  * lightbox when a URI is present.
  *
  * Pass `allUris` to enable swipe-through of multiple photos in the lightbox.
+ * Pass `pin` (normalized 0–1 coords) to show an AI-location pin marker on
+ * both the thumbnail and in the expanded lightbox.
  * When uri is null/undefined the component renders a non-interactive placeholder
  * icon — no tap target is added.
  */
@@ -51,11 +62,17 @@ export function ExpandableImage({
   placeholderBackgroundColor = "#f1f5f9",
   allUris,
   initialPhotoIndex = 0,
+  pin,
+  pinColor = "#085041",
 }: ExpandableImageProps) {
   const [lightboxVisible, setLightboxVisible] = useState(false);
+  const [dims, setDims] = useState({ w: 0, h: 0 });
 
   const lightboxUris: string[] =
     allUris && allUris.length > 0 ? allUris : uri ? [uri] : [];
+
+  const hasPin =
+    !!pin && isFinite(pin.x) && isFinite(pin.y) && dims.w > 0 && dims.h > 0;
 
   if (!uri) {
     return (
@@ -84,18 +101,41 @@ export function ExpandableImage({
       <Pressable
         onPress={() => setLightboxVisible(true)}
         style={[style, { overflow: "hidden" }]}
+        onLayout={(e) => {
+          const { width, height } = e.nativeEvent.layout;
+          setDims({ w: width, h: height });
+        }}
       >
         <Image
           source={{ uri }}
           style={{ width: "100%", height: "100%" }}
           contentFit={contentFit}
         />
+        {hasPin && (
+          <View
+            pointerEvents="none"
+            style={{
+              position: "absolute",
+              left: pin!.x * dims.w - THUMB_PIN_R,
+              top: pin!.y * dims.h - THUMB_PIN_R,
+              width: THUMB_PIN_R * 2,
+              height: THUMB_PIN_R * 2,
+              borderRadius: THUMB_PIN_R,
+              backgroundColor: pinColor,
+              borderWidth: 1.5,
+              borderColor: "#fff",
+            }}
+          />
+        )}
       </Pressable>
       <ImageViewerModal
         uris={lightboxUris}
         initialIndex={initialPhotoIndex}
         visible={lightboxVisible}
         onClose={() => setLightboxVisible(false)}
+        pin={pin}
+        pinPhotoIndex={initialPhotoIndex}
+        pinColor={pinColor}
       />
     </>
   );
