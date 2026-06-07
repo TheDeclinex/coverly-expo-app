@@ -214,10 +214,14 @@ export default function AddItemScreen() {
         console.warn("[AddItem] Photo upload failed:", uploadError.message, "path:", path, "bucket:", ITEM_PHOTOS_BUCKET);
         return { url: null, uploadErrMsg: uploadError.message };
       }
-      const { data: urlData } = supabase.storage
+      const { data: signedData, error: signedError } = await supabase.storage
         .from(ITEM_PHOTOS_BUCKET)
-        .getPublicUrl(uploadData.path);
-      return { url: urlData.publicUrl ?? null, uploadErrMsg: null };
+        .createSignedUrl(uploadData.path, 31536000);
+      if (signedError || !signedData?.signedUrl) {
+        console.warn("[AddItem] Signed URL error:", signedError?.message);
+        return { url: null, uploadErrMsg: signedError?.message ?? "signed URL failed" };
+      }
+      return { url: signedData.signedUrl, uploadErrMsg: null };
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       console.warn("[AddItem] Photo upload error:", msg);

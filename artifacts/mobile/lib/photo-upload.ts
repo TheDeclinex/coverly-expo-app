@@ -62,15 +62,17 @@ export async function uploadScanPhoto(
       return null;
     }
 
-    const { data: urlData } = supabase.storage
+    const { data: signedData, error: signedError } = await supabase.storage
       .from(SCAN_PHOTOS_BUCKET)
-      .getPublicUrl(uploadData.path);
+      .createSignedUrl(uploadData.path, 31536000);
 
-    const publicUrl = urlData?.publicUrl ?? null;
-    if (publicUrl) {
-      uploadCache.set(cacheKey, publicUrl);
+    if (signedError || !signedData?.signedUrl) {
+      console.warn("[photoUpload] signed URL error:", signedError?.message);
+      return null;
     }
-    return publicUrl;
+    const signedUrl = signedData.signedUrl;
+    uploadCache.set(cacheKey, signedUrl);
+    return signedUrl;
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     console.warn("[photoUpload] unexpected error:", msg);
@@ -115,10 +117,14 @@ export async function uploadCoverPhoto(
       console.warn("[photoUpload] cover upload error:", uploadError.message);
       return null;
     }
-    const { data: urlData } = supabase.storage
+    const { data: signedData, error: signedError } = await supabase.storage
       .from(SCAN_PHOTOS_BUCKET)
-      .getPublicUrl(uploadData.path);
-    return urlData?.publicUrl ?? null;
+      .createSignedUrl(uploadData.path, 31536000);
+    if (signedError || !signedData?.signedUrl) {
+      console.warn("[photoUpload] cover signed URL error:", signedError?.message);
+      return null;
+    }
+    return signedData.signedUrl;
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     console.warn("[photoUpload] cover upload unexpected error:", msg);

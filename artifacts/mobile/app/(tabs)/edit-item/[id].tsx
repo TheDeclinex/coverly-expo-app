@@ -209,10 +209,14 @@ export default function EditItemScreen() {
         };
       }
 
-      const { data: urlData } = supabase.storage
+      const { data: signedData, error: signedError } = await supabase.storage
         .from(ITEM_PHOTOS_BUCKET)
-        .getPublicUrl(uploadData.path);
-      return { url: urlData.publicUrl ?? null, uploadErrMsg: null };
+        .createSignedUrl(uploadData.path, 31536000);
+      if (signedError || !signedData?.signedUrl) {
+        console.warn("[EditItem] Signed URL error:", signedError?.message);
+        return { url: null, uploadErrMsg: signedError?.message ?? "signed URL failed" };
+      }
+      return { url: signedData.signedUrl, uploadErrMsg: null };
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       console.warn("[EditItem] Photo upload error:", msg);
