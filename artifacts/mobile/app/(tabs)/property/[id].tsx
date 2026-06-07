@@ -993,6 +993,13 @@ function RoomBarsSection({
 
 // ─── Room card ────────────────────────────────────────────────────────────────
 
+// Module-level Set — tracks rooms whose completion celebration has already fired
+// this session.  This ensures the celebration plays even when the user navigates
+// back to the property screen after the ring was already closed (in which case
+// the component mounts with completionPct already = 1, so the old prevPctRef
+// approach — which started at the current value — never triggered).
+const celebratedRooms = new Set<string>();
+
 const RING_SIZE = 88;
 // Rounded-rect ring that hugs the square thumbnail
 const RING_RECT_INSET = 4;                              // path centre 4 px from container edge
@@ -1039,45 +1046,112 @@ function RoomCard({
   const completionPct = itemCount > 0 ? Math.min(completedCount / itemCount, 1) : 0;
   const ringOffset = RING_CIRC * (1 - completionPct);
 
-  // Ring completion celebration: bounce-scale the thumbnail+ring, fire success haptic
-  const prevPctRef = useRef(completionPct);
+  // Ring completion celebration:
+  //   - bounce-scales the thumbnail+ring
+  //   - fires success haptic
+  //   - shows a brief "Room complete 🎉" toast pill
+  //
+  // Uses the module-level celebratedRooms Set so the celebration fires at most
+  // once per room per session — critically, it fires even when the user navigates
+  // back to the property screen AFTER the ring closed (mounting with completionPct
+  // already = 1, which the old prevPctRef approach missed entirely).
   const celebAnim = useRef(new Animated.Value(0)).current;
-  const celebScale = celebAnim.interpolate({ inputRange: [0, 1], outputRange: [1, 1.18] });
+  const toastAnim = useRef(new Animated.Value(0)).current;
+  const celebScale = celebAnim.interpolate({ inputRange: [0, 1], outputRange: [1, 1.22] });
+  const toastOpacity = toastAnim.interpolate({ inputRange: [0, 1], outputRange: [0, 1] });
+  const toastTranslate = toastAnim.interpolate({ inputRange: [0, 1], outputRange: [6, 0] });
 
   useEffect(() => {
-    if (prevPctRef.current < 1 && completionPct >= 1) {
+    if (completionPct >= 1 && !celebratedRooms.has(item.id)) {
+      celebratedRooms.add(item.id);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+
+      // Ring bounce
       Animated.sequence([
         Animated.timing(celebAnim, {
           toValue: 1,
-          duration: 280,
+          duration: 260,
           useNativeDriver: true,
-          easing: Easing.out(Easing.back(2)),
+          easing: Easing.out(Easing.back(2.5)),
         }),
         Animated.timing(celebAnim, {
           toValue: 0,
-          duration: 360,
+          duration: 380,
+          useNativeDriver: true,
+          easing: Easing.in(Easing.cubic),
+        }),
+      ]).start();
+
+      // Toast: slide up + fade in, hold 1.8 s, then fade out
+      Animated.sequence([
+        Animated.timing(toastAnim, {
+          toValue: 1,
+          duration: 260,
+          useNativeDriver: true,
+          easing: Easing.out(Easing.cubic),
+        }),
+        Animated.delay(1800),
+        Animated.timing(toastAnim, {
+          toValue: 0,
+          duration: 320,
           useNativeDriver: true,
           easing: Easing.in(Easing.cubic),
         }),
       ]).start();
     }
-    prevPctRef.current = completionPct;
-  }, [completionPct]);
+  }, [completionPct, item.id]);
 
   return (
-    <Pressable
-      onPress={handlePress}
-      style={({ pressed }) => [
-        styles.card,
-        {
-          backgroundColor: colors.card,
-          borderRadius: colors.radius,
-          borderColor: colors.border,
-          opacity: pressed ? 0.92 : 1,
-        },
-      ]}
-    >
+    <View>
+      {/* "Room complete 🎉" toast — slides up from the card, fades in/out */}
+      <Animated.View
+        pointerEvents="none"
+        style={{
+          position: "absolute",
+          top: -36,
+          alignSelf: "center",
+          zIndex: 10,
+          opacity: toastOpacity,
+          transform: [{ translateY: toastTranslate }],
+          backgroundColor: "#1C6B5A",
+          paddingHorizontal: 16,
+          paddingVertical: 7,
+          borderRadius: 20,
+          flexDirection: "row",
+          alignItems: "center",
+          gap: 6,
+          shadowColor: "#000",
+          shadowOffset: { width: 0, height: 2 },
+          shadowOpacity: 0.18,
+          shadowRadius: 6,
+          elevation: 6,
+        }}
+      >
+        <Text style={{ fontSize: 15 }}>🎉</Text>
+        <Text
+          style={{
+            color: "#fff",
+            fontSize: 13,
+            fontFamily: "Inter_600SemiBold",
+            letterSpacing: 0.2,
+          }}
+        >
+          Room complete!
+        </Text>
+      </Animated.View>
+
+      <Pressable
+        onPress={handlePress}
+        style={({ pressed }) => [
+          styles.card,
+          {
+            backgroundColor: colors.card,
+            borderRadius: colors.radius,
+            borderColor: colors.border,
+            opacity: pressed ? 0.92 : 1,
+          },
+        ]}
+      >
       <View style={styles.cardLeft}>
         {/* Completion ring — animated scale on full completion */}
         <Animated.View style={[styles.roomThumbWrap, { transform: [{ scale: celebScale }] }]}>
@@ -1169,6 +1243,7 @@ function RoomCard({
         </View>
       </View>
     </Pressable>
+    </View>
   );
 }
 
