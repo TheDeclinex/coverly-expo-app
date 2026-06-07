@@ -265,6 +265,19 @@ export default function HomeScreen() {
     enabled: !!session,
   });
 
+  const { data: allRooms } = useQuery({
+    queryKey: ["all-rooms-count", session?.user.id],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("inventory_rooms")
+        .select("id")
+        .is("archived_at", null);
+      if (error) throw error;
+      return (data ?? []) as { id: string }[];
+    },
+    enabled: !!session,
+  });
+
   const portfolio = useMemo(() => {
     if (!properties || !allItems) return null;
     return calcPortfolioStats(properties, allItems);
@@ -354,7 +367,7 @@ export default function HomeScreen() {
           )}
         </View>
 
-        {(allItems ?? []).length === 0 && (
+        {(allRooms ?? []).length === 0 && (allItems ?? []).length === 0 && (
           <View
             style={{
               backgroundColor: colors.secondary,

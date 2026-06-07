@@ -2011,8 +2011,8 @@ export default function PropertyDetailScreen() {
           </View>
         )}
 
-        {/* 3.6 — First-use guidance card: shown until any room or item exists */}
-        {(rooms ?? []).length === 0 && (items ?? []).length === 0 && (
+        {/* 3.6 — First-use guidance card: shown until cover photo, room, or item exists */}
+        {!(localCoverUrl ?? property?.property_cover_image_url) && (rooms ?? []).length === 0 && (items ?? []).length === 0 && (
           <View
             style={{
               backgroundColor: colors.card,
