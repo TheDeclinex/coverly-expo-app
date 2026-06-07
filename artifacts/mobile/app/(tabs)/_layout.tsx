@@ -6,11 +6,18 @@ import { useAuth } from "@/context/AuthContext";
 import { useColors } from "@/hooks/useColors";
 
 export default function AppLayout() {
-  const { session, loading } = useAuth();
+  const { session, loading, hasSeenOnboarding } = useAuth();
   const colors = useColors();
 
   if (!loading && !session) {
     return <Redirect href="/login" />;
+  }
+
+  // Belt-and-suspenders: if the user lands on a tab route without completing
+  // onboarding (e.g. restored session from a previous interrupted session),
+  // redirect back to the onboarding wizard.
+  if (!loading && session && hasSeenOnboarding === false) {
+    return <Redirect href="/onboarding" />;
   }
 
   return (

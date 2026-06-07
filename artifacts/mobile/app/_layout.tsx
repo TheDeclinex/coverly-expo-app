@@ -21,7 +21,7 @@ SplashScreen.preventAutoHideAsync();
 const queryClient = new QueryClient();
 
 function RootLayoutNav() {
-  const { loading } = useAuth();
+  const { loading, session, hasSeenOnboarding } = useAuth();
   const [fontsLoaded, fontError] = useFonts({
     Inter_400Regular,
     Inter_500Medium,
@@ -29,17 +29,22 @@ function RootLayoutNav() {
     Inter_700Bold,
   });
 
+  // Auth is settled when not loading AND (no session, OR the onboarding flag has resolved).
+  // Waiting for hasSeenOnboarding prevents a flash of the wrong screen for authed users.
+  const authSettled = !loading && (session === null || hasSeenOnboarding !== null);
+
   useEffect(() => {
-    if ((fontsLoaded || fontError) && !loading) {
+    if ((fontsLoaded || fontError) && authSettled) {
       SplashScreen.hideAsync();
     }
-  }, [fontsLoaded, fontError, loading]);
+  }, [fontsLoaded, fontError, loading, session, hasSeenOnboarding]);
 
-  if ((!fontsLoaded && !fontError) || loading) return null;
+  if ((!fontsLoaded && !fontError) || !authSettled) return null;
 
   return (
     <Stack screenOptions={{ headerShown: false }}>
       <Stack.Screen name="login" options={{ headerShown: false }} />
+      <Stack.Screen name="onboarding" options={{ headerShown: false }} />
       <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
     </Stack>
   );

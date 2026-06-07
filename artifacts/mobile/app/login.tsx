@@ -99,7 +99,7 @@ function ScanCorners() {
 type Mode = "signin" | "signup" | "forgot";
 
 export default function LoginScreen() {
-  const { session } = useAuth();
+  const { session, hasSeenOnboarding } = useAuth();
   const colors      = useColors();
   const insets      = useSafeAreaInsets();
 
@@ -122,7 +122,13 @@ export default function LoginScreen() {
   const [testResult,  setTestResult]  = useState<string | null>(null);
   const [testLoading, setTestLoading] = useState(false);
 
-  if (session) return <Redirect href="/(tabs)" />;
+  // Route based on onboarding state:
+  //   null  = still resolving AsyncStorage — keep showing splash (handled by _layout.tsx)
+  //   false = new user, hasn't finished onboarding
+  //   true  = returning user, go straight to the app
+  if (session && hasSeenOnboarding === true) return <Redirect href="/(tabs)" />;
+  if (session && hasSeenOnboarding === false) return <Redirect href="/onboarding" />;
+  if (session && hasSeenOnboarding === null) return null;
 
   // ── Helpers ────────────────────────────────────────────────────────────────
   const switchMode = (next: Mode) => {
