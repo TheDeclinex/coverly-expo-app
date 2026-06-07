@@ -81,15 +81,25 @@ function CoverageBar({
           overflow: "hidden",
         }}
       >
-        <View style={{ width: `${clamped}%` as any, height: 8, overflow: "hidden" }}>
-          <LinearGradient
-            colors={["#22C55E", "#22C55E", "#FBBF24", "#F97316", "#EF4444"]}
-            locations={[0, 0.75, 0.85, 0.93, 1.0]}
-            start={{ x: 0, y: 0.5 }}
-            end={{ x: 1, y: 0.5 }}
-            style={{ width: 300, height: 8 }}
-          />
-        </View>
+        {/* Gradient spans full track so locations map to real bar width */}
+        <LinearGradient
+          colors={["#22C55E", "#22C55E", "#FBBF24", "#F97316", "#EF4444"]}
+          locations={[0, 0.75, 0.85, 0.93, 1.0]}
+          start={{ x: 0, y: 0.5 }}
+          end={{ x: 1, y: 0.5 }}
+          style={StyleSheet.absoluteFill}
+        />
+        {/* Overlay hides the unfilled right portion with the track colour */}
+        <View
+          style={{
+            position: "absolute",
+            top: 0,
+            bottom: 0,
+            left: `${clamped}%` as any,
+            right: 0,
+            backgroundColor: colors.border,
+          }}
+        />
       </View>
       <Text
         style={{
