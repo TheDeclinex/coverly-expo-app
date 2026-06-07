@@ -13,6 +13,7 @@ import Animated, {
 } from "react-native-reanimated";
 
 import { useColors } from "@/hooks/useColors";
+import { useSignedUrl } from "@/hooks/useSignedUrls";
 
 export interface PhotoEntry {
   url: string;
@@ -93,12 +94,16 @@ function PhotoCard({
     elevation: isDragging.value ? 6 : 0,
   }));
 
+  // Resolve storage path → signed URL; local file:// URIs and legacy https:// URLs
+  // pass through unchanged. undefined while loading → show broken state gracefully.
+  const resolvedUrl = useSignedUrl(photo.url);
+
   return (
     <GestureDetector gesture={panGesture}>
       <Animated.View style={[animStyle, { width: CARD_W, gap: 6 }]}>
         <View style={{ position: "relative" }}>
           <Image
-            source={{ uri: photo.url }}
+            source={resolvedUrl ? { uri: resolvedUrl } : undefined}
             style={{
               width: CARD_W,
               height: CARD_H,

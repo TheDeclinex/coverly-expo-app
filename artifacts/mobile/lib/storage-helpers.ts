@@ -6,14 +6,7 @@
  *   - Display code calls getSignedDisplayUrl / getSignedDisplayUrls to get a fresh
  *     1-hour signed URL at render time.
  *   - Legacy records may contain a full https:// signed URL from before this change;
- *     those are returned as-is (they expire after 1 year from the time they were stored).
- *
- * TODO (DB migration): Add dedicated storage-path columns once service-role access is
- *   available:
- *     ALTER TABLE inventory_items      ADD COLUMN IF NOT EXISTS image_storage_path text;
- *     ALTER TABLE inventory_rooms      ADD COLUMN IF NOT EXISTS cover_photo_storage_path text;
- *     ALTER TABLE inventory_files      ADD COLUMN IF NOT EXISTS property_cover_storage_path text;
- *   Until then, paths are stored in the existing *_url columns (text fields, so valid).
+ *     those are returned as-is.
  */
 
 import { supabase } from "@/lib/supabase";
@@ -27,19 +20,27 @@ export const INVENTORY_PHOTOS_BUCKET = "inventory-photos";
 export const SIGNED_URL_EXPIRY_SECS = 3600;
 
 /**
- * Returns true if `value` is a Supabase Storage object path rather than a full URL.
- * New uploads store bare paths; legacy records stored https:// signed URLs.
+ * Returns true if `value` is a Supabase Storage object path rather than a full URL
+ * or a local device URI.
+ *
+ * Storage paths are bare relative paths like "userId/cover-123.jpg".
+ * Everything else is passed through as-is by the display helpers:
+ *   - https:// / http://  → legacy signed URL or public URL
+ *   - file:// / ph://     → iOS local device URI (freshly picked from camera/library)
+ *   - content://          → Android content URI
  */
 export function isStoragePath(value: string | null | undefined): value is string {
   if (!value) return false;
-  return !value.startsWith("http://") && !value.startsWith("https://");
+  if (value.startsWith("http://") || value.startsWith("https://")) return false;
+  if (value.startsWith("file://") || value.startsWith("ph://") || value.startsWith("content://")) return false;
+  return true;
 }
 
 /**
  * Resolve a stored value (storage path or legacy signed URL) to a display URL.
  *
- * - Storage path  → generate fresh SIGNED_URL_EXPIRY_SECS signed URL.
- * - https:// URL  → return as-is (legacy; may expire in ≤ 1 year from upload time).
+ * - Storage path  → generate fresh SIGNED_URL_EXPIRY_SECS signed URL via createSignedUrl.
+ * - https:// URL  → return as-is (legacy; may expire ≤ 1 year from upload time).
  * - null/empty    → return null.
  */
 export async function getSignedDisplayUrl(
@@ -57,12 +58,15 @@ export async function getSignedDisplayUrl(
     console.warn("[storage] createSignedUrl failed:", error?.message, "path:", pathOrUrl);
     return null;
   }
+  console.log("[storage] signed URL generated for path:", pathOrUrl.slice(0, 40) + "...");
   return data.signedUrl;
 }
 
 /**
  * Batch-resolve an array of storage paths / legacy URLs to signed display URLs.
- * Uses createSignedUrls() for storage paths (single round-trip regardless of count).
+ * Uses individual createSignedUrl calls in parallel (proven API) rather than the
+ * createSignedUrls batch endpoint, which can silently fail or return mismatched paths.
+ *
  * Returns a Map<originalValue, signedUrl> for successful entries only.
  */
 export async function getSignedDisplayUrls(
@@ -83,21 +87,31 @@ export async function getSignedDisplayUrls(
     }
   }
 
-  if (storagePaths.length > 0) {
-    const { data, error } = await supabase.storage
-      .from(bucket)
-      .createSignedUrls(storagePaths, SIGNED_URL_EXPIRY_SECS);
+  if (storagePaths.length === 0) return result;
 
-    if (error) {
-      console.warn("[storage] createSignedUrls batch failed:", error.message);
-    } else {
-      for (const entry of data ?? []) {
-        if (entry.path && entry.signedUrl) {
-          result.set(entry.path, entry.signedUrl);
-        }
+  console.log("[storage] resolving", storagePaths.length, "storage path(s) to signed URLs");
+
+  // Use individual createSignedUrl calls in parallel — more reliable than the batch endpoint.
+  const settled = await Promise.allSettled(
+    storagePaths.map(async (path) => {
+      const { data, error } = await supabase.storage
+        .from(bucket)
+        .createSignedUrl(path, SIGNED_URL_EXPIRY_SECS);
+      if (error || !data?.signedUrl) {
+        console.warn("[storage] failed to sign path:", path, error?.message);
+        return null;
       }
+      return { path, signedUrl: data.signedUrl };
+    }),
+  );
+
+  for (const outcome of settled) {
+    if (outcome.status === "fulfilled" && outcome.value) {
+      result.set(outcome.value.path, outcome.value.signedUrl);
     }
   }
+
+  console.log("[storage] resolved", result.size - (pathsOrUrls.filter(v => v && !isStoragePath(v)).length), "storage path(s) successfully");
 
   return result;
 }

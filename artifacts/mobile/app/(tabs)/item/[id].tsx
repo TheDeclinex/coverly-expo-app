@@ -118,8 +118,10 @@ export default function ItemDetailScreen() {
   }, [rawPrimaryUri, item?.attachments]);
 
   // Resolve storage paths → 1-hr signed URLs in one batch call.
+  // While loading, signedUriMap is empty — use null so ExpandableImage shows its
+  // placeholder rather than passing an invalid storage path to the Image component.
   const signedUriMap = useSignedUrls(rawPhotoUris);
-  const allPhotoUris = rawPhotoUris.map((u) => signedUriMap.get(u) ?? u);
+  const allPhotoUris = rawPhotoUris.map((u) => signedUriMap.get(u) ?? null).filter((u): u is string => u !== null);
   const primaryUri = allPhotoUris[0] ?? null;
 
   const handleEdit = async () => {

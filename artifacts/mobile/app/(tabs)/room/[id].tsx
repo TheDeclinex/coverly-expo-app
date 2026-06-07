@@ -363,9 +363,11 @@ export default function ItemsScreen() {
   // Signed URL for the room cover photo (resolves storage path → 1-hr signed URL)
   const signedCoverUrl = useSignedUrl(room?.cover_photo_url);
 
-  // Batch-resolve item thumbnail paths → signed URLs in one round-trip
-  const itemImagePaths = (items ?? []).map(
-    (it) => it.image_url ?? it.photo_url ?? null,
+  // Batch-resolve item thumbnail paths → signed URLs in one round-trip.
+  // Memoised so the array reference is stable between renders (avoids redundant key recomputation).
+  const itemImagePaths = React.useMemo(
+    () => (items ?? []).map((it) => it.image_url ?? it.photo_url ?? null),
+    [items],
   );
   const itemSignedUrls = useSignedUrls(itemImagePaths);
 
