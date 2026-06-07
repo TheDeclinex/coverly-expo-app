@@ -53,9 +53,9 @@ const BRAND_DARK = "#0B6F66";
 const BRAND_DARK_DEEP = "#0A5C55";
 
 function coverageColor(percent: number): string {
-  if (percent >= 90) return BRAND_DANGER;
-  if (percent >= 70) return BRAND_AMBER;
-  return BRAND_TEAL;
+  if (percent >= 100) return "#EF4444";
+  if (percent >= 75) return "#F97316";
+  return "#22C55E";
 }
 
 const ROOM_ICONS: Record<string, string> = {
@@ -642,10 +642,11 @@ function CoverageBar({
           overflow: "hidden",
         }}
       >
-        {/* Gradient spans the full bar; clipped by the percentage-width container */}
+        {/* Gradient: green 0→75 %, yellow-orange 75→100 %, solid red if over */}
         <View style={{ width: `${clamped}%` as any, height: 8, overflow: "hidden" }}>
           <LinearGradient
-            colors={["#22C55E", "#F97316", "#EF4444"]}
+            colors={["#22C55E", "#22C55E", "#FBBF24", "#F97316", "#EF4444"]}
+            locations={[0, 0.75, 0.85, 0.93, 1.0]}
             start={{ x: 0, y: 0.5 }}
             end={{ x: 1, y: 0.5 }}
             style={{ width: 300, height: 8 }}
@@ -1411,10 +1412,14 @@ export default function PropertyDetailScreen() {
         <View style={{ height: 200, overflow: "hidden" }}>
           {(localCoverUrl ?? property?.property_cover_image_url) ? (
             <Animated.View
-              style={[
-                StyleSheet.absoluteFill,
-                { bottom: -40, transform: [{ translateY: heroTranslateY }] },
-              ]}
+              style={{
+                position: "absolute",
+                top: 0,
+                left: 0,
+                right: 0,
+                height: 240, // 40 px taller than container — room to shift up
+                transform: [{ translateY: heroTranslateY }],
+              }}
             >
               <Image
                 source={{ uri: localCoverUrl ?? property!.property_cover_image_url! }}

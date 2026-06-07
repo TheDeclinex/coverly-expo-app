@@ -187,7 +187,6 @@ export default function ScanScreen() {
       return;
     }
     const result = await ImagePicker.launchCameraAsync({
-      allowsEditing: true,
       quality: 0.8,
       base64: true,
     });

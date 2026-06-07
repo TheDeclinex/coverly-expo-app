@@ -1,6 +1,7 @@
 import { Feather } from "@expo/vector-icons";
 import { Image } from "expo-image";
 import * as Haptics from "expo-haptics";
+import { LinearGradient } from "expo-linear-gradient";
 import { Stack, router } from "expo-router";
 import { useQuery } from "@tanstack/react-query";
 import React, { useMemo } from "react";
@@ -27,9 +28,9 @@ import { supabase } from "@/lib/supabase";
 import type { InventoryFile, InventoryItem } from "@/types";
 
 function coverageColor(percent: number): string {
-  if (percent >= 90) return "#B91C1C";
-  if (percent >= 70) return "#D97706";
-  return "#1D9E75";
+  if (percent >= 100) return "#EF4444";
+  if (percent >= 75) return "#F97316";
+  return "#22C55E";
 }
 
 function CoverageBar({
@@ -80,14 +81,15 @@ function CoverageBar({
           overflow: "hidden",
         }}
       >
-        <View
-          style={{
-            height: 8,
-            borderRadius: 4,
-            width: `${clamped}%` as any,
-            backgroundColor: fill,
-          }}
-        />
+        <View style={{ width: `${clamped}%` as any, height: 8, overflow: "hidden" }}>
+          <LinearGradient
+            colors={["#22C55E", "#22C55E", "#FBBF24", "#F97316", "#EF4444"]}
+            locations={[0, 0.75, 0.85, 0.93, 1.0]}
+            start={{ x: 0, y: 0.5 }}
+            end={{ x: 1, y: 0.5 }}
+            style={{ width: 300, height: 8 }}
+          />
+        </View>
       </View>
       <Text
         style={{
