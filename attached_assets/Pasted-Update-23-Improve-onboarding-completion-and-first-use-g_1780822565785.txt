@@ -1,0 +1,203 @@
+Update #23 — Improve onboarding completion and first-use guidance
+
+Use Replit Planner mode first.
+
+The current onboarding wizard looks good, but after creating a property the user lands on an empty/directionless property/home screen. Improve the flow so the user has a clearer first path:
+
+1. Add optional contents cover amount during onboarding
+2. Fix property type display labels
+3. Add first-use “next steps” prompts after onboarding
+4. Make the empty property and home screens guide the user toward the first useful actions
+
+Important constraints:
+
+* Do not introduce schema drift.
+* Do not create new Supabase tables.
+* Use existing Supabase fields if they already exist.
+* If no matching contents cover field exists on `inventory_files`, do not add a migration in this task. Keep the field local/UI-only or omit saving until schema is confirmed.
+* Do not provide insurance or financial advice in the UI.
+* Phrase this as recording the user’s existing contents cover/policy limit, not recommending a value.
+* Keep it production-safe for eventual migration.
+
+Relevant files:
+
+* `artifacts/mobile/app/onboarding.tsx`
+* `artifacts/mobile/app/(tabs)/property/[id].tsx`
+* `artifacts/mobile/app/(tabs)/index.tsx`
+* `artifacts/mobile/app/(tabs)/add-property.tsx`
+* `artifacts/mobile/constants/colors.ts`
+* `artifacts/mobile/hooks/useColors.ts`
+* Any existing property/inventory type files used by these screens
+
+Part 1 — Update onboarding Step 2
+
+Current Step 2 only asks for property name and type.
+
+Update it to ask for:
+
+1. Property name
+2. Property type chips
+3. Optional contents cover amount
+
+UI copy:
+
+Label:
+`Contents cover amount`
+
+Helper text:
+`Optional — add your current contents cover so Coverly can compare it with your documented inventory later.`
+
+Placeholder:
+`e.g. 75000`
+
+Requirements:
+
+* Numeric input keyboard
+* Format/display as currency where appropriate
+* Do not block creation if empty
+* Do not call this “recommended cover”, “insured value recommendation”, or anything advisory
+* Keep property creation button disabled only when property name is empty
+* Keep inline error handling
+
+Supabase insert:
+
+* Continue inserting into `inventory_files` with existing conventions:
+
+```ts id="xkdjnq"
+{
+  user_id: user.id,
+  name: trimmedName,
+  status: "active"
+}
+```
+
+* If `inventory_files` already has a compatible cover/insured value field, save the numeric contents cover amount there.
+* If there is no compatible existing field, do not invent one and do not add a migration in this task.
+
+Part 2 — Fix property type display
+
+The property card currently displays values like:
+
+```txt id="fnm3uy"
+Main_home
+```
+
+Fix display formatting so user-facing text shows:
+
+```txt id="upuvcn"
+Main home
+```
+
+Rules:
+
+* Store values however the app currently expects internally.
+* Display clean human labels in UI.
+* Apply this anywhere property type appears on the home/property card.
+
+Part 3 — Improve post-onboarding destination
+
+After the user creates their first property and taps `Let's go →`, they should still navigate to the new property screen, but that screen should now clearly guide the next action.
+
+On the new property screen, if the property has:
+
+* no cover photo
+* no rooms
+* no items
+
+show a first-use guidance section near the top.
+
+Add a compact card titled:
+
+```txt id="d1abse"
+Start your inventory
+```
+
+Body:
+
+```txt id="qnvr3k"
+Add a property photo, create your first room, then scan items room by room.
+```
+
+Show a 3-step checklist:
+
+1. `Add a cover photo`
+2. `Add your first room`
+3. `Start an AI scan`
+
+Each checklist item should be actionable if possible:
+
+* `Add a cover photo` should visually point to or trigger the existing cover photo picker.
+* `Add your first room` should trigger the existing add-room flow.
+* `Start an AI scan` should trigger or navigate to the existing scan flow.
+
+Keep this lightweight. Do not build a full tutorial overlay system.
+
+Part 4 — Add subtle visual callouts
+
+On the empty property page:
+
+* Make the existing `Add a cover photo` hero more instructional.
+* Add a small helper label or arrow-style hint:
+
+```txt id="d1t3rs"
+First, add a cover photo
+```
+
+Near the scan button, when there are no items yet, add:
+
+```txt id="rw0v2o"
+Then scan your first room
+```
+
+The prompts should disappear once the relevant action is complete:
+
+* Cover photo prompt disappears once cover photo exists.
+* Room prompt disappears once at least one room exists.
+* Scan prompt disappears once at least one item exists.
+
+Part 5 — Improve home screen empty/early state
+
+On the home screen, when the user has one property but no rooms/items yet, replace the blank-feeling state with a guided card.
+
+Title:
+
+```txt id="uu9lit"
+Next step
+```
+
+Body:
+
+```txt id="ho8jve"
+Open your property and add your first room to start building your inventory.
+```
+
+CTA:
+
+```txt id="srsu0o"
+Continue setup →
+```
+
+CTA should navigate to the existing first property.
+
+Part 6 — Keep current visual direction but reduce blankness
+
+The onboarding screens are visually acceptable, but tighten obvious spacing issues:
+
+* Ensure headings are safely below the dynamic island/notch.
+* Make sure `What Coverly does` is not visually cramped or split awkwardly.
+* Avoid excessive empty vertical space on the feature screen.
+* Keep the dark welcome screen style.
+* Keep the teal/white Coverly brand direction.
+* Do not make the app greener overall.
+
+Part 7 — Done looks like
+
+* Onboarding Step 2 asks for property name, property type, and optional contents cover amount.
+* Property creation still works.
+* No schema errors if contents cover field does not exist.
+* Property type displays as `Main home`, not `Main_home`.
+* After onboarding, the new property screen gives clear next actions.
+* Empty property/home screens are no longer directionless.
+* Prompts disappear as the user completes setup.
+* No full tutorial overlay system is introduced.
+* TypeScript passes.
