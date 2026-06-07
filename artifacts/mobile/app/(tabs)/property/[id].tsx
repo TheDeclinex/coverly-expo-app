@@ -1760,7 +1760,7 @@ export default function PropertyDetailScreen() {
           keyExtractor={(rs) => rs.room.id}
           onScroll={Animated.event(
             [{ nativeEvent: { contentOffset: { y: scrollY } } }],
-            { useNativeDriver: true },
+            { useNativeDriver: false },
           )}
           scrollEventThrottle={16}
           renderItem={({ item: rs }) => (
