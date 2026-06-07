@@ -109,17 +109,30 @@ function SparkLine({
     );
   }
 
-  const pts = points
-    .map(
-      (p) =>
-        `${(pad + p.x * w).toFixed(1)},${(pad + (1 - p.y) * h).toFixed(1)}`
-    )
-    .join(" ");
+  // Map normalised points to screen coords
+  const screen = points.map((p) => ({
+    x: pad + p.x * w,
+    y: pad + (1 - p.y) * h,
+  }));
+
+  // Catmull-Rom → cubic Bezier for smooth curve
+  let d = `M${screen[0].x.toFixed(2)},${screen[0].y.toFixed(2)}`;
+  for (let i = 0; i < screen.length - 1; i++) {
+    const p0 = screen[Math.max(0, i - 1)];
+    const p1 = screen[i];
+    const p2 = screen[i + 1];
+    const p3 = screen[Math.min(screen.length - 1, i + 2)];
+    const cp1x = p1.x + (p2.x - p0.x) / 6;
+    const cp1y = p1.y + (p2.y - p0.y) / 6;
+    const cp2x = p2.x - (p3.x - p1.x) / 6;
+    const cp2y = p2.y - (p3.y - p1.y) / 6;
+    d += ` C${cp1x.toFixed(2)},${cp1y.toFixed(2)} ${cp2x.toFixed(2)},${cp2y.toFixed(2)} ${p2.x.toFixed(2)},${p2.y.toFixed(2)}`;
+  }
 
   return (
     <Svg width={width} height={height}>
-      <Polyline
-        points={pts}
+      <Path
+        d={d}
         fill="none"
         stroke={stroke}
         strokeWidth={2}
@@ -339,7 +352,9 @@ function InsightCard({
   colors: ReturnType<typeof import("@/hooks/useColors").useColors>;
 }) {
   const [innerW, setInnerW] = useState(0);
-  const sparkPoints = useMemo(() => buildSparklinePoints(items, 6), [items]);
+  const [sparkPeriod, setSparkPeriod] = useState(3);
+  const [showPeriodPicker, setShowPeriodPicker] = useState(false);
+  const sparkPoints = useMemo(() => buildSparklinePoints(items, sparkPeriod), [items, sparkPeriod]);
 
   // Build category breakdown sorted by value desc
   const categoryData = useMemo(() => {
@@ -417,14 +432,51 @@ function InsightCard({
             )}
           </View>
 
-          {/* Mini sparkline */}
+          {/* Mini sparkline — tap to pick period */}
           {innerW > 0 && (
-            <View style={styles.insightSparkWrap}>
-              <Text style={styles.insightSparkLabel}>GROWTH</Text>
-              <SparkLine points={sparkPoints} width={68} height={40} light />
-            </View>
+            <Pressable
+              style={({ pressed }) => [
+                styles.insightSparkWrap,
+                pressed && { opacity: 0.75 },
+              ]}
+              onPress={() => setShowPeriodPicker((v) => !v)}
+            >
+              <Text style={styles.insightSparkLabel}>{sparkPeriod}MO GROWTH</Text>
+              <SparkLine points={sparkPoints} width={68} height={40} />
+            </Pressable>
           )}
         </View>
+
+        {/* Period picker — shown on tap */}
+        {showPeriodPicker && (
+          <View style={styles.insightPeriodWrap}>
+            <Text style={styles.insightPeriodTitle}>{sparkPeriod} months</Text>
+            <View style={styles.insightPeriodRow}>
+              {[1, 3, 6, 12, 24].map((m) => (
+                <Pressable
+                  key={m}
+                  onPress={() => {
+                    setSparkPeriod(m);
+                    setShowPeriodPicker(false);
+                  }}
+                  style={[
+                    styles.insightPeriodChip,
+                    sparkPeriod === m && styles.insightPeriodChipActive,
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.insightPeriodChipText,
+                      sparkPeriod === m && styles.insightPeriodChipTextActive,
+                    ]}
+                  >
+                    {m}
+                  </Text>
+                </Pressable>
+              ))}
+            </View>
+          </View>
+        )}
 
         <Text style={styles.insightSubtext}>{insightText}</Text>
       </View>
@@ -1585,7 +1637,7 @@ const styles = StyleSheet.create({
     marginTop: 5,
   },
   insightInner: {
-    backgroundColor: "rgba(255,255,255,0.12)",
+    backgroundColor: "rgba(255,255,255,0.95)",
     borderRadius: 10,
     padding: 12,
     marginTop: 14,
@@ -1595,7 +1647,7 @@ const styles = StyleSheet.create({
     fontSize: 9,
     fontFamily: "Inter_700Bold",
     letterSpacing: 1.1,
-    color: "rgba(255,255,255,0.6)",
+    color: BRAND_DARK,
   },
   insightBody: {
     flexDirection: "row",
@@ -1620,17 +1672,17 @@ const styles = StyleSheet.create({
   insightLegendText: {
     fontSize: 11,
     fontFamily: "Inter_400Regular",
-    color: "rgba(255,255,255,0.9)",
+    color: "#1A2E2A",
     flex: 1,
   },
   insightMoreText: {
     fontSize: 10,
     fontFamily: "Inter_400Regular",
-    color: "rgba(255,255,255,0.5)",
+    color: "#64736F",
     marginTop: 1,
   },
   insightSparkWrap: {
-    backgroundColor: "rgba(255,255,255,0.12)",
+    backgroundColor: "#E8F5F3",
     borderRadius: 8,
     padding: 6,
     alignItems: "center",
@@ -1640,12 +1692,44 @@ const styles = StyleSheet.create({
     fontSize: 8,
     fontFamily: "Inter_700Bold",
     letterSpacing: 0.8,
-    color: "rgba(255,255,255,0.55)",
+    color: BRAND_DARK,
   },
   insightSubtext: {
     fontSize: 12,
     fontFamily: "Inter_400Regular",
-    color: "rgba(255,255,255,0.75)",
+    color: "#1A2E2A",
+  },
+  insightPeriodWrap: {
+    backgroundColor: "#F0FAF8",
+    borderRadius: 8,
+    padding: 10,
+    gap: 8,
+  },
+  insightPeriodTitle: {
+    fontSize: 11,
+    fontFamily: "Inter_600SemiBold",
+    color: BRAND_DARK,
+  },
+  insightPeriodRow: {
+    flexDirection: "row",
+    gap: 6,
+  },
+  insightPeriodChip: {
+    paddingHorizontal: 12,
+    paddingVertical: 5,
+    borderRadius: 14,
+    backgroundColor: "#DDF0EC",
+  },
+  insightPeriodChipActive: {
+    backgroundColor: BRAND_DARK,
+  },
+  insightPeriodChipText: {
+    fontSize: 12,
+    fontFamily: "Inter_600SemiBold",
+    color: BRAND_DARK,
+  },
+  insightPeriodChipTextActive: {
+    color: "#FFFFFF",
   },
 
   // Action buttons
