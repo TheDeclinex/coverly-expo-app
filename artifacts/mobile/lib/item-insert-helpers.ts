@@ -148,7 +148,21 @@ export function buildItemInsertPayload(form: ItemFormData): InventoryItem {
 export function buildItemUpdatePayload(
   form: Omit<ItemFormData, "fileId">
 ): Partial<InventoryItem> {
-  const primaryUrl = form.photos?.[0]?.url ?? form.imageUrl ?? form.photoUrl ?? null;
+  // image_url / photo_url / attachments are ONLY included in the update when
+  // form.photos is explicitly provided (not undefined).
+  //
+  //   form.photos === undefined  → caller did not touch photos → omit image fields
+  //                                entirely so existing DB values are preserved.
+  //   form.photos === []         → caller explicitly cleared all photos → write null.
+  //   form.photos = [...]        → caller has photos → write first URL + attachments.
+  //
+  // This prevents accidental nullification when editing non-photo fields
+  // (e.g. renaming an item) and also when all photo uploads fail.
+  const photosProvided = form.photos !== undefined;
+  const primaryUrl = photosProvided
+    ? (form.photos?.[0]?.url ?? form.imageUrl ?? form.photoUrl ?? null)
+    : undefined;
+
   return {
     room_id: form.roomId || null,
     room: form.roomName?.trim() || null,
@@ -161,9 +175,11 @@ export function buildItemUpdatePayload(
     quantity: form.quantity ?? 1,
     valuation_basis: form.valuationBasis ?? null,
     price_source_type: form.priceSourceType ?? null,
-    image_url: primaryUrl,
-    photo_url: primaryUrl,
-    attachments: form.photos && form.photos.length > 0 ? form.photos : null,
+    ...(photosProvided ? {
+      image_url: primaryUrl ?? null,
+      photo_url: primaryUrl ?? null,
+      attachments: form.photos && form.photos.length > 0 ? form.photos : null,
+    } : {}),
     brand_maker: form.brandMaker ?? null,
     model_series: form.modelSeries ?? null,
     condition_label: form.conditionLabel ?? null,

@@ -115,6 +115,10 @@ export default function EditItemScreen() {
   const [quantity, setQuantity] = useState("1");
   const [selectedRoomId, setSelectedRoomId] = useState("");
   const [photos, setPhotos] = useState<PhotoEntry[]>([]);
+  // Track whether the user explicitly changed the photo strip.
+  // We only write image_url/photo_url in the update when photos were modified;
+  // this prevents accidental nullification when the user edits non-photo fields.
+  const [photosModified, setPhotosModified] = useState(false);
   const [saving, setSaving] = useState(false);
   const [hydrated, setHydrated] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -221,8 +225,15 @@ export default function EditItemScreen() {
     }
   };
 
+  // Returns true if `url` is a local device URI that must be uploaded before saving.
+  // blob: is included because web ImagePicker returns blob: URIs — these are
+  // in-memory browser references that are NOT persistent and MUST be uploaded
+  // to Supabase Storage before being stored in the database.
   const isLocalUri = (url: string) =>
-    url.startsWith("file://") || url.startsWith("ph://") || url.startsWith("content://");
+    url.startsWith("file://") ||
+    url.startsWith("ph://") ||
+    url.startsWith("content://") ||
+    url.startsWith("blob:");
 
   const handleSave = async () => {
     setErrorMsg(null);
@@ -272,6 +283,15 @@ export default function EditItemScreen() {
       const destRoomName =
         rooms?.find((r) => r.id === selectedRoomId)?.name ?? null;
 
+      // Only include photos in the update when the user explicitly changed them.
+      // If photosModified is false, image_url/photo_url are omitted from the
+      // PATCH so existing DB values are preserved unchanged.
+      // This prevents accidental nullification when editing non-photo fields,
+      // and also when all uploads fail (failedUploads.length > 0).
+      const photosForUpdate: PhotoEntry[] | undefined = photosModified
+        ? uploadedPhotos   // may be empty → intentional clear
+        : undefined;       // not changed → omit from update
+
       const updates = buildItemUpdatePayload({
         roomId: selectedRoomId,
         roomName: destRoomName,
@@ -280,7 +300,7 @@ export default function EditItemScreen() {
         category,
         estimatedPrice: price,
         quantity: qty,
-        photos: uploadedPhotos.length > 0 ? uploadedPhotos : null,
+        photos: photosForUpdate,
       });
 
       console.log("[EditItem] Update payload keys:", Object.keys(updates));
@@ -322,6 +342,7 @@ export default function EditItemScreen() {
 
   const handlePhotosChange = useCallback((next: PhotoEntry[]) => {
     setPhotos(next);
+    setPhotosModified(true);
   }, []);
 
   if (itemLoading) return <LoadingState />;
