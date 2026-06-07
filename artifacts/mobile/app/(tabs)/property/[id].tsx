@@ -748,8 +748,8 @@ function RoomBarsSection({
 
 // ─── Room card ────────────────────────────────────────────────────────────────
 
-const RING_SIZE = 80;
-const RING_R = 34;
+const RING_SIZE = 88;   // 8 px gap each side around the 72 px thumbnail
+const RING_R = 40;      // outer edge 42, image half-width 36 → 6 px clear gap
 const RING_CIRC = 2 * Math.PI * RING_R;
 
 function RoomCard({
@@ -807,7 +807,7 @@ function RoomCard({
               r={RING_R}
               fill="none"
               stroke={BRAND_BORDER}
-              strokeWidth={3}
+              strokeWidth={4}
             />
             {/* Progress */}
             {completionPct > 0 && (
@@ -817,7 +817,7 @@ function RoomCard({
                 r={RING_R}
                 fill="none"
                 stroke={BRAND_TEAL}
-                strokeWidth={3}
+                strokeWidth={4}
                 strokeLinecap="round"
                 strokeDasharray={`${RING_CIRC} ${RING_CIRC}`}
                 strokeDashoffset={ringOffset}
