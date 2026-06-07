@@ -21,6 +21,7 @@ import { EmptyState } from "@/components/EmptyState";
 import { ErrorState } from "@/components/ErrorState";
 import { LoadingState } from "@/components/LoadingState";
 import { useAuth } from "@/context/AuthContext";
+import { propertyTypeLabel } from "@/constants/propertyTypes";
 import { useColors } from "@/hooks/useColors";
 import { useSignedUrl } from "@/hooks/useSignedUrls";
 import { calcPortfolioStats } from "@/lib/dashboard-stats";
@@ -186,7 +187,7 @@ function PropertyCard({
         </View>
         {item.property_type && (
           <Text style={[styles.cardType, { color: colors.mutedForeground }]}>
-            {item.property_type}
+            {propertyTypeLabel(item.property_type)}
           </Text>
         )}
         <View style={styles.cardStats}>
@@ -352,6 +353,72 @@ export default function HomeScreen() {
             </View>
           )}
         </View>
+
+        {(allItems ?? []).length === 0 && (
+          <View
+            style={{
+              backgroundColor: colors.secondary,
+              borderRadius: colors.radius,
+              borderWidth: 1,
+              borderColor: colors.border,
+              padding: 16,
+              gap: 12,
+            }}
+          >
+            <View style={{ gap: 4 }}>
+              <Text
+                style={{
+                  fontSize: 11,
+                  fontFamily: "Inter_600SemiBold",
+                  letterSpacing: 0.8,
+                  color: colors.primary,
+                }}
+              >
+                NEXT STEP
+              </Text>
+              <Text
+                style={{
+                  fontSize: 14,
+                  fontFamily: "Inter_400Regular",
+                  color: colors.foreground,
+                  lineHeight: 21,
+                }}
+              >
+                Open your property, add your first room, then scan items to build your inventory record.
+              </Text>
+            </View>
+            <Pressable
+              onPress={() => {
+                const first = properties[0];
+                router.push({
+                  pathname: "/(tabs)/property/[id]",
+                  params: { id: first.id, name: first.name },
+                });
+              }}
+              style={({ pressed }) => ({
+                flexDirection: "row",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: 8,
+                backgroundColor: colors.primary,
+                borderRadius: colors.radius,
+                paddingVertical: 12,
+                opacity: pressed ? 0.85 : 1,
+              })}
+            >
+              <Text
+                style={{
+                  fontSize: 14,
+                  fontFamily: "Inter_600SemiBold",
+                  color: colors.primaryForeground,
+                }}
+              >
+                Continue setup
+              </Text>
+              <Feather name="arrow-right" size={14} color={colors.primaryForeground} />
+            </Pressable>
+          </View>
+        )}
 
         <View style={{ flexDirection: "row", gap: 10 }}>
           <Pressable
@@ -552,7 +619,6 @@ const styles = StyleSheet.create({
   cardType: {
     fontSize: 12,
     fontFamily: "Inter_400Regular",
-    textTransform: "capitalize",
   },
   cardStats: {
     flexDirection: "row",

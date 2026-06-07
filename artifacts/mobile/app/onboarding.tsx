@@ -27,6 +27,7 @@ import Animated, {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { useAuth } from "@/context/AuthContext";
+import { PROPERTY_TYPES } from "@/constants/propertyTypes";
 import { useColors } from "@/hooks/useColors";
 import { supabase } from "@/lib/supabase";
 
@@ -37,14 +38,6 @@ const BTN_TOP    = "#137058";
 const BTN_BOT    = "#085041";
 const TEAL_TOP   = "#0D7A6F";
 const TEAL_BOT   = "#064E46";
-
-const PROPERTY_TYPES = [
-  { label: "Main home", value: "main_home" },
-  { label: "Rental",    value: "rental"    },
-  { label: "Holiday",   value: "holiday"   },
-  { label: "Storage",   value: "storage"   },
-  { label: "Other",     value: "other"     },
-];
 
 function generateId(): string {
   return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
@@ -115,6 +108,7 @@ export default function OnboardingScreen() {
 
   const [propertyName, setPropertyName]     = useState("");
   const [propertyType, setPropertyType]     = useState<string | null>(null);
+  const [coverAmount, setCoverAmount]       = useState("");
   const [creating, setCreating]             = useState(false);
   const [createError, setCreateError]       = useState<string | null>(null);
   const [newPropertyId, setNewPropertyId]   = useState<string | null>(null);
@@ -230,7 +224,10 @@ export default function OnboardingScreen() {
           created_by_email: session.user.email ?? null,
           created_date: now,
           last_modified: now,
-          contents_sum_insured: null,
+          contents_sum_insured: (() => {
+            const n = parseFloat(coverAmount);
+            return isFinite(n) && n > 0 ? n : null;
+          })(),
         })
         .select()
         .single();
@@ -437,6 +434,59 @@ export default function OnboardingScreen() {
                   );
                 })}
               </ScrollView>
+            </View>
+
+            <View style={{ gap: 8 }}>
+              <Text style={[styles.fieldLabel, { color: colors.mutedForeground }]}>CONTENTS COVER AMOUNT</Text>
+              <View
+                style={{
+                  flexDirection: "row",
+                  alignItems: "center",
+                  borderWidth: 1.5,
+                  borderRadius: colors.radius,
+                  borderColor: colors.border,
+                  backgroundColor: colors.card,
+                  overflow: "hidden",
+                }}
+              >
+                <Text
+                  style={{
+                    paddingLeft: 14,
+                    paddingRight: 2,
+                    fontSize: 17,
+                    fontFamily: "Inter_400Regular",
+                    color: colors.mutedForeground,
+                  }}
+                >
+                  $
+                </Text>
+                <TextInput
+                  style={{
+                    flex: 1,
+                    paddingVertical: 14,
+                    paddingRight: 14,
+                    fontSize: 17,
+                    fontFamily: "Inter_400Regular",
+                    color: colors.foreground,
+                  }}
+                  value={coverAmount}
+                  onChangeText={(v) => setCoverAmount(v.replace(/[^0-9.]/g, ""))}
+                  placeholder="e.g. 75000"
+                  placeholderTextColor={colors.mutedForeground}
+                  keyboardType="decimal-pad"
+                  returnKeyType="done"
+                />
+              </View>
+              <Text
+                style={{
+                  fontSize: 12,
+                  fontFamily: "Inter_400Regular",
+                  color: colors.mutedForeground,
+                  lineHeight: 18,
+                }}
+              >
+                Optional — add your current contents cover so Coverly can compare it with your documented inventory later.
+              </Text>
             </View>
 
             {createError ? (

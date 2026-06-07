@@ -18,16 +18,8 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { useAuth } from "@/context/AuthContext";
 import { useColors } from "@/hooks/useColors";
+import { PROPERTY_TYPES } from "@/constants/propertyTypes";
 import { supabase } from "@/lib/supabase";
-
-const PROPERTY_TYPES = [
-  { label: "Main home", value: "main_home" },
-  { label: "Rental property", value: "rental" },
-  { label: "Holiday / beach house", value: "holiday" },
-  { label: "Storage unit", value: "storage" },
-  { label: "Parent's home", value: "parents" },
-  { label: "Other", value: "other" },
-];
 
 function FormField({
   label,

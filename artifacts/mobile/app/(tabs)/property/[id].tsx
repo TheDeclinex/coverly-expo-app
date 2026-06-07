@@ -1882,7 +1882,7 @@ export default function PropertyDetailScreen() {
                     letterSpacing: 0.1,
                   }}
                 >
-                  Add a cover photo
+                  First, add a cover photo
                 </Text>
                 <Text
                   style={{
@@ -1987,6 +1987,152 @@ export default function PropertyDetailScreen() {
             </Text>
           </Pressable>
         </View>
+
+        {/* 3.5 — Scan hint: shown until the first item is documented */}
+        {(items ?? []).length === 0 && (
+          <View
+            style={{
+              flexDirection: "row",
+              alignItems: "center",
+              gap: 6,
+              paddingHorizontal: 2,
+            }}
+          >
+            <Feather name="arrow-right" size={12} color={colors.primary} />
+            <Text
+              style={{
+                fontSize: 12,
+                fontFamily: "Inter_400Regular",
+                color: colors.mutedForeground,
+              }}
+            >
+              Then scan your first room to start adding items
+            </Text>
+          </View>
+        )}
+
+        {/* 3.6 — First-use guidance card: shown until any room or item exists */}
+        {(rooms ?? []).length === 0 && (items ?? []).length === 0 && (
+          <View
+            style={{
+              backgroundColor: colors.card,
+              borderRadius: colors.radius,
+              borderWidth: 1,
+              borderColor: colors.border,
+              padding: 16,
+              gap: 14,
+            }}
+          >
+            <View style={{ gap: 4 }}>
+              <Text
+                style={{
+                  fontSize: 15,
+                  fontFamily: "Inter_600SemiBold",
+                  color: colors.foreground,
+                }}
+              >
+                Start your inventory
+              </Text>
+              <Text
+                style={{
+                  fontSize: 13,
+                  fontFamily: "Inter_400Regular",
+                  color: colors.mutedForeground,
+                  lineHeight: 19,
+                }}
+              >
+                Add a property photo, create your first room, then scan items room by room.
+              </Text>
+            </View>
+            {(
+              [
+                {
+                  label: "Add a cover photo",
+                  done: !!(localCoverUrl ?? property?.property_cover_image_url),
+                  onPress: handlePickPropertyCover,
+                },
+                {
+                  label: "Add your first room",
+                  done: (rooms ?? []).length > 0,
+                  onPress: () => {
+                    setAddRoomName("");
+                    setAddRoomType(null);
+                    setAddRoomError(null);
+                    setAddRoomVisible(true);
+                  },
+                },
+                {
+                  label: "Start an AI scan",
+                  done: (items ?? []).length > 0,
+                  onPress: () =>
+                    router.push({
+                      pathname: "/(tabs)/scan",
+                      params: { fileId: id, fileName: name },
+                    }),
+                },
+              ] as { label: string; done: boolean; onPress: () => void }[]
+            ).map((stepItem, i) => (
+              <Pressable
+                key={i}
+                onPress={stepItem.onPress}
+                style={({ pressed }) => ({
+                  flexDirection: "row",
+                  alignItems: "center",
+                  gap: 12,
+                  paddingVertical: 10,
+                  paddingHorizontal: 12,
+                  backgroundColor: stepItem.done ? colors.secondary : colors.background,
+                  borderRadius: 10,
+                  borderWidth: 1,
+                  borderColor: stepItem.done
+                    ? colors.primary + "40"
+                    : colors.border,
+                  opacity: pressed ? 0.8 : 1,
+                })}
+              >
+                <View
+                  style={{
+                    width: 26,
+                    height: 26,
+                    borderRadius: 13,
+                    backgroundColor: stepItem.done ? colors.primary : "transparent",
+                    borderWidth: stepItem.done ? 0 : 1.5,
+                    borderColor: colors.border,
+                    alignItems: "center",
+                    justifyContent: "center",
+                  }}
+                >
+                  {stepItem.done ? (
+                    <Feather name="check" size={14} color="#FFFFFF" />
+                  ) : (
+                    <Text
+                      style={{
+                        fontSize: 11,
+                        fontFamily: "Inter_600SemiBold",
+                        color: colors.mutedForeground,
+                      }}
+                    >
+                      {i + 1}
+                    </Text>
+                  )}
+                </View>
+                <Text
+                  style={{
+                    flex: 1,
+                    fontSize: 14,
+                    fontFamily: stepItem.done ? "Inter_500Medium" : "Inter_400Regular",
+                    color: stepItem.done ? colors.primary : colors.foreground,
+                  }}
+                >
+                  {stepItem.label}
+                </Text>
+                {!stepItem.done && (
+                  <Feather name="chevron-right" size={16} color={colors.mutedForeground} />
+                )}
+              </Pressable>
+            ))}
+          </View>
+        )}
 
         {/* 4 — Rooms heading + add-room button */}
         <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
