@@ -196,9 +196,17 @@ export default function LoginScreen() {
     }
     setLoading(true);
     setError(null);
+    // Sign-up flow notes:
+    // 1. Supabase Auth sends a confirmation email to the user's address.
+    // 2. `emailRedirectTo` controls where the user lands after clicking the link
+    //    in that email — it must be an allowlisted URL in the spike Supabase project
+    //    (Authentication → URL Configuration → Redirect URLs).
+    // 3. Branded/customised email templates require SMTP and template setup in the
+    //    spike Supabase project dashboard, not in Expo.
     const { data, error: authError } = await supabase.auth.signUp({
       email: email.trim(),
       password,
+      options: { emailRedirectTo: "https://coverly.nz/auth/verified" },
     });
     setLoading(false);
     if (authError) {
@@ -300,7 +308,7 @@ export default function LoginScreen() {
             {awaitConfirm ? (
               <InboxState
                 title="Check your inbox"
-                body={`We sent a confirmation link to\n${email.trim()}\n\nTap the link to activate your account, then come back and sign in.`}
+                body={`We sent a confirmation link to\n${email.trim()}\n\nTap the link in your email to verify your account, then return to Coverly and sign in.`}
                 onBack={() => switchMode("signin")}
                 backLabel="Back to Sign In"
                 colors={colors}
