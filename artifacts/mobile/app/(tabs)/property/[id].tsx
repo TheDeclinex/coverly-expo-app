@@ -17,6 +17,7 @@ import {
   Platform,
   Pressable,
   RefreshControl,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -684,7 +685,23 @@ function CoverageBar({
   );
 }
 
-// ─── Room distribution bars ───────────────────────────────────────────────────
+// ─── Room distribution stacked bars ───────────────────────────────────────────
+
+/** Pastel palette — one colour per room, consistent across both bars */
+const ROOM_BAR_PALETTE = [
+  "#80CBC4", // teal-mint
+  "#A5D6A7", // sage-green
+  "#FFCC80", // peachy-amber
+  "#CE93D8", // soft-lavender
+  "#90CAF9", // sky-blue
+  "#F48FB1", // dusty-rose
+  "#FFE082", // warm-yellow
+  "#BCAAA4", // warm-grey
+  "#80DEEA", // cyan-light
+  "#EF9A9A", // soft-coral
+];
+
+const LEGEND_LIMIT = 4; // dots shown beneath bars before "+N more"
 
 function RoomBarsSection({
   roomStats,
@@ -693,91 +710,283 @@ function RoomBarsSection({
   roomStats: RoomStat[];
   colors: ReturnType<typeof import("@/hooks/useColors").useColors>;
 }) {
+  const [modalVisible, setModalVisible] = useState(false);
+  const insets = useSafeAreaInsets();
+
   if (roomStats.length === 0) return null;
-  const top = roomStats.slice(0, 8);
-  const maxValue = Math.max(...top.map((r) => r.totalValue), 1);
-  const topByCount = [...top].sort((a, b) => b.itemCount - a.itemCount);
-  const maxCount = Math.max(...topByCount.map((r) => r.itemCount), 1);
+
+  // Sort by value descending — this ordering defines palette assignment
+  const byValue = [...roomStats].sort((a, b) => b.totalValue - a.totalValue);
+  const byCount = [...roomStats].sort((a, b) => b.itemCount - a.itemCount);
+
+  const colorMap: Record<string, string> = {};
+  byValue.forEach((rs, i) => {
+    colorMap[rs.room.id] = ROOM_BAR_PALETTE[i % ROOM_BAR_PALETTE.length];
+  });
+
+  const totalValue = byValue.reduce((s, r) => s + r.totalValue, 0) || 1;
+  const totalCount = byValue.reduce((s, r) => s + r.itemCount, 0) || 1;
+
+  const legendRooms = byValue.slice(0, LEGEND_LIMIT);
+  const extraCount = Math.max(0, byValue.length - LEGEND_LIMIT);
+
+  const renderStackedBar = (
+    sorted: RoomStat[],
+    getValue: (r: RoomStat) => number,
+    total: number
+  ) => (
+    <View
+      style={{
+        flex: 1,
+        flexDirection: "row",
+        height: 14,
+        borderRadius: 7,
+        overflow: "hidden",
+      }}
+    >
+      {sorted.map((rs) => {
+        const pct = (getValue(rs) / total) * 100;
+        if (pct < 0.8) return null;
+        return (
+          <View
+            key={rs.room.id}
+            style={{ flex: pct, backgroundColor: colorMap[rs.room.id] }}
+          />
+        );
+      })}
+    </View>
+  );
 
   return (
-    <View
-      style={[
-        styles.footerCard,
-        {
-          backgroundColor: colors.card,
-          borderColor: colors.border,
-          borderRadius: colors.radius,
-        },
-      ]}
-    >
-      <Text
-        style={[styles.sectionLabel, { color: colors.mutedForeground, marginBottom: 10 }]}
+    <>
+      <Pressable
+        onPress={() => setModalVisible(true)}
+        style={({ pressed }) => [
+          styles.footerCard,
+          {
+            backgroundColor: colors.card,
+            borderColor: colors.border,
+            borderRadius: colors.radius,
+            opacity: pressed ? 0.92 : 1,
+          },
+        ]}
       >
-        VALUE BY ROOM
-      </Text>
-      {top.map((rs) => (
-        <View key={`${rs.room.id}-val`} style={styles.barRow}>
+        <Text
+          style={[styles.sectionLabel, { color: colors.mutedForeground, marginBottom: 12 }]}
+        >
+          VALUE & ITEMS BY ROOM
+        </Text>
+
+        {/* Value stacked bar */}
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 7 }}>
           <Text
-            style={[styles.barLabel, { color: colors.foreground }]}
-            numberOfLines={1}
+            style={{
+              fontSize: 11,
+              fontFamily: "Inter_500Medium",
+              color: colors.mutedForeground,
+              width: 36,
+            }}
           >
-            {rs.room.name}
+            Value
           </Text>
-          <View style={[styles.barTrack, { backgroundColor: colors.border }]}>
-            <View
-              style={[
-                styles.barFill,
-                {
-                  width: `${(rs.totalValue / maxValue) * 100}%` as any,
-                  backgroundColor: BRAND_TEAL,
-                },
-              ]}
-            />
-          </View>
-          <Text style={[styles.barMeta, { color: colors.mutedForeground }]}>
-            {formatCurrency(rs.totalValue || null)}
-          </Text>
+          {renderStackedBar(byValue, (r) => r.totalValue, totalValue)}
         </View>
-      ))}
 
-      <View
-        style={{
-          height: StyleSheet.hairlineWidth,
-          backgroundColor: colors.border,
-          marginVertical: 14,
-        }}
-      />
+        {/* Items stacked bar */}
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 14 }}>
+          <Text
+            style={{
+              fontSize: 11,
+              fontFamily: "Inter_500Medium",
+              color: colors.mutedForeground,
+              width: 36,
+            }}
+          >
+            Items
+          </Text>
+          {renderStackedBar(byCount, (r) => r.itemCount, totalCount)}
+        </View>
 
-      <Text
-        style={[styles.sectionLabel, { color: colors.mutedForeground, marginBottom: 10 }]}
+        {/* Legend: top rooms + "+N more" tap hint */}
+        <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 10, alignItems: "center" }}>
+          {legendRooms.map((rs) => (
+            <View key={rs.room.id} style={{ flexDirection: "row", alignItems: "center", gap: 5 }}>
+              <View
+                style={{
+                  width: 8,
+                  height: 8,
+                  borderRadius: 4,
+                  backgroundColor: colorMap[rs.room.id],
+                }}
+              />
+              <Text
+                style={{
+                  fontSize: 12,
+                  fontFamily: "Inter_400Regular",
+                  color: colors.foreground,
+                }}
+              >
+                {rs.room.name}
+              </Text>
+            </View>
+          ))}
+          {extraCount > 0 && (
+            <Text
+              style={{
+                fontSize: 12,
+                fontFamily: "Inter_400Regular",
+                color: colors.primary,
+              }}
+            >
+              +{extraCount} more
+            </Text>
+          )}
+        </View>
+      </Pressable>
+
+      {/* ── Full room breakdown bottom sheet ── */}
+      <Modal
+        visible={modalVisible}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setModalVisible(false)}
       >
-        ITEMS BY ROOM
-      </Text>
-      {topByCount.map((rs) => (
-        <View key={`${rs.room.id}-cnt`} style={styles.barRow}>
-          <Text
-            style={[styles.barLabel, { color: colors.foreground }]}
-            numberOfLines={1}
+        <Pressable
+          style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.4)", justifyContent: "flex-end" }}
+          onPress={() => setModalVisible(false)}
+        >
+          <Pressable
+            onPress={(e) => e.stopPropagation()}
+            style={{
+              backgroundColor: colors.card,
+              borderTopLeftRadius: 20,
+              borderTopRightRadius: 20,
+              paddingBottom: insets.bottom + 16,
+              maxHeight: "80%",
+            }}
           >
-            {rs.room.name}
-          </Text>
-          <View style={[styles.barTrack, { backgroundColor: colors.border }]}>
+            {/* Handle */}
+            <View style={{ alignItems: "center", paddingTop: 12, paddingBottom: 4 }}>
+              <View
+                style={{ width: 36, height: 4, borderRadius: 2, backgroundColor: colors.border }}
+              />
+            </View>
+
+            <Text
+              style={{
+                fontSize: 16,
+                fontFamily: "Inter_600SemiBold",
+                color: colors.foreground,
+                paddingHorizontal: 20,
+                paddingVertical: 12,
+              }}
+            >
+              Room Breakdown
+            </Text>
+
+            {/* Mini stacked bars inside modal */}
+            <View style={{ paddingHorizontal: 20, gap: 7, marginBottom: 16 }}>
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                <Text
+                  style={{ fontSize: 11, fontFamily: "Inter_500Medium", color: colors.mutedForeground, width: 36 }}
+                >
+                  Value
+                </Text>
+                {renderStackedBar(byValue, (r) => r.totalValue, totalValue)}
+              </View>
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                <Text
+                  style={{ fontSize: 11, fontFamily: "Inter_500Medium", color: colors.mutedForeground, width: 36 }}
+                >
+                  Items
+                </Text>
+                {renderStackedBar(byCount, (r) => r.itemCount, totalCount)}
+              </View>
+            </View>
+
+            {/* Divider */}
             <View
-              style={[
-                styles.barFill,
-                {
-                  width: `${(rs.itemCount / maxCount) * 100}%` as any,
-                  backgroundColor: BRAND_DARK,
-                },
-              ]}
+              style={{
+                height: StyleSheet.hairlineWidth,
+                backgroundColor: colors.border,
+                marginHorizontal: 20,
+                marginBottom: 4,
+              }}
             />
-          </View>
-          <Text style={[styles.barMeta, { color: colors.mutedForeground }]}>
-            {rs.itemCount} {rs.itemCount === 1 ? "item" : "items"}
-          </Text>
-        </View>
-      ))}
-    </View>
+
+            <ScrollView
+              showsVerticalScrollIndicator={false}
+              contentContainerStyle={{ paddingHorizontal: 20 }}
+            >
+              {/* Table header */}
+              <View
+                style={{
+                  flexDirection: "row",
+                  paddingVertical: 8,
+                  borderBottomWidth: StyleSheet.hairlineWidth,
+                  borderColor: colors.border,
+                }}
+              >
+                <Text
+                  style={{ flex: 1, fontSize: 11, fontFamily: "Inter_500Medium", color: colors.mutedForeground }}
+                >
+                  ROOM
+                </Text>
+                <Text
+                  style={{ width: 90, fontSize: 11, fontFamily: "Inter_500Medium", color: colors.mutedForeground, textAlign: "right" }}
+                >
+                  VALUE
+                </Text>
+                <Text
+                  style={{ width: 52, fontSize: 11, fontFamily: "Inter_500Medium", color: colors.mutedForeground, textAlign: "right" }}
+                >
+                  ITEMS
+                </Text>
+              </View>
+
+              {byValue.map((rs) => (
+                <View
+                  key={rs.room.id}
+                  style={{
+                    flexDirection: "row",
+                    alignItems: "center",
+                    paddingVertical: 11,
+                    borderBottomWidth: StyleSheet.hairlineWidth,
+                    borderColor: colors.border,
+                  }}
+                >
+                  <View
+                    style={{
+                      width: 10,
+                      height: 10,
+                      borderRadius: 5,
+                      backgroundColor: colorMap[rs.room.id],
+                      marginRight: 8,
+                    }}
+                  />
+                  <Text
+                    style={{ flex: 1, fontSize: 14, fontFamily: "Inter_400Regular", color: colors.foreground }}
+                    numberOfLines={1}
+                  >
+                    {rs.room.name}
+                  </Text>
+                  <Text
+                    style={{ width: 90, fontSize: 14, fontFamily: "Inter_500Medium", color: colors.foreground, textAlign: "right" }}
+                  >
+                    {formatCurrency(rs.totalValue || null)}
+                  </Text>
+                  <Text
+                    style={{ width: 52, fontSize: 14, fontFamily: "Inter_400Regular", color: colors.mutedForeground, textAlign: "right" }}
+                  >
+                    {rs.itemCount}
+                  </Text>
+                </View>
+              ))}
+            </ScrollView>
+          </Pressable>
+        </Pressable>
+      </Modal>
+    </>
   );
 }
 
