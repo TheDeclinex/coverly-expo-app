@@ -5,6 +5,7 @@ import React, { useEffect, useState } from "react";
 import { Pressable, View } from "react-native";
 import type { StyleProp, ViewStyle } from "react-native";
 
+import { DraggablePinLayer } from "@/components/DraggablePinLayer";
 import { ImageViewerModal } from "@/components/ImageViewerModal";
 import { ItemPinMarker, PIN_MARKER_SIZE } from "@/components/ItemPinMarker";
 import { isDisplayableUri } from "@/lib/storage-helpers";
@@ -25,6 +26,13 @@ interface ExpandableImageProps {
    */
   pin?: { x: number; y: number } | null;
   pinColor?: string;
+  /**
+   * When provided, the pin becomes draggable (long-press → drag → release).
+   * Called with the new normalised coords on drop; throw to signal failure
+   * (the pin will revert to its previous position automatically).
+   * Only pass this on editable screens — read-only contexts should omit it.
+   */
+  onReposition?: (x: number, y: number) => Promise<void>;
 }
 
 export function ExpandableImage({
@@ -39,6 +47,7 @@ export function ExpandableImage({
   initialPhotoIndex = 0,
   pin,
   pinColor = "#1D9E75",
+  onReposition,
 }: ExpandableImageProps) {
   const [lightboxVisible, setLightboxVisible] = useState(false);
   const [dims, setDims] = useState({ w: 0, h: 0 });
@@ -125,7 +134,15 @@ export function ExpandableImage({
             setHasError(true);
           }}
         />
-        {hasPin && (
+        {hasPin && onReposition ? (
+          <DraggablePinLayer
+            pin={pin!}
+            dims={dims}
+            onReposition={onReposition}
+            onTap={() => setLightboxVisible(true)}
+            pinColor={pinColor}
+          />
+        ) : hasPin ? (
           <View
             pointerEvents="none"
             style={{
@@ -136,7 +153,7 @@ export function ExpandableImage({
           >
             <ItemPinMarker size="sm" color={pinColor} />
           </View>
-        )}
+        ) : null}
       </Pressable>
       <ImageViewerModal
         uris={lightboxUris}

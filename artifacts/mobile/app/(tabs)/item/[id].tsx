@@ -1,6 +1,6 @@
 import { Feather } from "@expo/vector-icons";
 import { Stack, router, useLocalSearchParams } from "expo-router";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import React from "react";
 import {
   Platform,
@@ -80,6 +80,7 @@ export default function ItemDetailScreen() {
   const { session } = useAuth();
   const colors = useColors();
   const insets = useSafeAreaInsets();
+  const queryClient = useQueryClient();
 
   const {
     data: item,
@@ -131,6 +132,31 @@ export default function ItemDetailScreen() {
     });
   };
 
+  /**
+   * Saves the repositioned pin to Supabase. Called by DraggablePinLayer on drop.
+   * Throws on error so DraggablePinLayer can revert the optimistic pin position.
+   */
+  const handleRepositionPin = React.useCallback(
+    async (x: number, y: number) => {
+      if (!item) throw new Error("Item not loaded");
+      const rawPin = item.image_pin as Record<string, unknown> | null | undefined;
+      const { error } = await supabase
+        .from("inventory_items")
+        .update({
+          image_pin: {
+            x,
+            y,
+            sourcePhotoIndex: (rawPin?.sourcePhotoIndex as number | undefined) ?? 0,
+            type: rawPin?.type ?? "user",
+          },
+        })
+        .eq("id", item.id);
+      if (error) throw new Error(error.message);
+      queryClient.invalidateQueries({ queryKey: ["item", id, session?.user.id] });
+    },
+    [item, id, session?.user.id, queryClient],
+  );
+
   return (
     <>
       <Stack.Screen
@@ -173,7 +199,13 @@ export default function ItemDetailScreen() {
             allUris={allPhotoUris}
             initialPhotoIndex={0}
             pin={itemPin}
+            onReposition={itemPin ? handleRepositionPin : undefined}
           />
+          {itemPin && (
+            <Text style={[styles.pinHint, { color: colors.mutedForeground }]}>
+              Long-press the pin to reposition it
+            </Text>
+          )}
 
           <View style={styles.content}>
             <View style={styles.titleRow}>
@@ -384,5 +416,12 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontFamily: "Inter_400Regular",
     lineHeight: 22,
+  },
+  pinHint: {
+    fontSize: 11,
+    fontFamily: "Inter_400Regular",
+    textAlign: "center",
+    paddingVertical: 5,
+    opacity: 0.7,
   },
 });
