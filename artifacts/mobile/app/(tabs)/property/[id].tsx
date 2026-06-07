@@ -23,7 +23,7 @@ import {
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import Svg, { Circle, Line, Path, Polyline } from "react-native-svg";
+import Svg, { Circle, Line, Path, Polyline, Rect } from "react-native-svg";
 
 import { EmptyState } from "@/components/EmptyState";
 import { ErrorState } from "@/components/ErrorState";
@@ -363,7 +363,7 @@ function InsightCard({
   const [showPeriodPicker, setShowPeriodPicker] = useState(false);
   const sparkPoints = useMemo(() => buildSparklinePoints(items, sparkPeriod), [items, sparkPeriod]);
 
-  // Animated counting total
+  // Animated counting total + haptic feedback (fast → slow deceleration)
   const [displayVal, setDisplayVal] = useState(0);
   useEffect(() => {
     const anim = new Animated.Value(0);
@@ -374,7 +374,22 @@ function InsightCard({
       useNativeDriver: false,
       easing: Easing.out(Easing.cubic),
     }).start();
-    return () => anim.removeListener(id);
+
+    // Schedule 8 haptic pulses with quadratically increasing gaps (fast start → slow end)
+    const PULSES = 8;
+    const DURATION = 680; // slightly under animation duration
+    const timeouts = Array.from({ length: PULSES }, (_, i) => {
+      const delay = Math.round(((i / (PULSES - 1)) ** 2) * DURATION);
+      return setTimeout(
+        () => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light),
+        delay,
+      );
+    });
+
+    return () => {
+      anim.removeListener(id);
+      timeouts.forEach(clearTimeout);
+    };
   }, [totalValue]);
 
   // Build category breakdown sorted by value desc
@@ -627,14 +642,15 @@ function CoverageBar({
           overflow: "hidden",
         }}
       >
-        <View
-          style={{
-            height: 8,
-            borderRadius: 4,
-            width: `${clamped}%` as any,
-            backgroundColor: fill,
-          }}
-        />
+        {/* Gradient spans the full bar; clipped by the percentage-width container */}
+        <View style={{ width: `${clamped}%` as any, height: 8, overflow: "hidden" }}>
+          <LinearGradient
+            colors={["#22C55E", "#F97316", "#EF4444"]}
+            start={{ x: 0, y: 0.5 }}
+            end={{ x: 1, y: 0.5 }}
+            style={{ width: 300, height: 8 }}
+          />
+        </View>
       </View>
       <Text
         style={{
@@ -748,9 +764,15 @@ function RoomBarsSection({
 
 // ─── Room card ────────────────────────────────────────────────────────────────
 
-const RING_SIZE = 88;   // 8 px gap each side around the 72 px thumbnail
-const RING_R = 40;      // outer edge 42, image half-width 36 → 6 px clear gap
-const RING_CIRC = 2 * Math.PI * RING_R;
+const RING_SIZE = 88;
+// Rounded-rect ring that hugs the square thumbnail
+const RING_RECT_INSET = 4;                              // path centre 4 px from container edge
+const RING_RECT_SIDE = RING_SIZE - 2 * RING_RECT_INSET; // 80 px
+const RING_RECT_RX = 10;                                // outer corner radius (thumbnail rx=6 + gap)
+const RING_CIRC =
+  2 * (RING_RECT_SIDE - 2 * RING_RECT_RX) +            // straight sides (×2 for top+bottom & left+right)
+  2 * (RING_RECT_SIDE - 2 * RING_RECT_RX) +
+  2 * Math.PI * RING_RECT_RX;                           // four quarter-circles = one full circle ≈ 303 px
 
 function RoomCard({
   item,
@@ -800,30 +822,33 @@ function RoomCard({
             height={RING_SIZE}
             style={StyleSheet.absoluteFillObject}
           >
-            {/* Track */}
-            <Circle
-              cx={RING_SIZE / 2}
-              cy={RING_SIZE / 2}
-              r={RING_R}
+            {/* Track — rounded-rect shape matches the thumbnail */}
+            <Rect
+              x={RING_RECT_INSET}
+              y={RING_RECT_INSET}
+              width={RING_RECT_SIDE}
+              height={RING_RECT_SIDE}
+              rx={RING_RECT_RX}
+              ry={RING_RECT_RX}
               fill="none"
               stroke={BRAND_BORDER}
               strokeWidth={4}
             />
             {/* Progress */}
             {completionPct > 0 && (
-              <Circle
-                cx={RING_SIZE / 2}
-                cy={RING_SIZE / 2}
-                r={RING_R}
+              <Rect
+                x={RING_RECT_INSET}
+                y={RING_RECT_INSET}
+                width={RING_RECT_SIDE}
+                height={RING_RECT_SIDE}
+                rx={RING_RECT_RX}
+                ry={RING_RECT_RX}
                 fill="none"
                 stroke={BRAND_TEAL}
                 strokeWidth={4}
                 strokeLinecap="round"
                 strokeDasharray={`${RING_CIRC} ${RING_CIRC}`}
                 strokeDashoffset={ringOffset}
-                rotation={-90}
-                originX={RING_SIZE / 2}
-                originY={RING_SIZE / 2}
               />
             )}
           </Svg>
