@@ -124,7 +124,10 @@ function ItemCard({
   /** Pre-resolved signed URL from the parent's batch useSignedUrls() call. */
   resolvedImageUrl?: string | null;
 }) {
-  const imageUri = resolvedImageUrl ?? item.image_url ?? item.photo_url ?? null;
+  // Do NOT fall back to item.image_url/photo_url — those may be raw storage paths
+  // that expo-image cannot load. resolvedImageUrl is already the signed URL (or null
+  // while loading), so we show the placeholder until the signed URL arrives.
+  const imageUri = resolvedImageUrl ?? null;
 
   const rawPin = item.image_pin as Record<string, unknown> | null | undefined;
   const pin =

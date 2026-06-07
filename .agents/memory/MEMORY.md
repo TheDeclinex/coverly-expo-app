@@ -1,2 +1,3 @@
 - [Coverly Supabase insert rules](coverly-supabase-inserts.md) — inventory_files has no INSERT RLS policy; inventory_items user_id note was incorrect (see updated file)
 - [Coverly scan-room-photo contract](coverly-scan-contract.md) — production function expects base64 images, not storage paths; mode names differ from mobile; confidence is float 0-1
+- [Coverly storage-path display rules](coverly-storage-display.md) — never fall back to raw image_url/photo_url columns in display components; always show placeholder until signed URL resolves
