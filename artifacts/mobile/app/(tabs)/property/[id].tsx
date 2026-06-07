@@ -801,6 +801,32 @@ function RoomCard({
   const completionPct = itemCount > 0 ? Math.min(completedCount / itemCount, 1) : 0;
   const ringOffset = RING_CIRC * (1 - completionPct);
 
+  // Ring completion celebration: bounce-scale the thumbnail+ring, fire success haptic
+  const prevPctRef = useRef(completionPct);
+  const celebAnim = useRef(new Animated.Value(0)).current;
+  const celebScale = celebAnim.interpolate({ inputRange: [0, 1], outputRange: [1, 1.18] });
+
+  useEffect(() => {
+    if (prevPctRef.current < 1 && completionPct >= 1) {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      Animated.sequence([
+        Animated.timing(celebAnim, {
+          toValue: 1,
+          duration: 280,
+          useNativeDriver: true,
+          easing: Easing.out(Easing.back(2)),
+        }),
+        Animated.timing(celebAnim, {
+          toValue: 0,
+          duration: 360,
+          useNativeDriver: true,
+          easing: Easing.in(Easing.cubic),
+        }),
+      ]).start();
+    }
+    prevPctRef.current = completionPct;
+  }, [completionPct]);
+
   return (
     <Pressable
       onPress={handlePress}
@@ -815,8 +841,8 @@ function RoomCard({
       ]}
     >
       <View style={styles.cardLeft}>
-        {/* Completion ring wrapping the thumbnail */}
-        <View style={styles.roomThumbWrap}>
+        {/* Completion ring — animated scale on full completion */}
+        <Animated.View style={[styles.roomThumbWrap, { transform: [{ scale: celebScale }] }]}>
           <Svg
             width={RING_SIZE}
             height={RING_SIZE}
@@ -872,7 +898,7 @@ function RoomCard({
               />
             </View>
           )}
-        </View>
+        </Animated.View>
       </View>
       <View style={styles.cardBody}>
         <View style={styles.cardRow}>
@@ -1109,6 +1135,91 @@ function CoverAmountModal({
   );
 }
 
+// ─── Shimmer skeleton ─────────────────────────────────────────────────────────
+
+const SHIMMER_W = 220;
+
+function ShimmerBlock({
+  height,
+  borderRadius = 8,
+  bgColor,
+  style,
+}: {
+  height: number;
+  borderRadius?: number;
+  bgColor: string;
+  style?: object;
+}) {
+  const shimmerX = useRef(new Animated.Value(-SHIMMER_W)).current;
+  useEffect(() => {
+    const anim = Animated.loop(
+      Animated.timing(shimmerX, {
+        toValue: 420,
+        duration: 1100,
+        useNativeDriver: true,
+        easing: Easing.linear,
+      }),
+    );
+    anim.start();
+    return () => anim.stop();
+  }, []);
+  return (
+    <View
+      style={[{ height, borderRadius, backgroundColor: bgColor, overflow: "hidden" }, style]}
+    >
+      <Animated.View
+        style={[
+          StyleSheet.absoluteFillObject,
+          { transform: [{ translateX: shimmerX }] },
+        ]}
+      >
+        <LinearGradient
+          colors={["rgba(255,255,255,0)", "rgba(255,255,255,0.45)", "rgba(255,255,255,0)"]}
+          start={{ x: 0, y: 0.5 }}
+          end={{ x: 1, y: 0.5 }}
+          style={{ width: SHIMMER_W, height: "100%" }}
+        />
+      </Animated.View>
+    </View>
+  );
+}
+
+function PropertySkeleton({
+  colors,
+}: {
+  colors: ReturnType<typeof import("@/hooks/useColors").useColors>;
+}) {
+  const bg = colors.border;
+  return (
+    <View style={{ flex: 1, backgroundColor: colors.background }}>
+      {/* Hero */}
+      <ShimmerBlock height={200} borderRadius={0} bgColor={bg} />
+
+      <View style={{ gap: 10, paddingHorizontal: 16, paddingTop: 14 }}>
+        {/* Summary card */}
+        <ShimmerBlock height={82} borderRadius={12} bgColor={bg} />
+
+        {/* Insight card */}
+        <ShimmerBlock height={244} borderRadius={14} bgColor={bg} />
+
+        {/* Action buttons */}
+        <View style={{ flexDirection: "row", gap: 10 }}>
+          <ShimmerBlock height={48} borderRadius={10} bgColor={bg} style={{ flex: 1 }} />
+          <ShimmerBlock height={48} borderRadius={10} bgColor={bg} style={{ flex: 1 }} />
+        </View>
+
+        {/* Rooms heading */}
+        <ShimmerBlock height={20} borderRadius={4} bgColor={bg} style={{ width: 60 }} />
+
+        {/* Room cards */}
+        {[1, 2, 3].map((i) => (
+          <ShimmerBlock key={i} height={88} borderRadius={12} bgColor={bg} />
+        ))}
+      </View>
+    </View>
+  );
+}
+
 // ─── Main screen ──────────────────────────────────────────────────────────────
 
 export default function PropertyDetailScreen() {
@@ -1121,6 +1232,14 @@ export default function PropertyDetailScreen() {
   const [coverPhotoUploading, setCoverPhotoUploading] = useState(false);
   // Optimistic local state so the cover photo shows instantly after upload
   const [localCoverUrl, setLocalCoverUrl] = useState<string | null>(null);
+
+  // Parallax hero
+  const scrollY = useRef(new Animated.Value(0)).current;
+  const heroTranslateY = scrollY.interpolate({
+    inputRange: [0, 200],
+    outputRange: [0, -40],
+    extrapolate: "clamp",
+  });
 
   const {
     data: rooms,
@@ -1291,11 +1410,18 @@ export default function PropertyDetailScreen() {
         {/* Property cover photo hero */}
         <View style={{ height: 200, overflow: "hidden" }}>
           {(localCoverUrl ?? property?.property_cover_image_url) ? (
-            <Image
-              source={{ uri: localCoverUrl ?? property!.property_cover_image_url! }}
-              style={StyleSheet.absoluteFill}
-              contentFit="cover"
-            />
+            <Animated.View
+              style={[
+                StyleSheet.absoluteFill,
+                { bottom: -40, transform: [{ translateY: heroTranslateY }] },
+              ]}
+            >
+              <Image
+                source={{ uri: localCoverUrl ?? property!.property_cover_image_url! }}
+                style={StyleSheet.absoluteFill}
+                contentFit="cover"
+              />
+            </Animated.View>
           ) : (
             /* Designed placeholder — gradient teal, icon badge, CTA */
             <Pressable
@@ -1621,7 +1747,7 @@ export default function PropertyDetailScreen() {
         }}
       />
       {isLoading ? (
-        <LoadingState />
+        <PropertySkeleton colors={colors} />
       ) : roomsError ? (
         <ErrorState
           message="Failed to load rooms"
@@ -1632,6 +1758,11 @@ export default function PropertyDetailScreen() {
         <FlatList
           data={stats ? stats.roomStats : []}
           keyExtractor={(rs) => rs.room.id}
+          onScroll={Animated.event(
+            [{ nativeEvent: { contentOffset: { y: scrollY } } }],
+            { useNativeDriver: true },
+          )}
+          scrollEventThrottle={16}
           renderItem={({ item: rs }) => (
             <View style={{ paddingHorizontal: 16, marginBottom: 10 }}>
               <RoomCard
