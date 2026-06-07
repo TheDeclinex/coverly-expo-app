@@ -1008,7 +1008,7 @@ export default function PropertyDetailScreen() {
       const { data, error } = await supabase
         .from("inventory_items")
         .select(
-          "id, file_id, room_id, name, estimated_price, unit_estimated_price, quantity, image_url, photo_url"
+          "id, file_id, room_id, name, category, estimated_price, unit_estimated_price, quantity, image_url, photo_url"
         )
         .eq("file_id", id);
       if (error) throw error;
