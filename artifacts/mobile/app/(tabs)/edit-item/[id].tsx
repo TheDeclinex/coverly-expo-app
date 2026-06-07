@@ -170,10 +170,14 @@ export default function EditItemScreen() {
     enabled: !!session && !!item?.file_id,
   });
 
+  /**
+   * Upload a photo and return the durable storage path.
+   * The path (not a signed URL) is what gets stored in the DB.
+   */
   const uploadPhoto = async (
     uri: string,
     fileId: string
-  ): Promise<{ url: string | null; uploadErrMsg: string | null }> => {
+  ): Promise<{ path: string | null; uploadErrMsg: string | null }> => {
     try {
       const { data: sessionData } = await supabase.auth.getSession();
       const accessToken = sessionData?.session?.access_token;
@@ -187,11 +191,11 @@ export default function EditItemScreen() {
       const ext = filename.includes(".")
         ? (filename.split(".").pop()?.toLowerCase() ?? "jpeg")
         : "jpeg";
-      const path = `${userId}/${fileId}/${Date.now()}.${ext}`;
+      const storagePath = `${userId}/${fileId}/${Date.now()}.${ext}`;
 
       console.log("[EditItem] Upload attempt:", {
         bucket: ITEM_PHOTOS_BUCKET,
-        path,
+        path: storagePath,
         email,
         user_id: userId,
         has_access_token: hasToken,
@@ -199,28 +203,21 @@ export default function EditItemScreen() {
 
       const { data: uploadData, error: uploadError } = await supabase.storage
         .from(ITEM_PHOTOS_BUCKET)
-        .upload(path, blob, { contentType: `image/${ext}`, upsert: false });
+        .upload(storagePath, blob, { contentType: `image/${ext}`, upsert: false });
 
       if (uploadError) {
         console.warn("[EditItem] Photo upload failed:", uploadError.message);
         return {
-          url: null,
-          uploadErrMsg: `${uploadError.message} [bucket=${ITEM_PHOTOS_BUCKET} path=${path} auth=${hasToken} user=${userId}]`,
+          path: null,
+          uploadErrMsg: `${uploadError.message} [bucket=${ITEM_PHOTOS_BUCKET} path=${storagePath} auth=${hasToken} user=${userId}]`,
         };
       }
-
-      const { data: signedData, error: signedError } = await supabase.storage
-        .from(ITEM_PHOTOS_BUCKET)
-        .createSignedUrl(uploadData.path, 31536000);
-      if (signedError || !signedData?.signedUrl) {
-        console.warn("[EditItem] Signed URL error:", signedError?.message);
-        return { url: null, uploadErrMsg: signedError?.message ?? "signed URL failed" };
-      }
-      return { url: signedData.signedUrl, uploadErrMsg: null };
+      // Return the durable path — display code will generate signed URLs at render time.
+      return { path: uploadData.path, uploadErrMsg: null };
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       console.warn("[EditItem] Photo upload error:", msg);
-      return { url: null, uploadErrMsg: msg };
+      return { path: null, uploadErrMsg: msg };
     }
   };
 
@@ -250,9 +247,10 @@ export default function EditItemScreen() {
 
       for (const photo of photos) {
         if (isLocalUri(photo.url)) {
-          const { url, uploadErrMsg } = await uploadPhoto(photo.url, fileId);
-          if (url) {
-            uploadedPhotos.push({ url, caption: photo.caption });
+          // uploadPhoto returns a durable storage path — store the path in the DB.
+          const { path, uploadErrMsg } = await uploadPhoto(photo.url, fileId);
+          if (path) {
+            uploadedPhotos.push({ url: path, caption: photo.caption });
           } else {
             failedUploads.push(uploadErrMsg ?? "unknown error");
           }

@@ -26,6 +26,7 @@ import { LoadingState } from "@/components/LoadingState";
 import { useAuth } from "@/context/AuthContext";
 import { useColors } from "@/hooks/useColors";
 import { formatCurrency } from "@/lib/inventory-mappers";
+import { useSignedUrl, useSignedUrls } from "@/hooks/useSignedUrls";
 import { uploadCoverPhoto } from "@/lib/photo-upload";
 import { supabase } from "@/lib/supabase";
 import type { InventoryItem, InventoryRoom } from "@/types";
@@ -116,11 +117,14 @@ function roomIconName(roomType: string | null): keyof typeof Feather.glyphMap {
 function ItemCard({
   item,
   colors,
+  resolvedImageUrl,
 }: {
   item: InventoryItem;
   colors: ReturnType<typeof import("@/hooks/useColors").useColors>;
+  /** Pre-resolved signed URL from the parent's batch useSignedUrls() call. */
+  resolvedImageUrl?: string | null;
 }) {
-  const imageUri = item.image_url ?? item.photo_url ?? null;
+  const imageUri = resolvedImageUrl ?? item.image_url ?? item.photo_url ?? null;
 
   const rawPin = item.image_pin as Record<string, unknown> | null | undefined;
   const pin =
@@ -356,6 +360,15 @@ export default function ItemsScreen() {
     enabled: !!session && !!id,
   });
 
+  // Signed URL for the room cover photo (resolves storage path → 1-hr signed URL)
+  const signedCoverUrl = useSignedUrl(room?.cover_photo_url);
+
+  // Batch-resolve item thumbnail paths → signed URLs in one round-trip
+  const itemImagePaths = (items ?? []).map(
+    (it) => it.image_url ?? it.photo_url ?? null,
+  );
+  const itemSignedUrls = useSignedUrls(itemImagePaths);
+
   const handleScanRoom = async () => {
     await Haptics.selectionAsync();
     router.push({
@@ -391,17 +404,18 @@ export default function ItemsScreen() {
     if (!session?.user.id) return;
     setCoverUploading(true);
     try {
-      const publicUrl = await uploadCoverPhoto(
+      const uploaded = await uploadCoverPhoto(
         result.assets[0].uri,
         session.user.id
       );
-      if (!publicUrl) {
+      if (!uploaded) {
         Alert.alert("Upload failed", "Could not upload cover photo. Please try again.");
         return;
       }
+      // Store the durable storage path in the DB, not the short-lived signed URL.
       const { error: updateError } = await supabase
         .from("inventory_rooms")
-        .update({ cover_photo_url: publicUrl })
+        .update({ cover_photo_url: uploaded.path })
         .eq("id", id);
       if (updateError) {
         Alert.alert("Save failed", updateError.message);
@@ -419,7 +433,7 @@ export default function ItemsScreen() {
 
   const renderRoomCover = () => (
     <View style={[styles.coverContainer, { backgroundColor: colors.secondary }]}>
-      {room?.cover_photo_url ? (
+      {signedCoverUrl ? (
         /* Parallax image — taller than container so it can shift up */
         <Animated.View
           style={{
@@ -432,7 +446,7 @@ export default function ItemsScreen() {
           }}
         >
           <Image
-            source={{ uri: room.cover_photo_url }}
+            source={{ uri: signedCoverUrl }}
             style={StyleSheet.absoluteFill}
             contentFit="cover"
           />
@@ -492,7 +506,13 @@ export default function ItemsScreen() {
           <Animated.FlatList
             data={items}
             keyExtractor={(item) => item.id}
-            renderItem={({ item }) => <ItemCard item={item} colors={colors} />}
+            renderItem={({ item }) => (
+              <ItemCard
+                item={item}
+                colors={colors}
+                resolvedImageUrl={itemSignedUrls.get(item.image_url ?? item.photo_url ?? "") ?? null}
+              />
+            )}
             ListHeaderComponent={renderRoomCover}
             contentContainerStyle={[
               styles.list,

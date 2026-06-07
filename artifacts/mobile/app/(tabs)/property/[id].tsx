@@ -31,6 +31,7 @@ import { ErrorState } from "@/components/ErrorState";
 import { LoadingState } from "@/components/LoadingState";
 import { useAuth } from "@/context/AuthContext";
 import { useColors } from "@/hooks/useColors";
+import { useSignedUrl, useSignedUrls } from "@/hooks/useSignedUrls";
 import {
   buildSparklinePoints,
   calcPropertyStats,
@@ -1015,6 +1016,7 @@ function RoomCard({
   maxValue,
   completedCount,
   colors,
+  resolvedCoverUrl,
 }: {
   item: InventoryRoom;
   itemCount: number;
@@ -1022,6 +1024,8 @@ function RoomCard({
   maxValue: number;
   completedCount: number;
   colors: ReturnType<typeof import("@/hooks/useColors").useColors>;
+  /** Pre-resolved signed URL from the parent's batch useSignedUrls() call. */
+  resolvedCoverUrl?: string | null;
 }) {
   const handlePress = async () => {
     await Haptics.selectionAsync();
@@ -1103,9 +1107,9 @@ function RoomCard({
               />
             )}
           </Svg>
-          {item.cover_photo_url ? (
+          {resolvedCoverUrl ? (
             <Image
-              source={{ uri: item.cover_photo_url }}
+              source={{ uri: resolvedCoverUrl }}
               style={styles.roomThumb}
               contentFit="cover"
             />
@@ -1455,7 +1459,8 @@ export default function PropertyDetailScreen() {
   const queryClient = useQueryClient();
   const [coverModalVisible, setCoverModalVisible] = useState(false);
   const [coverPhotoUploading, setCoverPhotoUploading] = useState(false);
-  // Optimistic local state so the cover photo shows instantly after upload
+  // Optimistic local state — holds the 1-hr signed displayUrl right after upload
+  // so the hero shows immediately without waiting for a query refetch + URL resolution.
   const [localCoverUrl, setLocalCoverUrl] = useState<string | null>(null);
 
   // Parallax hero
@@ -1567,6 +1572,17 @@ export default function PropertyDetailScreen() {
 
   const isLoading = roomsLoading || itemsLoading;
 
+  // Signed URL for the property cover photo (path → 1-hr signed URL).
+  // localCoverUrl overrides while the optimistic displayUrl is still fresh.
+  const signedCoverUrl = useSignedUrl(property?.property_cover_image_url);
+
+  // Batch-resolve room thumbnail paths → signed URLs in one round-trip.
+  const roomCoverPaths = useMemo(
+    () => (stats?.roomStats ?? []).map((rs) => rs.room.cover_photo_url ?? null),
+    [stats],
+  );
+  const roomCoverSignedUrls = useSignedUrls(roomCoverPaths);
+
   const saveCoverAmount = async (value: number | null) => {
     const { error } = await supabase
       .from("inventory_files")
@@ -1597,19 +1613,19 @@ export default function PropertyDetailScreen() {
     if (!session?.user.id) return;
     setCoverPhotoUploading(true);
     try {
-      const publicUrl = await uploadCoverPhoto(
+      const uploaded = await uploadCoverPhoto(
         result.assets[0].uri,
         session.user.id
       );
-      if (!publicUrl) {
+      if (!uploaded) {
         Alert.alert("Upload failed", "Could not upload cover photo. Please try again.");
         return;
       }
-      // Show the photo immediately — don't wait for cache refetch
-      setLocalCoverUrl(publicUrl);
+      // Show immediately via the 1-hr signed URL; store the durable path in the DB.
+      setLocalCoverUrl(uploaded.displayUrl);
       const { error: updateError } = await supabase
         .from("inventory_files")
-        .update({ property_cover_image_url: publicUrl })
+        .update({ property_cover_image_url: uploaded.path })
         .eq("id", id)
         .eq("user_id", session.user.id);
       if (updateError) {
@@ -1634,7 +1650,7 @@ export default function PropertyDetailScreen() {
       <>
         {/* Property cover photo hero */}
         <View style={{ height: 200, overflow: "hidden" }}>
-          {(localCoverUrl ?? property?.property_cover_image_url) ? (
+          {(localCoverUrl ?? signedCoverUrl) ? (
             <Animated.View
               style={{
                 position: "absolute",
@@ -1646,7 +1662,7 @@ export default function PropertyDetailScreen() {
               }}
             >
               <Image
-                source={{ uri: localCoverUrl ?? property!.property_cover_image_url! }}
+                source={{ uri: (localCoverUrl ?? signedCoverUrl)! }}
                 style={StyleSheet.absoluteFill}
                 contentFit="cover"
               />
@@ -2001,6 +2017,9 @@ export default function PropertyDetailScreen() {
                 maxValue={maxRoomValue}
                 completedCount={completionMap.get(rs.room.id) ?? 0}
                 colors={colors}
+                resolvedCoverUrl={
+                  roomCoverSignedUrls.get(rs.room.cover_photo_url ?? "") ?? null
+                }
               />
             </View>
           )}

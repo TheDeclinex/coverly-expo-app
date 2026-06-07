@@ -17,6 +17,7 @@ import { ExpandableImage } from "@/components/ExpandableImage";
 import { LoadingState } from "@/components/LoadingState";
 import { useAuth } from "@/context/AuthContext";
 import { useColors } from "@/hooks/useColors";
+import { useSignedUrls } from "@/hooks/useSignedUrls";
 import { formatCurrencyFull } from "@/lib/inventory-mappers";
 import { supabase } from "@/lib/supabase";
 import type { InventoryItem } from "@/types";
@@ -99,7 +100,7 @@ export default function ItemDetailScreen() {
     enabled: !!session && !!id,
   });
 
-  const primaryUri = item?.image_url ?? item?.photo_url;
+  const rawPrimaryUri = item?.image_url ?? item?.photo_url;
 
   const itemPin = React.useMemo(() => {
     const raw = item?.image_pin as Record<string, unknown> | null | undefined;
@@ -107,14 +108,19 @@ export default function ItemDetailScreen() {
     return { x: raw.x, y: raw.y };
   }, [item?.image_pin]);
 
-  const allPhotoUris: string[] = React.useMemo(() => {
+  const rawPhotoUris: string[] = React.useMemo(() => {
     const uris: string[] = [];
-    if (primaryUri) uris.push(primaryUri);
+    if (rawPrimaryUri) uris.push(rawPrimaryUri);
     for (const att of item?.attachments ?? []) {
       if (att.url && !uris.includes(att.url)) uris.push(att.url);
     }
     return uris;
-  }, [primaryUri, item?.attachments]);
+  }, [rawPrimaryUri, item?.attachments]);
+
+  // Resolve storage paths → 1-hr signed URLs in one batch call.
+  const signedUriMap = useSignedUrls(rawPhotoUris);
+  const allPhotoUris = rawPhotoUris.map((u) => signedUriMap.get(u) ?? u);
+  const primaryUri = allPhotoUris[0] ?? null;
 
   const handleEdit = async () => {
     router.push({

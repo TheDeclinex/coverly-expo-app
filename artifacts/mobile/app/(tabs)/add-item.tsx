@@ -196,36 +196,34 @@ export default function AddItemScreen() {
     }
   };
 
+  /**
+   * Upload a photo and return the durable storage path.
+   * The path (not a signed URL) is what gets stored in the DB.
+   */
   const uploadPhoto = async (
     uri: string,
     itemFileId: string
-  ): Promise<{ url: string | null; uploadErrMsg: string | null }> => {
+  ): Promise<{ path: string | null; uploadErrMsg: string | null }> => {
     try {
       const userId = session?.user?.id ?? "anon";
       const response = await fetch(uri);
       const blob = await response.blob();
       const filename = uri.split("/").pop()?.split("?")[0] ?? "";
       const ext = filename.includes(".") ? (filename.split(".").pop()?.toLowerCase() ?? "jpeg") : "jpeg";
-      const path = `${userId}/${itemFileId}/${Date.now()}.${ext}`;
+      const storagePath = `${userId}/${itemFileId}/${Date.now()}.${ext}`;
       const { data: uploadData, error: uploadError } = await supabase.storage
         .from(ITEM_PHOTOS_BUCKET)
-        .upload(path, blob, { contentType: `image/${ext}`, upsert: false });
+        .upload(storagePath, blob, { contentType: `image/${ext}`, upsert: false });
       if (uploadError) {
-        console.warn("[AddItem] Photo upload failed:", uploadError.message, "path:", path, "bucket:", ITEM_PHOTOS_BUCKET);
-        return { url: null, uploadErrMsg: uploadError.message };
+        console.warn("[AddItem] Photo upload failed:", uploadError.message, "path:", storagePath, "bucket:", ITEM_PHOTOS_BUCKET);
+        return { path: null, uploadErrMsg: uploadError.message };
       }
-      const { data: signedData, error: signedError } = await supabase.storage
-        .from(ITEM_PHOTOS_BUCKET)
-        .createSignedUrl(uploadData.path, 31536000);
-      if (signedError || !signedData?.signedUrl) {
-        console.warn("[AddItem] Signed URL error:", signedError?.message);
-        return { url: null, uploadErrMsg: signedError?.message ?? "signed URL failed" };
-      }
-      return { url: signedData.signedUrl, uploadErrMsg: null };
+      // Return the durable path — display code will generate signed URLs at render time.
+      return { path: uploadData.path, uploadErrMsg: null };
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       console.warn("[AddItem] Photo upload error:", msg);
-      return { url: null, uploadErrMsg: msg };
+      return { path: null, uploadErrMsg: msg };
     }
   };
 
@@ -252,11 +250,12 @@ export default function AddItemScreen() {
 
     setSaving(true);
 
+    // Upload returns a durable storage path. Display code resolves paths to signed URLs at render time.
     let uploadedPhotoUrl: string | null = null;
     if (photoUri) {
-      const { url, uploadErrMsg } = await uploadPhoto(photoUri, selectedFileId);
-      uploadedPhotoUrl = url;
-      if (!url) {
+      const { path, uploadErrMsg } = await uploadPhoto(photoUri, selectedFileId);
+      uploadedPhotoUrl = path;
+      if (!path) {
         setPhotoWarning(
           `Photo upload failed: ${uploadErrMsg ?? "unknown error"} — item will be saved without a photo.`
         );

@@ -350,14 +350,15 @@ export default function ScanScreen() {
     }
 
     const dedupeKey = `${item.sourcePhotoIndex ?? 0}:${item.sourceImageUri}`;
-    const uploadedUrl = await uploadScanPhoto(item.sourceImageUri, userId, dedupeKey);
-    if (!uploadedUrl) {
+    const uploaded = await uploadScanPhoto(item.sourceImageUri, userId, dedupeKey);
+    if (!uploaded) {
       setScanSaveError("Photo upload failed. Check your connection and try again.");
       setSavingIds((prev) => { const n = new Set(prev); n.delete(index); return n; });
       return;
     }
 
-    const { error } = await supabase.from("inventory_items").insert(buildPayload(item, uploadedUrl));
+    // Store the durable storage path in the DB, not the short-lived signed URL.
+    const { error } = await supabase.from("inventory_items").insert(buildPayload(item, uploaded.path));
 
     setSavingIds((prev) => {
       const next = new Set(prev);
@@ -392,6 +393,7 @@ export default function ScanScreen() {
     // Phase 1: Upload each unique source photo once.
     // Track successful uploads (photoIdx → URL) and failures (photoIdx in failedPhotoIndices).
     // Items whose photo failed to upload are treated as partial failures and never inserted.
+    // Stores durable storage paths (not signed URLs) keyed by photo index.
     const photoUrlByIndex = new Map<number, string>();
     const failedPhotoIndices = new Set<number>();
 
@@ -401,8 +403,9 @@ export default function ScanScreen() {
       const uri = item.sourceImageUri ?? images[photoIdx]?.uri ?? null;
       if (!uri) { failedPhotoIndices.add(photoIdx); continue; }
       const dedupeKey = `${photoIdx}:${uri}`;
-      const url = await uploadScanPhoto(uri, userId, dedupeKey);
-      if (url) { photoUrlByIndex.set(photoIdx, url); }
+      const uploaded = await uploadScanPhoto(uri, userId, dedupeKey);
+      // Store the durable path (not the short-lived displayUrl) in the DB map.
+      if (uploaded) { photoUrlByIndex.set(photoIdx, uploaded.path); }
       else { failedPhotoIndices.add(photoIdx); }
     }
 

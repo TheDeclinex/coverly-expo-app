@@ -22,6 +22,7 @@ import { ErrorState } from "@/components/ErrorState";
 import { LoadingState } from "@/components/LoadingState";
 import { useAuth } from "@/context/AuthContext";
 import { useColors } from "@/hooks/useColors";
+import { useSignedUrl } from "@/hooks/useSignedUrls";
 import { calcPortfolioStats } from "@/lib/dashboard-stats";
 import { formatCurrency, getItemTotalValue } from "@/lib/inventory-mappers";
 import { supabase } from "@/lib/supabase";
@@ -137,6 +138,9 @@ function PropertyCard({
     });
   };
 
+  // Resolve the storage path (or legacy signed URL) to a fresh display URL.
+  const signedCoverUrl = useSignedUrl(item.property_cover_image_url);
+
   return (
     <Pressable
       onPress={handlePress}
@@ -150,9 +154,9 @@ function PropertyCard({
         },
       ]}
     >
-      {item.property_cover_image_url ? (
+      {signedCoverUrl ? (
         <Image
-          source={{ uri: item.property_cover_image_url }}
+          source={{ uri: signedCoverUrl }}
           style={[styles.cardImage, { borderRadius: colors.radius }]}
           contentFit="cover"
         />
