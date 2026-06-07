@@ -5,10 +5,12 @@ import * as ImagePicker from "expo-image-picker";
 import { LinearGradient } from "expo-linear-gradient";
 import { Stack, router, useLocalSearchParams } from "expo-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
+  Animated,
   ActivityIndicator,
   Alert,
+  Easing,
   FlatList,
   KeyboardAvoidingView,
   Modal,
@@ -33,7 +35,12 @@ import {
   calcPropertyStats,
   type RoomStat,
 } from "@/lib/dashboard-stats";
-import { formatCurrency, getItemTotalValue } from "@/lib/inventory-mappers";
+import {
+  formatCurrency,
+  getItemTotalValue,
+  hasPhoto,
+  hasValue,
+} from "@/lib/inventory-mappers";
 import { uploadCoverPhoto } from "@/lib/photo-upload";
 import { supabase } from "@/lib/supabase";
 import type { InventoryFile, InventoryItem, InventoryRoom } from "@/types";
@@ -356,6 +363,20 @@ function InsightCard({
   const [showPeriodPicker, setShowPeriodPicker] = useState(false);
   const sparkPoints = useMemo(() => buildSparklinePoints(items, sparkPeriod), [items, sparkPeriod]);
 
+  // Animated counting total
+  const [displayVal, setDisplayVal] = useState(0);
+  useEffect(() => {
+    const anim = new Animated.Value(0);
+    const id = anim.addListener(({ value }) => setDisplayVal(Math.round(value)));
+    Animated.timing(anim, {
+      toValue: totalValue,
+      duration: 700,
+      useNativeDriver: false,
+      easing: Easing.out(Easing.cubic),
+    }).start();
+    return () => anim.removeListener(id);
+  }, [totalValue]);
+
   // Build category breakdown sorted by value desc
   const categoryData = useMemo(() => {
     const map = new Map<string, number>();
@@ -394,7 +415,7 @@ function InsightCard({
       {/* ── Total header ──────────────────────────────── */}
       <Text style={styles.insightLabel}>You've documented so far</Text>
       <Text style={styles.insightValue} numberOfLines={1} adjustsFontSizeToFit>
-        {formatCurrency(totalValue || null)}
+        {totalValue > 0 ? formatCurrency(displayVal || 0) : formatCurrency(null)}
       </Text>
       <Text style={styles.insightTagline}>
         {totalValue > 0
@@ -727,17 +748,23 @@ function RoomBarsSection({
 
 // ─── Room card ────────────────────────────────────────────────────────────────
 
+const RING_SIZE = 80;
+const RING_R = 34;
+const RING_CIRC = 2 * Math.PI * RING_R;
+
 function RoomCard({
   item,
   itemCount,
   totalValue,
   maxValue,
+  completedCount,
   colors,
 }: {
   item: InventoryRoom;
   itemCount: number;
   totalValue: number;
   maxValue: number;
+  completedCount: number;
   colors: ReturnType<typeof import("@/hooks/useColors").useColors>;
 }) {
   const handlePress = async () => {
@@ -749,6 +776,8 @@ function RoomCard({
   };
 
   const pct = maxValue > 0 ? Math.min(totalValue / maxValue, 1) : 0;
+  const completionPct = itemCount > 0 ? Math.min(completedCount / itemCount, 1) : 0;
+  const ringOffset = RING_CIRC * (1 - completionPct);
 
   return (
     <Pressable
@@ -764,26 +793,61 @@ function RoomCard({
       ]}
     >
       <View style={styles.cardLeft}>
-        {item.cover_photo_url ? (
-          <Image
-            source={{ uri: item.cover_photo_url }}
-            style={styles.roomThumb}
-            contentFit="cover"
-          />
-        ) : (
-          <View
-            style={[
-              styles.roomThumbPlaceholder,
-              { backgroundColor: colors.secondary },
-            ]}
+        {/* Completion ring wrapping the thumbnail */}
+        <View style={styles.roomThumbWrap}>
+          <Svg
+            width={RING_SIZE}
+            height={RING_SIZE}
+            style={StyleSheet.absoluteFillObject}
           >
-            <Feather
-              name={roomIcon(item.room_type) as any}
-              size={20}
-              color={colors.primary}
+            {/* Track */}
+            <Circle
+              cx={RING_SIZE / 2}
+              cy={RING_SIZE / 2}
+              r={RING_R}
+              fill="none"
+              stroke={BRAND_BORDER}
+              strokeWidth={3}
             />
-          </View>
-        )}
+            {/* Progress */}
+            {completionPct > 0 && (
+              <Circle
+                cx={RING_SIZE / 2}
+                cy={RING_SIZE / 2}
+                r={RING_R}
+                fill="none"
+                stroke={BRAND_TEAL}
+                strokeWidth={3}
+                strokeLinecap="round"
+                strokeDasharray={`${RING_CIRC} ${RING_CIRC}`}
+                strokeDashoffset={ringOffset}
+                rotation={-90}
+                originX={RING_SIZE / 2}
+                originY={RING_SIZE / 2}
+              />
+            )}
+          </Svg>
+          {item.cover_photo_url ? (
+            <Image
+              source={{ uri: item.cover_photo_url }}
+              style={styles.roomThumb}
+              contentFit="cover"
+            />
+          ) : (
+            <View
+              style={[
+                styles.roomThumbPlaceholder,
+                { backgroundColor: colors.secondary },
+              ]}
+            >
+              <Feather
+                name={roomIcon(item.room_type) as any}
+                size={20}
+                color={colors.primary}
+              />
+            </View>
+          )}
+        </View>
       </View>
       <View style={styles.cardBody}>
         <View style={styles.cardRow}>
@@ -1120,6 +1184,17 @@ export default function PropertyDetailScreen() {
   const maxRoomValue = stats
     ? Math.max(...stats.roomStats.map((r) => r.totalValue), 1)
     : 1;
+
+  // Per-room completion: items that have both a photo and a value
+  const completionMap = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const item of items ?? []) {
+      if (item.room_id && hasPhoto(item) && hasValue(item)) {
+        map.set(item.room_id, (map.get(item.room_id) ?? 0) + 1);
+      }
+    }
+    return map;
+  }, [items]);
 
   const isLoading = roomsLoading || itemsLoading;
 
@@ -1539,6 +1614,7 @@ export default function PropertyDetailScreen() {
                 itemCount={rs.itemCount}
                 totalValue={rs.totalValue}
                 maxValue={maxRoomValue}
+                completedCount={completionMap.get(rs.room.id) ?? 0}
                 colors={colors}
               />
             </View>
@@ -1762,7 +1838,13 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   cardLeft: {},
-  roomThumb: { width: 72, height: 72 },
+  roomThumbWrap: {
+    width: RING_SIZE,
+    height: RING_SIZE,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  roomThumb: { width: 72, height: 72, borderRadius: 6 },
   roomThumbPlaceholder: {
     width: 72,
     height: 72,
