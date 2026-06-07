@@ -1526,6 +1526,21 @@ function PropertySkeleton({
 
 // ─── Main screen ──────────────────────────────────────────────────────────────
 
+const ROOM_TYPE_OPTIONS = [
+  { label: "Living Room", value: "living_room" },
+  { label: "Bedroom",     value: "bedroom" },
+  { label: "Kitchen",     value: "kitchen" },
+  { label: "Bathroom",    value: "bathroom" },
+  { label: "Dining Room", value: "dining" },
+  { label: "Office",      value: "office" },
+  { label: "Garage",      value: "garage" },
+  { label: "Hallway",     value: "hallway" },
+  { label: "Utility",     value: "utility" },
+  { label: "Loft",        value: "loft" },
+  { label: "Garden",      value: "garden" },
+  { label: "Other",       value: "other" },
+];
+
 export default function PropertyDetailScreen() {
   const { id, name } = useLocalSearchParams<{ id: string; name: string }>();
   const { session } = useAuth();
@@ -1534,6 +1549,13 @@ export default function PropertyDetailScreen() {
   const queryClient = useQueryClient();
   const [coverModalVisible, setCoverModalVisible] = useState(false);
   const [coverPhotoUploading, setCoverPhotoUploading] = useState(false);
+
+  // Add-room sheet state
+  const [addRoomVisible, setAddRoomVisible] = useState(false);
+  const [addRoomName, setAddRoomName] = useState("");
+  const [addRoomType, setAddRoomType] = useState<string | null>(null);
+  const [addRoomSaving, setAddRoomSaving] = useState(false);
+  const [addRoomError, setAddRoomError] = useState<string | null>(null);
   // Optimistic local state — holds the 1-hr signed displayUrl right after upload
   // so the hero shows immediately without waiting for a query refetch + URL resolution.
   const [localCoverUrl, setLocalCoverUrl] = useState<string | null>(null);
@@ -1565,6 +1587,9 @@ export default function PropertyDetailScreen() {
       return (data ?? []) as InventoryRoom[];
     },
     enabled: !!session && !!id,
+    // Always refetch when screen remounts (e.g. back-navigation) so room list
+    // and cover images are current; stale cache is shown while refetching.
+    staleTime: 0,
   });
 
   const { data: items, isLoading: itemsLoading } = useQuery({
@@ -1634,11 +1659,13 @@ export default function PropertyDetailScreen() {
     ? Math.max(...stats.roomStats.map((r) => r.totalValue), 1)
     : 1;
 
-  // Per-room completion: items that have both a photo and a value
+  // Per-room completion: items that have a photo are considered "documented".
+  // Value is NOT required — the ring should reach 100% once everything is
+  // photographed, which is the primary insurance-readiness signal.
   const completionMap = useMemo(() => {
     const map = new Map<string, number>();
     for (const item of items ?? []) {
-      if (item.room_id && hasPhoto(item) && hasValue(item)) {
+      if (item.room_id && hasPhoto(item)) {
         map.set(item.room_id, (map.get(item.room_id) ?? 0) + 1);
       }
     }
@@ -1652,11 +1679,57 @@ export default function PropertyDetailScreen() {
   const signedCoverUrl = useSignedUrl(property?.property_cover_image_url);
 
   // Batch-resolve room thumbnail paths → signed URLs in one round-trip.
+  // Derived from `rooms` (not `stats`) so URLs start resolving as soon as
+  // rooms load — before items have finished loading (which stats requires).
+  // This prevents the blank-thumbnail flash when navigating back.
   const roomCoverPaths = useMemo(
-    () => (stats?.roomStats ?? []).map((rs) => rs.room.cover_photo_url ?? null),
-    [stats],
+    () => (rooms ?? []).map((r) => r.cover_photo_url ?? null),
+    [rooms],
   );
   const roomCoverSignedUrls = useSignedUrls(roomCoverPaths);
+
+  // Map room.id → resolved signed URL, for clean O(1) lookup in renderItem.
+  const roomSignedUrlById = useMemo(() => {
+    const map = new Map<string, string | null>();
+    for (const r of rooms ?? []) {
+      const path = r.cover_photo_url;
+      map.set(r.id, path ? (roomCoverSignedUrls.get(path) ?? null) : null);
+    }
+    return map;
+  }, [rooms, roomCoverSignedUrls]);
+
+  const handleAddRoom = async () => {
+    const trimmed = addRoomName.trim();
+    if (!trimmed) {
+      setAddRoomError("Room name is required.");
+      return;
+    }
+    if (!session?.user.id) return;
+    setAddRoomError(null);
+    setAddRoomSaving(true);
+    try {
+      const { error } = await supabase.from("inventory_rooms").insert({
+        file_id: id,
+        user_id: session.user.id,
+        name: trimmed,
+        room_type: addRoomType,
+        sort_order: (rooms?.length ?? 0) + 1,
+      });
+      if (error) {
+        setAddRoomError(error.message);
+        return;
+      }
+      await queryClient.invalidateQueries({ queryKey: ["rooms", id] });
+      setAddRoomVisible(false);
+      setAddRoomName("");
+      setAddRoomType(null);
+      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    } catch (err) {
+      setAddRoomError(err instanceof Error ? err.message : "Failed to create room.");
+    } finally {
+      setAddRoomSaving(false);
+    }
+  };
 
   const saveCoverAmount = async (value: number | null) => {
     const { error } = await supabase
@@ -1915,10 +1988,37 @@ export default function PropertyDetailScreen() {
           </Pressable>
         </View>
 
-        {/* 4 — Rooms heading */}
-        <Text style={[styles.sectionHeading, { color: colors.foreground }]}>
-          Rooms
-        </Text>
+        {/* 4 — Rooms heading + add-room button */}
+        <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
+          <Text style={[styles.sectionHeading, { color: colors.foreground }]}>
+            Rooms
+          </Text>
+          <Pressable
+            onPress={() => {
+              setAddRoomName("");
+              setAddRoomType(null);
+              setAddRoomError(null);
+              setAddRoomVisible(true);
+            }}
+            hitSlop={10}
+            style={({ pressed }) => ({
+              flexDirection: "row",
+              alignItems: "center",
+              gap: 5,
+              paddingHorizontal: 12,
+              paddingVertical: 6,
+              borderRadius: 20,
+              borderWidth: 1,
+              borderColor: colors.border,
+              backgroundColor: pressed ? colors.secondary : colors.card,
+            })}
+          >
+            <Feather name="plus" size={14} color={colors.primary} />
+            <Text style={{ fontSize: 13, fontFamily: "Inter_500Medium", color: colors.primary }}>
+              Add room
+            </Text>
+          </Pressable>
+        </View>
       </View>
       </>
     );
@@ -2092,9 +2192,7 @@ export default function PropertyDetailScreen() {
                 maxValue={maxRoomValue}
                 completedCount={completionMap.get(rs.room.id) ?? 0}
                 colors={colors}
-                resolvedCoverUrl={
-                  roomCoverSignedUrls.get(rs.room.cover_photo_url ?? "") ?? null
-                }
+                resolvedCoverUrl={roomSignedUrlById.get(rs.room.id) ?? null}
               />
             </View>
           )}
@@ -2129,6 +2227,132 @@ export default function PropertyDetailScreen() {
         onSave={saveCoverAmount}
         colors={colors}
       />
+
+      {/* ── Add Room sheet ────────────────────────────────────────────────── */}
+      <Modal
+        visible={addRoomVisible}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setAddRoomVisible(false)}
+      >
+        <Pressable
+          style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.45)" }}
+          onPress={() => !addRoomSaving && setAddRoomVisible(false)}
+        />
+        <KeyboardAvoidingView
+          behavior={Platform.OS === "ios" ? "padding" : "height"}
+          style={{ position: "absolute", bottom: 0, left: 0, right: 0 }}
+        >
+          <View
+            style={{
+              backgroundColor: colors.card,
+              borderTopLeftRadius: 20,
+              borderTopRightRadius: 20,
+              paddingHorizontal: 20,
+              paddingTop: 16,
+              paddingBottom: insets.bottom + 20,
+              gap: 16,
+            }}
+          >
+            {/* Handle */}
+            <View style={{ alignItems: "center" }}>
+              <View style={{ width: 36, height: 4, borderRadius: 2, backgroundColor: colors.border }} />
+            </View>
+
+            {/* Title row */}
+            <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
+              <Text style={{ fontSize: 18, fontFamily: "Inter_700Bold", color: colors.foreground }}>
+                Add a room
+              </Text>
+              <Pressable onPress={() => setAddRoomVisible(false)} hitSlop={12} disabled={addRoomSaving}>
+                <Feather name="x" size={20} color={colors.mutedForeground} />
+              </Pressable>
+            </View>
+
+            {/* Room name */}
+            <View style={{ gap: 6 }}>
+              <Text style={{ fontSize: 12, fontFamily: "Inter_500Medium", color: colors.mutedForeground, letterSpacing: 0.3 }}>
+                ROOM NAME
+              </Text>
+              <TextInput
+                value={addRoomName}
+                onChangeText={(t) => { setAddRoomName(t); setAddRoomError(null); }}
+                placeholder="e.g. Master Bedroom"
+                placeholderTextColor={colors.mutedForeground}
+                autoFocus
+                returnKeyType="done"
+                style={{
+                  borderWidth: 1,
+                  borderColor: addRoomError ? "#B91C1C" : colors.border,
+                  borderRadius: colors.radius,
+                  paddingHorizontal: 14,
+                  paddingVertical: 12,
+                  fontSize: 16,
+                  fontFamily: "Inter_400Regular",
+                  color: colors.foreground,
+                  backgroundColor: colors.background,
+                }}
+              />
+              {addRoomError && (
+                <Text style={{ fontSize: 12, color: "#B91C1C", fontFamily: "Inter_400Regular" }}>
+                  {addRoomError}
+                </Text>
+              )}
+            </View>
+
+            {/* Room type picker */}
+            <View style={{ gap: 8 }}>
+              <Text style={{ fontSize: 12, fontFamily: "Inter_500Medium", color: colors.mutedForeground, letterSpacing: 0.3 }}>
+                ROOM TYPE (optional)
+              </Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginHorizontal: -20 }} contentContainerStyle={{ paddingHorizontal: 20, gap: 8 }}>
+                {ROOM_TYPE_OPTIONS.map((opt) => {
+                  const active = addRoomType === opt.value;
+                  return (
+                    <Pressable
+                      key={opt.value}
+                      onPress={() => setAddRoomType(active ? null : opt.value)}
+                      style={{
+                        paddingHorizontal: 14,
+                        paddingVertical: 7,
+                        borderRadius: 20,
+                        borderWidth: 1,
+                        borderColor: active ? BRAND_TEAL : colors.border,
+                        backgroundColor: active ? "#E8F5F3" : colors.card,
+                      }}
+                    >
+                      <Text style={{ fontSize: 13, fontFamily: "Inter_500Medium", color: active ? BRAND_DARK : colors.foreground }}>
+                        {opt.label}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </ScrollView>
+            </View>
+
+            {/* Create button */}
+            <Pressable
+              onPress={handleAddRoom}
+              disabled={addRoomSaving || !addRoomName.trim()}
+              style={({ pressed }) => ({
+                paddingVertical: 14,
+                borderRadius: colors.radius,
+                backgroundColor: BRAND_TEAL,
+                alignItems: "center",
+                opacity: pressed || addRoomSaving || !addRoomName.trim() ? 0.6 : 1,
+              })}
+            >
+              {addRoomSaving ? (
+                <ActivityIndicator size="small" color="#fff" />
+              ) : (
+                <Text style={{ fontSize: 15, fontFamily: "Inter_600SemiBold", color: "#fff" }}>
+                  Create room
+                </Text>
+              )}
+            </Pressable>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
     </>
   );
 }
