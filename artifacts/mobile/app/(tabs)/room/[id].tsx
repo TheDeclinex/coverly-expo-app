@@ -4,10 +4,11 @@ import * as Haptics from "expo-haptics";
 import { Image } from "expo-image";
 import { Stack, router, useLocalSearchParams } from "expo-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import React, { useState } from "react";
+import React, { useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
+  Animated,
   FlatList,
   Platform,
   Pressable,
@@ -313,6 +314,14 @@ export default function ItemsScreen() {
 
   const [coverUploading, setCoverUploading] = useState(false);
 
+  // Parallax hero — scrollY drives image translateY 0→-40 as user scrolls down
+  const scrollY = useRef(new Animated.Value(0)).current;
+  const heroTranslateY = scrollY.interpolate({
+    inputRange: [0, COVER_H],
+    outputRange: [0, -40],
+    extrapolate: "clamp",
+  });
+
   const {
     data: items,
     isLoading,
@@ -411,11 +420,23 @@ export default function ItemsScreen() {
   const renderRoomCover = () => (
     <View style={[styles.coverContainer, { backgroundColor: colors.secondary }]}>
       {room?.cover_photo_url ? (
-        <Image
-          source={{ uri: room.cover_photo_url }}
-          style={StyleSheet.absoluteFill}
-          contentFit="cover"
-        />
+        /* Parallax image — taller than container so it can shift up */
+        <Animated.View
+          style={{
+            position: "absolute",
+            top: 0,
+            left: 0,
+            right: 0,
+            height: COVER_H + 40,
+            transform: [{ translateY: heroTranslateY }],
+          }}
+        >
+          <Image
+            source={{ uri: room.cover_photo_url }}
+            style={StyleSheet.absoluteFill}
+            contentFit="cover"
+          />
+        </Animated.View>
       ) : (
         <View style={styles.coverPlaceholder}>
           <Feather
@@ -468,7 +489,7 @@ export default function ItemsScreen() {
         />
       ) : (
         <>
-          <FlatList
+          <Animated.FlatList
             data={items}
             keyExtractor={(item) => item.id}
             renderItem={({ item }) => <ItemCard item={item} colors={colors} />}
@@ -480,6 +501,11 @@ export default function ItemsScreen() {
                 ...(Platform.OS === "web" ? { paddingTop: 0 } : {}),
               },
             ]}
+            onScroll={Animated.event(
+              [{ nativeEvent: { contentOffset: { y: scrollY } } }],
+              { useNativeDriver: false }
+            )}
+            scrollEventThrottle={16}
             refreshControl={
               <RefreshControl
                 refreshing={isRefetching}

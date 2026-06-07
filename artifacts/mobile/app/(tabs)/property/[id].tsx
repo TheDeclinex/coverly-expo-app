@@ -770,10 +770,16 @@ const RING_SIZE = 88;
 const RING_RECT_INSET = 4;                              // path centre 4 px from container edge
 const RING_RECT_SIDE = RING_SIZE - 2 * RING_RECT_INSET; // 80 px
 const RING_RECT_RX = 10;                                // outer corner radius (thumbnail rx=6 + gap)
+// Perimeter: 4 straight sides + one full circle of arcs
 const RING_CIRC =
-  2 * (RING_RECT_SIDE - 2 * RING_RECT_RX) +            // straight sides (×2 for top+bottom & left+right)
-  2 * (RING_RECT_SIDE - 2 * RING_RECT_RX) +
+  4 * (RING_RECT_SIDE - 2 * RING_RECT_RX) +            // four straight segments (square, so all equal)
   2 * Math.PI * RING_RECT_RX;                           // four quarter-circles = one full circle ≈ 303 px
+// Explicit path starting at top-center (12 o'clock) going clockwise — gives precise control
+// over where the progress arc starts and ends.
+// Coords: I=4 S=80 R=10 → top-center=(44,4)
+const RING_PATH =
+  "M 44 4 L 74 4 A 10 10 0 0 1 84 14 L 84 74 A 10 10 0 0 1 74 84 " +
+  "L 14 84 A 10 10 0 0 1 4 74 L 4 14 A 10 10 0 0 1 14 4 L 44 4";
 
 function RoomCard({
   item,
@@ -849,27 +855,18 @@ function RoomCard({
             height={RING_SIZE}
             style={StyleSheet.absoluteFillObject}
           >
-            {/* Track — rounded-rect shape matches the thumbnail */}
-            <Rect
-              x={RING_RECT_INSET}
-              y={RING_RECT_INSET}
-              width={RING_RECT_SIDE}
-              height={RING_RECT_SIDE}
-              rx={RING_RECT_RX}
-              ry={RING_RECT_RX}
+            {/* Track — full rounded-rect, path starts at top-center */}
+            <Path
+              d={RING_PATH}
               fill="none"
               stroke={BRAND_BORDER}
               strokeWidth={4}
+              strokeLinecap="round"
             />
-            {/* Progress */}
+            {/* Progress — same path, dashed to show only completionPct */}
             {completionPct > 0 && (
-              <Rect
-                x={RING_RECT_INSET}
-                y={RING_RECT_INSET}
-                width={RING_RECT_SIDE}
-                height={RING_RECT_SIDE}
-                rx={RING_RECT_RX}
-                ry={RING_RECT_RX}
+              <Path
+                d={RING_PATH}
                 fill="none"
                 stroke={BRAND_TEAL}
                 strokeWidth={4}
