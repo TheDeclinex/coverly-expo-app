@@ -198,15 +198,17 @@ export default function LoginScreen() {
     setError(null);
     // Sign-up flow notes:
     // 1. Supabase Auth sends a confirmation email to the user's address.
-    // 2. `emailRedirectTo` controls where the user lands after clicking the link
-    //    in that email — it must be an allowlisted URL in the spike Supabase project
-    //    (Authentication → URL Configuration → Redirect URLs).
-    // 3. Branded/customised email templates require SMTP and template setup in the
-    //    spike Supabase project dashboard, not in Expo.
+    // 2. `emailRedirectTo` would control where the user lands after clicking the
+    //    link, but it must be allowlisted in Supabase → Authentication → URL
+    //    Configuration → Redirect URLs first.  Omitting it here uses Supabase's
+    //    default redirect, which works fine for the current dev project.
+    //    Re-add it (pointing to coverly.nz/auth/verified) once the production
+    //    Supabase project has that URL allowlisted.
+    // 3. Branded email templates require SMTP + template setup in the Supabase
+    //    dashboard, not in Expo.
     const { data, error: authError } = await supabase.auth.signUp({
       email: email.trim(),
       password,
-      options: { emailRedirectTo: "https://coverly.nz/auth/verified" },
     });
     setLoading(false);
     if (authError) {
