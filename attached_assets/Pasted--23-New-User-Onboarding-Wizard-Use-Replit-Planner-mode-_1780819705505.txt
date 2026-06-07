@@ -1,0 +1,305 @@
+#23 — New User Onboarding Wizard
+
+Use Replit Planner mode first.
+
+Build a first-time user onboarding wizard for the Expo/React Native Coverly mobile app.
+
+Goal:
+New users should not land cold on an empty home screen. After signup/login, if they have not completed onboarding, route them to a 4-step onboarding flow that introduces Coverly and helps them create their first property. Returning users should skip onboarding and go straight into the app.
+
+Important constraints:
+
+* Follow the existing mobile app architecture and naming conventions.
+* Do not introduce schema drift.
+* Do not create new Supabase tables.
+* Use the existing Supabase client and existing `inventory_files` insert conventions.
+* Respect the current Expo Router structure.
+* Do not break existing auth/session handling.
+* Do not hard-code dev/prod URLs, Supabase keys, or environment-specific values.
+* This needs to remain clean for eventual production migration.
+
+Relevant files:
+
+* `artifacts/mobile/app/_layout.tsx`
+* `artifacts/mobile/app/(tabs)/_layout.tsx`
+* `artifacts/mobile/context/AuthContext.tsx`
+* `artifacts/mobile/app/login.tsx`
+* `artifacts/mobile/app/(tabs)/add-property.tsx`
+* `artifacts/mobile/app/(tabs)/index.tsx`
+* `artifacts/mobile/constants/colors.ts`
+* `artifacts/mobile/hooks/useColors.ts`
+
+Implementation requirements:
+
+1. Extend `AuthContext`
+
+Add onboarding state to the auth context:
+
+```ts
+hasSeenOnboarding: boolean | null;
+markOnboardingComplete: () => Promise<void>;
+```
+
+Behaviour:
+
+* `hasSeenOnboarding` is `null` while loading.
+* Once a session is available, read:
+
+```ts
+AsyncStorage.getItem(`onboarding:${user.id}`)
+```
+
+* If the key exists, set `hasSeenOnboarding` to `true`.
+* If the key does not exist, set `hasSeenOnboarding` to `false`.
+* `markOnboardingComplete()` should write the same key and update state to `true`.
+* Keep this user-specific, not global device-wide.
+* Do not cause a flash of the wrong screen while the onboarding flag is loading.
+
+2. Register onboarding route
+
+Add an onboarding route to the root stack:
+
+```tsx
+<Stack.Screen name="onboarding" />
+```
+
+In the root navigation logic:
+
+* If there is no session, keep the existing login flow.
+* If session exists and `hasSeenOnboarding === null`, show the existing loading/splash state.
+* If session exists and `hasSeenOnboarding === false`, redirect to `/onboarding`.
+* If session exists and `hasSeenOnboarding === true`, continue into the normal app.
+
+Do not redirect a user away from `/onboarding` while they are actively completing it.
+
+3. Create onboarding screen
+
+Create:
+
+```ts
+artifacts/mobile/app/onboarding.tsx
+```
+
+Use a local `step` state from `0` to `3`.
+
+Use Reanimated for:
+
+* horizontal slide transition between steps
+* fade transition between steps
+* spring entrance animations
+* staggered feature row animations
+* celebration checkmark scale animation
+
+Preferred transition:
+
+* keyed `Animated.View` per step
+* entering: `FadeIn` + `SlideInRight`
+* exiting: `FadeOut` + `SlideOutLeft`
+
+Use haptic feedback on:
+
+* step advance
+* successful property creation
+* final completion CTA
+
+If haptics dependency already exists, use it. If not, add the smallest appropriate Expo haptics dependency and keep usage isolated.
+
+4. Step 0 — Welcome hero
+
+Full-screen dark background matching the login aesthetic:
+
+```ts
+#111C2A
+```
+
+Content:
+
+* animated shield icon
+* Coverly wordmark
+* tagline: `Know what you own`
+* short body copy explaining that Coverly helps users build an insurance-ready home inventory
+* primary teal gradient button: `Get started →`
+* text link: `Skip intro`
+
+Button behaviour:
+
+* `Get started →` advances to Step 1
+* `Skip intro` jumps to Step 2 only
+* Do not mark onboarding complete from this skip link
+
+5. Step 1 — Feature highlights
+
+Light/card-background screen.
+
+Heading:
+
+```txt
+What Coverly does
+```
+
+Show three stagger-animated feature rows:
+
+Row 1:
+
+* label: `AI Scanning`
+* description: `Scan a room photo and let Coverly identify items for you.`
+
+Row 2:
+
+* label: `Room by room`
+* description: `Organise your inventory by property, room, and item.`
+
+Row 3:
+
+* label: `Replacement pricing`
+* description: `Estimate replacement values as your inventory grows.`
+* add amber pill badge: `COMING SOON`
+
+Animation:
+
+* rows enter with `withDelay` and `withSpring`
+* delays: `0ms`, `100ms`, `200ms`
+
+Bottom:
+
+* progress dots
+* primary button: `Next →`
+* text link: `Skip intro`
+
+Button behaviour:
+
+* `Next →` advances to Step 2
+* `Skip intro` jumps to Step 2
+* Do not mark onboarding complete from this skip link
+
+6. Step 2 — Create your first property
+
+Inline form.
+
+Fields:
+
+* auto-focused property name text input
+* horizontal scroll row of property type chips:
+
+  * `Main home`
+  * `Rental`
+  * `Holiday`
+  * `Storage`
+  * `Other`
+
+Create button:
+
+```txt
+Create property →
+```
+
+Button state:
+
+* disabled until property name is non-empty
+* show loading state while creating
+* prevent duplicate submits
+
+Supabase insert:
+Use the existing mobile app Supabase client.
+
+Insert into `inventory_files` using the existing schema conventions. Minimum insert:
+
+```ts
+{
+  user_id: user.id,
+  name: trimmedName,
+  status: "active"
+}
+```
+
+Property type:
+
+* If the existing `inventory_files` table already has a property type column used elsewhere, save the selected type there.
+* If no compatible column exists, do not add a migration and do not invent a new field. Keep selected type UI-only for this version.
+
+On success:
+
+* store the new property id in local state
+* haptic success feedback
+* advance to Step 3
+
+On error:
+
+* show an inline error message
+* do not advance
+* keep the form values intact
+
+7. Step 3 — Celebration screen
+
+Teal gradient background.
+
+Content:
+
+* animated checkmark circle scaling from `0` to `1` with spring
+* heading: `You're all set`
+* show the created property name in a white pill
+* body: `You're ready to start building your inventory.`
+* single CTA button:
+
+```txt
+Let's go →
+```
+
+On press:
+
+* call `markOnboardingComplete()`
+* navigate to the newly created property screen
+
+Do not navigate to the literal string `"/(tabs)/property/[id]"`.
+
+Use the correct existing Expo Router params pattern, likely:
+
+```ts
+router.replace({
+  pathname: "/(tabs)/property/[id]",
+  params: { id: newPropertyId },
+});
+```
+
+If the app already uses a different working property navigation helper elsewhere, reuse that pattern.
+
+8. Returning user behaviour
+
+After onboarding completion:
+
+* user should never see onboarding again on that account/device unless AsyncStorage is cleared
+* app should route normally into the main tab flow
+* do not show onboarding for existing users who already have the AsyncStorage key
+
+9. Visual style
+
+Match Coverly’s existing brand system:
+
+* use `constants/colors.ts`
+* use `useColors.ts` where appropriate
+* dark welcome screen should match the login aesthetic
+* use modern, premium spacing and cards
+* avoid overly green screens; use teal carefully
+* keep components mobile-first
+
+10. Out of scope
+
+Do not implement:
+
+* replacement pricing itself
+* tutorial overlays inside app screens
+* push notification permission prompts
+* new database tables
+* new entitlement/billing logic
+* new property detail schema unless already present
+
+Done looks like:
+
+* A fresh signup/login is routed to onboarding before the main app.
+* Step 0 and Step 1 introduce the product with polished animation.
+* Skip links on Steps 0 and 1 jump to property creation, not out of onboarding.
+* Step 2 creates a real property in Supabase.
+* Step 3 celebrates success and routes to that property.
+* Returning users skip onboarding.
+* No auth flash, redirect loop, duplicate property creation, or broken tab routing.
+* TypeScript passes.
