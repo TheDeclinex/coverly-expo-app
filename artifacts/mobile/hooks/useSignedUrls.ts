@@ -5,7 +5,7 @@
  * so images keep loading without a visible reload.
  */
 
-import { useMemo } from "react";
+import { useEffect, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 
 import {
@@ -21,6 +21,12 @@ const GC_TIME_MS    = 60 * 60 * 1000;
 /**
  * Resolves a single storage path or legacy signed URL to a display URL.
  * Returns undefined while loading, null on failure, or the signed URL string.
+ *
+ * Handles all cases:
+ *   - null/undefined  → null (no query fired)
+ *   - file://, ph://, content://, blob:  → pass-through (local pre-save UI only)
+ *   - https://        → pass-through (legacy DB value)
+ *   - storage path    → createSignedUrl from inventory-photos bucket
  */
 export function useSignedUrl(
   pathOrUrl: string | null | undefined,
@@ -37,15 +43,16 @@ export function useSignedUrl(
 
 /**
  * Batch-resolves an array of storage paths / legacy URLs to signed display URLs.
- * Uses createSignedUrls() — one round-trip for all paths regardless of array length.
  *
- * Returns a Map<originalPathOrUrl, signedUrl>.
+ * Returns a Map<originalPathOrUrl, resolvedUrl>.
  * Re-fetches 5 min before the 1-hour expiry.
+ *
+ * Handles all URI types (null, local device URI, legacy https://, storage path).
  */
 export function useSignedUrls(
   pathsOrUrls: (string | null | undefined)[],
 ): Map<string, string> {
-  // Stable, de-duped, sorted key so the query identity doesn't change on re-order
+  // Stable, de-duped, sorted key so the query identity doesn't change on re-order.
   const stableKey = useMemo(() => {
     const unique = [...new Set(pathsOrUrls.filter((p): p is string => !!p))];
     return unique.sort().join("\n");
@@ -60,6 +67,16 @@ export function useSignedUrls(
     staleTime: STALE_TIME_MS,
     gcTime: GC_TIME_MS,
   });
+
+  // Log resolution results when the query settles.
+  useEffect(() => {
+    if (!data || data.size === 0) return;
+    const requested = stableKey.split("\n").filter(Boolean);
+    const sample = requested[0] ? `| sample: ${requested[0].slice(0, 50)}` : "";
+    console.log(
+      `[useSignedUrls] resolved ${data.size}/${requested.length} paths ${sample}`,
+    );
+  }, [data, stableKey]);
 
   return data ?? new Map<string, string>();
 }

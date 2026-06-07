@@ -4,7 +4,7 @@ import * as Haptics from "expo-haptics";
 import { Image } from "expo-image";
 import { Stack, router, useLocalSearchParams } from "expo-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import React, { useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -27,6 +27,7 @@ import { useAuth } from "@/context/AuthContext";
 import { useColors } from "@/hooks/useColors";
 import { formatCurrency } from "@/lib/inventory-mappers";
 import { useSignedUrl, useSignedUrls } from "@/hooks/useSignedUrls";
+import { isStoragePath } from "@/lib/storage-helpers";
 import { uploadCoverPhoto } from "@/lib/photo-upload";
 import { supabase } from "@/lib/supabase";
 import type { InventoryItem, InventoryRoom } from "@/types";
@@ -124,9 +125,36 @@ function ItemCard({
   /** Pre-resolved signed URL from the parent's batch useSignedUrls() call. */
   resolvedImageUrl?: string | null;
 }) {
-  // Do NOT fall back to item.image_url/photo_url — those may be raw storage paths
-  // that expo-image cannot load. resolvedImageUrl is already the signed URL (or null
-  // while loading), so we show the placeholder until the signed URL arrives.
+  // The single source of truth for this item's image reference in the DB.
+  // image_url takes priority; photo_url is the legacy fallback column.
+  const rawImageRef = item.image_url ?? item.photo_url ?? null;
+
+  const imageRefType = !rawImageRef
+    ? "null"
+    : isStoragePath(rawImageRef)
+      ? "storage-path"
+      : rawImageRef.startsWith("http")
+        ? "legacy-url"
+        : "local-uri";
+
+  // Structured diagnostic log: item id, raw DB values, detected type, resolved URL status.
+  useEffect(() => {
+    if (__DEV__) {
+      console.log("[ItemCard]", {
+        id: item.id.slice(-8),
+        raw_image_url: item.image_url ? item.image_url.slice(0, 60) : null,
+        raw_photo_url: item.photo_url ? item.photo_url.slice(0, 60) : null,
+        rawImageRef: rawImageRef ? rawImageRef.slice(0, 60) : null,
+        type: imageRefType,
+        resolved_present: !!resolvedImageUrl,
+        resolved_url: resolvedImageUrl ? resolvedImageUrl.slice(0, 70) : null,
+      });
+    }
+  }, [item.id, rawImageRef, imageRefType, resolvedImageUrl]);
+
+  // Do NOT fall back to rawImageRef — it may be a raw storage path that expo-image
+  // cannot load. resolvedImageUrl is the signed URL (or null while loading).
+  // ExpandableImage shows the placeholder until the signed URL arrives.
   const imageUri = resolvedImageUrl ?? null;
 
   const rawPin = item.image_pin as Record<string, unknown> | null | undefined;

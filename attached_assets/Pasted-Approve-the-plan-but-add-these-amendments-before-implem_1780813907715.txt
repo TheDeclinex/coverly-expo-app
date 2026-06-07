@@ -1,0 +1,56 @@
+Approve the plan, but add these amendments before implementation:
+
+1. Do not only add observability. Fix the actual render state issue.
+
+2. In ExpandableImage, when imageUri changes from null/raw/failed value to a valid signed URL, force the image component to remount:
+   - Use key={imageUri}
+   - Also reset local error/loading state in a useEffect when imageUri changes.
+   - Only render <Image> when imageUri is a real usable URI.
+   - Otherwise render the placeholder.
+
+3. Ensure expo-image never receives a raw Supabase storage path.
+   Allowed image values passed to <Image>:
+   - https:// signed/public URL
+   - valid local file:// URI only in pre-save scan review/edit flows
+   Not allowed:
+   - userId/scan-xxx.jpg
+   - inventory-photos/userId/scan-xxx.jpg unless first resolved to signed URL
+
+4. Fix the ItemCard fallback logic fully:
+   - Compute rawImageRef = item.image_url ?? item.photo_url ?? null
+   - resolvedImageUrl should be signedUrlMap.get(rawImageRef), not only map.get(item.image_url)
+   - If image_url is null but photo_url has a valid path, it must still display.
+
+5. In useSignedUrls, support these cases explicitly:
+   - null/empty → null
+   - file://, ph://, content://, blob: → do not sign; only valid in local pre-save UI
+   - https:// → treat as legacy URL and return as-is, but log as legacy URL
+   - storage path → create signed URL from inventory-photos bucket
+
+6. Verify actual storage object existence:
+   - For at least one failing item, log the DB path.
+   - Create a signed URL.
+   - Fetch/HEAD the signed URL or otherwise verify the object returns 200 and non-zero bytes.
+   - If signed URL is generated but GET returns 404/403, the stored path is wrong or upload failed.
+
+7. After scan save, invalidate/refetch the exact room item query used by room/[id].tsx.
+   Also update or clear any local/cache-first item cache if present, so the room list does not render stale item records without image_url/photo_url.
+
+8. Add logs, but keep them structured and temporary:
+   - item id
+   - raw image_url
+   - raw photo_url
+   - selected rawImageRef
+   - detected type
+   - resolved URL present true/false
+   - Image onLoad/onError
+
+Acceptance test must include:
+- Save scanned item.
+- Navigate to room.
+- Thumbnail appears.
+- Kill/reopen Expo.
+- Thumbnail still appears.
+- Open item detail.
+- Image appears.
+- Confirm Expo Image never receives a raw storage path.

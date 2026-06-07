@@ -2,11 +2,13 @@
  * Supabase Storage helpers for the inventory-photos bucket.
  *
  * Architecture:
- *   - New uploads store the object *path* (e.g. "userId/cover-123.jpg") in DB columns.
+ *   - New uploads store the object *path* (e.g. "userId/scan-xxx.jpg") in DB columns.
  *   - Display code calls getSignedDisplayUrl / getSignedDisplayUrls to get a fresh
  *     1-hour signed URL at render time.
  *   - Legacy records may contain a full https:// signed URL from before this change;
- *     those are returned as-is.
+ *     those are returned as-is (logged as legacy).
+ *   - Local device URIs (file://, ph://, content://, blob:) must NEVER be stored in
+ *     the DB. They are valid only in pre-save scan/edit UI flows.
  */
 
 import { supabase } from "@/lib/supabase";
@@ -20,27 +22,50 @@ export const INVENTORY_PHOTOS_BUCKET = "inventory-photos";
 export const SIGNED_URL_EXPIRY_SECS = 3600;
 
 /**
- * Returns true if `value` is a Supabase Storage object path rather than a full URL
- * or a local device URI.
+ * Returns true if `value` is a Supabase Storage object path (bare relative path).
  *
- * Storage paths are bare relative paths like "userId/cover-123.jpg".
- * Everything else is passed through as-is by the display helpers:
- *   - https:// / http://  → legacy signed URL or public URL
- *   - file:// / ph://     → iOS local device URI (freshly picked from camera/library)
- *   - content://          → Android content URI
+ * Excluded (not storage paths):
+ *   - https:// / http://     → legacy signed URL or public URL
+ *   - file:// / ph://        → iOS local device URI (freshly picked from camera/library)
+ *   - content://             → Android content URI
+ *   - blob:                  → browser/JS blob URI
  */
-export function isStoragePath(value: string | null | undefined): value is string {
+export function isStoragePath(value: string | null | undefined): boolean {
   if (!value) return false;
   if (value.startsWith("http://") || value.startsWith("https://")) return false;
-  if (value.startsWith("file://") || value.startsWith("ph://") || value.startsWith("content://")) return false;
+  if (
+    value.startsWith("file://") ||
+    value.startsWith("ph://") ||
+    value.startsWith("content://") ||
+    value.startsWith("blob:")
+  )
+    return false;
   return true;
 }
 
 /**
+ * Returns true if `value` is a URI that can be passed directly to expo-image.
+ * Raw Supabase storage paths (e.g. "userId/scan-xxx.jpg") are NOT displayable.
+ */
+export function isDisplayableUri(value: string | null | undefined): boolean {
+  if (!value) return false;
+  return (
+    value.startsWith("https://") ||
+    value.startsWith("http://") ||
+    value.startsWith("file://") ||
+    value.startsWith("ph://") ||
+    value.startsWith("content://") ||
+    value.startsWith("blob:")
+  );
+}
+
+/**
  * Resolve a stored value (storage path or legacy signed URL) to a display URL.
+ * Logs each case for diagnostics. In DEV, verifies the signed URL actually loads.
  *
- * - Storage path  → generate fresh SIGNED_URL_EXPIRY_SECS signed URL via createSignedUrl.
+ * - Storage path  → generate fresh signed URL via createSignedUrl.
  * - https:// URL  → return as-is (legacy; may expire ≤ 1 year from upload time).
+ * - Local URI     → return as-is (valid only in pre-save UI flows; not from DB).
  * - null/empty    → return null.
  */
 export async function getSignedDisplayUrl(
@@ -48,26 +73,55 @@ export async function getSignedDisplayUrl(
   pathOrUrl: string | null | undefined,
 ): Promise<string | null> {
   if (!pathOrUrl) return null;
-  if (!isStoragePath(pathOrUrl)) return pathOrUrl; // legacy full URL — pass through
 
+  // Legacy full URL or local device URI — pass through.
+  if (!isStoragePath(pathOrUrl)) {
+    if (pathOrUrl.startsWith("http")) {
+      console.log("[storage] legacy URL (pass-through):", pathOrUrl.slice(0, 70));
+    } else {
+      console.log("[storage] local device URI (pass-through):", pathOrUrl.slice(0, 50));
+    }
+    return pathOrUrl;
+  }
+
+  // Storage path — generate signed URL.
+  console.log("[storage] creating signed URL for path:", pathOrUrl.slice(0, 70));
   const { data, error } = await supabase.storage
     .from(bucket)
     .createSignedUrl(pathOrUrl, SIGNED_URL_EXPIRY_SECS);
 
   if (error || !data?.signedUrl) {
-    console.warn("[storage] createSignedUrl failed:", error?.message, "path:", pathOrUrl);
+    console.warn("[storage] createSignedUrl FAILED | path:", pathOrUrl, "| error:", error?.message);
     return null;
   }
-  console.log("[storage] signed URL generated for path:", pathOrUrl.slice(0, 40) + "...");
+
+  console.log("[storage] signed URL OK | path:", pathOrUrl.slice(0, 60));
+
+  // DEV-only: HEAD-fetch the signed URL to verify the object actually exists in storage.
+  if (__DEV__) {
+    fetch(data.signedUrl, { method: "HEAD" })
+      .then((r) => {
+        if (r.ok) {
+          console.log(`[storage] HEAD verify ✓ ${r.status} | path: ${pathOrUrl.slice(0, 50)}`);
+        } else {
+          console.warn(
+            `[storage] HEAD verify ✗ ${r.status} — object may not exist | path: ${pathOrUrl.slice(0, 50)}`,
+          );
+        }
+      })
+      .catch((e: unknown) =>
+        console.warn("[storage] HEAD check error:", e instanceof Error ? e.message : String(e)),
+      );
+  }
+
   return data.signedUrl;
 }
 
 /**
  * Batch-resolve an array of storage paths / legacy URLs to signed display URLs.
- * Uses individual createSignedUrl calls in parallel (proven API) rather than the
- * createSignedUrls batch endpoint, which can silently fail or return mismatched paths.
+ * Delegates to getSignedDisplayUrl for each entry so logging is consistent.
  *
- * Returns a Map<originalValue, signedUrl> for successful entries only.
+ * Returns a Map<originalValue, resolvedUrl> for successful entries only.
  */
 export async function getSignedDisplayUrls(
   bucket: string,
@@ -75,43 +129,24 @@ export async function getSignedDisplayUrls(
 ): Promise<Map<string, string>> {
   const result = new Map<string, string>();
 
-  const storagePaths: string[] = [];
+  const distinct = [
+    ...new Set(pathsOrUrls.filter((p): p is string => !!p)),
+  ];
 
-  for (const v of pathsOrUrls) {
-    if (!v) continue;
-    if (isStoragePath(v)) {
-      storagePaths.push(v);
-    } else {
-      // Legacy full URL — pass through as-is
-      result.set(v, v);
-    }
-  }
+  if (distinct.length === 0) return result;
 
-  if (storagePaths.length === 0) return result;
-
-  console.log("[storage] resolving", storagePaths.length, "storage path(s) to signed URLs");
-
-  // Use individual createSignedUrl calls in parallel — more reliable than the batch endpoint.
   const settled = await Promise.allSettled(
-    storagePaths.map(async (path) => {
-      const { data, error } = await supabase.storage
-        .from(bucket)
-        .createSignedUrl(path, SIGNED_URL_EXPIRY_SECS);
-      if (error || !data?.signedUrl) {
-        console.warn("[storage] failed to sign path:", path, error?.message);
-        return null;
-      }
-      return { path, signedUrl: data.signedUrl };
+    distinct.map(async (path) => {
+      const url = await getSignedDisplayUrl(bucket, path);
+      return url ? { path, url } : null;
     }),
   );
 
   for (const outcome of settled) {
     if (outcome.status === "fulfilled" && outcome.value) {
-      result.set(outcome.value.path, outcome.value.signedUrl);
+      result.set(outcome.value.path, outcome.value.url);
     }
   }
-
-  console.log("[storage] resolved", result.size - (pathsOrUrls.filter(v => v && !isStoragePath(v)).length), "storage path(s) successfully");
 
   return result;
 }

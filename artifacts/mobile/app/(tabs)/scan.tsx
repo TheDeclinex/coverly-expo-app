@@ -237,9 +237,15 @@ export default function ScanScreen() {
     });
 
   const invalidateRoomQueries = () => {
+    // Invalidate with the full key (matches room/[id].tsx query key exactly).
+    // Also use the 2-part prefix as a belt-and-suspenders fallback.
+    const userId = session?.user.id;
+    queryClient.invalidateQueries({ queryKey: ["items", selectedRoomId, userId] });
     queryClient.invalidateQueries({ queryKey: ["items", selectedRoomId] });
     queryClient.invalidateQueries({ queryKey: ["all-items"] });
     queryClient.invalidateQueries({ queryKey: ["property-items", selectedFileId] });
+    // Also invalidate signed-url cache so the new item's path gets a fresh signed URL.
+    queryClient.invalidateQueries({ queryKey: ["signed-urls"] });
   };
 
   const handleStartScan = async () => {

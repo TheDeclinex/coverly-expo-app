@@ -1,0 +1,55 @@
+Use Planner first. Do not make another isolated image fix until you have traced the full image lifecycle.
+
+Problem:
+In the Expo/React Native Coverly app, scan review thumbnails show correctly before save, and I can see an image URL/path in the Supabase database after save, but saved items in the room list often show a blank placeholder/pin icon instead of the image. This used to work.
+
+Goal:
+Make saved item images reliably display after save, app refresh, and navigation back into the room.
+
+Audit and fix the full lifecycle:
+
+1. Find where scan review images are created and displayed.
+2. Find where accepted scan items are saved.
+3. Find where item photos are uploaded to Supabase Storage.
+4. Find exactly what is stored in the inventory item row for the image:
+   - image_url
+   - imageUrl
+   - photo_url
+   - photoUrl
+   - storage_path
+   - any other related field
+5. Find where saved room items are fetched from Supabase.
+6. Find where saved item cards render their image thumbnail.
+7. Find any mapping layer between Supabase snake_case fields and app camelCase item fields.
+8. Find any local cache layer that may be returning stale item objects without image fields.
+
+Required behaviour:
+- Do not store temporary Expo local URIs such as file://, content://, or blob: as permanent item image URLs.
+- Prefer storing a stable Supabase Storage object path in the DB.
+- When displaying saved items, resolve that storage path into a fresh signed URL before rendering.
+- If the app currently stores a full Supabase signed URL, replace this with stable path-based handling where possible.
+- If the current DB column is image_url and no new column exists, either:
+  a) store the storage object path in image_url and clearly treat it as a path, or
+  b) add/use a dedicated image_path/storage_path only if the schema already supports it or the migration is included.
+- Ensure the room item list, item detail screen, and scan review saved-result flow all use the same image resolution helper.
+- Ensure both image_url and imageUrl are correctly mapped if both appear in the code.
+- Ensure the React Native image component receives { uri: resolvedUrl }, not a raw string.
+- Add defensive logging around image resolution:
+  item id, raw DB image value, detected type, resolved render URL success/failure.
+- Do not make the storage bucket public unless explicitly instructed.
+- Do not use 1-year signed URLs as the permanent stored DB value.
+
+Acceptance tests:
+1. Scan a photo.
+2. Accept/save detected items.
+3. Confirm DB row has a stable image reference.
+4. Navigate back to the room list.
+5. Saved item card shows the thumbnail.
+6. Kill/reopen the app or refresh Expo.
+7. Saved item card still shows the thumbnail.
+8. Open item detail.
+9. Item detail image shows.
+10. No placeholders appear when an image reference exists and the signed URL resolves.
+
+Before editing, report the current actual flow and identify the exact break point.
+Then make the smallest clean fix.
