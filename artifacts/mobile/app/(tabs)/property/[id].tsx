@@ -1743,6 +1743,7 @@ export default function PropertyDetailScreen() {
   };
 
   const handlePickPropertyCover = async () => {
+    if (coverPhotoUploading) return;
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (status !== "granted") {
       Alert.alert(
@@ -1769,21 +1770,34 @@ export default function PropertyDetailScreen() {
         Alert.alert("Upload failed", "Could not upload cover photo. Please try again.");
         return;
       }
-      // Show immediately via the 1-hr signed URL; store the durable path in the DB.
+      // Show immediately via the 1-hr signed URL while the DB write is in-flight.
       setLocalCoverUrl(uploaded.displayUrl);
-      const { error: updateError } = await supabase
+      const { data: updatedRows, error: updateError } = await supabase
         .from("inventory_files")
         .update({ property_cover_image_url: uploaded.path })
         .eq("id", id)
-        .eq("user_id", session.user.id);
+        .eq("user_id", session.user.id)
+        .select("id");
       if (updateError) {
-        // Revert optimistic update and surface the real error
+        console.error("[propertyCover] DB update error:", updateError);
         setLocalCoverUrl(null);
         Alert.alert("Save failed", updateError.message);
         return;
       }
+      if (!updatedRows || updatedRows.length === 0) {
+        console.error("[propertyCover] DB update matched 0 rows — possible missing UPDATE RLS policy. Run supabase/migrations/add_update_policies.sql.");
+        setLocalCoverUrl(null);
+        Alert.alert("Save failed", "Cover photo could not be saved. Please check your connection and try again.");
+        return;
+      }
+      // DB write confirmed — clear optimistic state and let the signed URL from
+      // the freshly-invalidated property query drive the display.
+      setLocalCoverUrl(null);
+      // Invalidate both the property query and the cached signed URL for the new
+      // path so useSignedUrl immediately re-fetches the correct signed URL.
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["property", id] }),
+        queryClient.invalidateQueries({ queryKey: ["signed-url", uploaded.path] }),
         queryClient.invalidateQueries({ queryKey: ["files"] }),
         queryClient.invalidateQueries({ queryKey: ["inventory-files"] }),
       ]);

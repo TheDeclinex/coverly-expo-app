@@ -419,6 +419,7 @@ export default function ItemsScreen() {
   };
 
   const handlePickRoomCover = async () => {
+    if (coverUploading) return;
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (status !== "granted") {
       Alert.alert(
@@ -446,16 +447,26 @@ export default function ItemsScreen() {
         return;
       }
       // Store the durable storage path in the DB, not the short-lived signed URL.
-      const { error: updateError } = await supabase
+      const { data: updatedRows, error: updateError } = await supabase
         .from("inventory_rooms")
         .update({ cover_photo_url: uploaded.path })
-        .eq("id", id);
+        .eq("id", id)
+        .select("id");
       if (updateError) {
+        console.error("[roomCover] DB update error:", updateError);
         Alert.alert("Save failed", updateError.message);
         return;
       }
+      if (!updatedRows || updatedRows.length === 0) {
+        console.error("[roomCover] DB update matched 0 rows — possible missing UPDATE RLS policy. Run supabase/migrations/add_update_policies.sql.");
+        Alert.alert("Save failed", "Cover photo could not be saved. Please check your connection and try again.");
+        return;
+      }
+      // Invalidate the room query and the signed URL cache for the new path so
+      // useSignedUrl immediately re-fetches and the new cover appears right away.
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["room", id] }),
+        queryClient.invalidateQueries({ queryKey: ["signed-url", uploaded.path] }),
         queryClient.invalidateQueries({ queryKey: ["rooms", fileId] }),
         queryClient.invalidateQueries({ queryKey: ["rooms", fileId, session.user.id] }),
       ]);
