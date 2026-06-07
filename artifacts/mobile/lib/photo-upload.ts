@@ -5,8 +5,8 @@
  * and returns a public URL. Includes an in-memory dedupe cache so save-all
  * workflows upload each unique source image only once per session.
  *
- * NOTE: This helper targets the `inventory-photos` bucket only. The existing
- * add-item / edit-item flows use `item-photos` — do not change those.
+ * NOTE: All photo uploads (scan, add-item, edit-item, cover photos) use the
+ * `inventory-photos` bucket. Do not use a separate bucket.
  */
 
 import { supabase } from "@/lib/supabase";

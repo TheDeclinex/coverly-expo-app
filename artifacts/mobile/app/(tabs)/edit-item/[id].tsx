@@ -30,7 +30,7 @@ import { buildItemUpdatePayload } from "@/lib/item-insert-helpers";
 import { supabase } from "@/lib/supabase";
 import type { InventoryItem, InventoryRoom } from "@/types";
 
-const ITEM_PHOTOS_BUCKET = "item-photos";
+const ITEM_PHOTOS_BUCKET = "inventory-photos";
 
 function FormField({
   label,

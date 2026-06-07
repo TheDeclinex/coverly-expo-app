@@ -1984,7 +1984,7 @@ export default function PropertyDetailScreen() {
           onRetry={refetch}
         />
       ) : (
-        <FlatList
+        <Animated.FlatList
           data={stats ? stats.roomStats : []}
           keyExtractor={(rs) => rs.room.id}
           onScroll={Animated.event(
