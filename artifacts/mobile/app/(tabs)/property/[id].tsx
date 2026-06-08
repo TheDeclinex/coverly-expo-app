@@ -50,7 +50,7 @@ import type { InventoryFile, InventoryItem, InventoryRoom } from "@/types";
 const BRAND_TEAL = "#1D9E75";
 const BRAND_AMBER = "#D97706";
 const BRAND_DANGER = "#B91C1C";
-const BRAND_BORDER = "#DDE7E3";
+const BRAND_BORDER = "#E2E8F0";
 const BRAND_DARK = "#0B6F66";
 const BRAND_DARK_DEEP = "#0A5C55";
 
@@ -433,7 +433,7 @@ function InsightCard({
 
   return (
     <LinearGradient
-      colors={["#0A6860", "#0F8F83"]}
+      colors={["#1E293B", "#0F172A"]}
       start={{ x: 0, y: 0 }}
       end={{ x: 1, y: 1 }}
       style={[styles.insightCard, { borderRadius: colors.radius + 2 }]}
@@ -593,7 +593,7 @@ function RadialCoverage({
         style={{
           fontSize: 8,
           fontFamily: "Inter_400Regular",
-          color: "#64736F",
+          color: "#64748B",
           textAlign: "center",
         }}
       >
@@ -1842,7 +1842,7 @@ export default function PropertyDetailScreen() {
               }}
             >
               <LinearGradient
-                colors={["#0B6F66", "#14A99A"]}
+                colors={["#0B7468", "#0F8F83"]}
                 start={{ x: 0, y: 1 }}
                 end={{ x: 1, y: 0 }}
                 style={StyleSheet.absoluteFill}
@@ -2478,10 +2478,10 @@ export default function PropertyDetailScreen() {
                         borderRadius: 20,
                         borderWidth: 1,
                         borderColor: active ? BRAND_TEAL : colors.border,
-                        backgroundColor: active ? "#E8F5F3" : colors.card,
+                        backgroundColor: active ? colors.accent : colors.card,
                       }}
                     >
-                      <Text style={{ fontSize: 13, fontFamily: "Inter_500Medium", color: active ? BRAND_DARK : colors.foreground }}>
+                      <Text style={{ fontSize: 13, fontFamily: "Inter_500Medium", color: active ? colors.primary : colors.foreground }}>
                         {opt.label}
                       </Text>
                     </Pressable>
@@ -2586,7 +2586,7 @@ const styles = StyleSheet.create({
     fontSize: 9,
     fontFamily: "Inter_700Bold",
     letterSpacing: 1.1,
-    color: BRAND_DARK,
+    color: "#334155",
   },
   insightBody: {
     flexDirection: "row",
@@ -2611,17 +2611,17 @@ const styles = StyleSheet.create({
   insightLegendText: {
     fontSize: 11,
     fontFamily: "Inter_400Regular",
-    color: "#1A2E2A",
+    color: "#334155",
     flex: 1,
   },
   insightMoreText: {
     fontSize: 10,
     fontFamily: "Inter_400Regular",
-    color: "#64736F",
+    color: "#64748B",
     marginTop: 1,
   },
   insightSparkWrap: {
-    backgroundColor: "#E8F5F3",
+    backgroundColor: "#F1F5F9",
     borderRadius: 8,
     padding: 6,
     alignItems: "center",
@@ -2631,15 +2631,15 @@ const styles = StyleSheet.create({
     fontSize: 8,
     fontFamily: "Inter_700Bold",
     letterSpacing: 0.8,
-    color: BRAND_DARK,
+    color: "#475569",
   },
   insightSubtext: {
     fontSize: 12,
     fontFamily: "Inter_400Regular",
-    color: "#1A2E2A",
+    color: "#334155",
   },
   insightPeriodWrap: {
-    backgroundColor: "#F0FAF8",
+    backgroundColor: "#F1F5F9",
     borderRadius: 8,
     padding: 10,
     gap: 8,
@@ -2647,7 +2647,7 @@ const styles = StyleSheet.create({
   insightPeriodTitle: {
     fontSize: 11,
     fontFamily: "Inter_600SemiBold",
-    color: BRAND_DARK,
+    color: "#475569",
   },
   insightPeriodRow: {
     flexDirection: "row",
@@ -2657,15 +2657,15 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 5,
     borderRadius: 14,
-    backgroundColor: "#DDF0EC",
+    backgroundColor: "#E2E8F0",
   },
   insightPeriodChipActive: {
-    backgroundColor: BRAND_DARK,
+    backgroundColor: "#1E293B",
   },
   insightPeriodChipText: {
     fontSize: 12,
     fontFamily: "Inter_600SemiBold",
-    color: BRAND_DARK,
+    color: "#475569",
   },
   insightPeriodChipTextActive: {
     color: "#FFFFFF",

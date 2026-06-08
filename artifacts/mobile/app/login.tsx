@@ -33,11 +33,11 @@ const BLOB_A      = "rgba(29,158,117,0.13)";   // restrained teal glow, upper-ri
 const BLOB_B      = "rgba(8,28,68,0.55)";       // deep navy, lower-left
 const HERO_TEXT   = "#FFFFFF";
 const HERO_SUB    = "rgba(255,255,255,0.88)";
-const ICON_BORDER = "rgba(29,158,117,0.45)";
+const ICON_BORDER = "rgba(15,143,131,0.45)";
 const ICON_BG     = "rgba(255,255,255,0.07)";
 const DOT_COLOR   = "rgba(255,255,255,0.08)";
-const BTN_TOP     = "#137058";
-const BTN_BOT     = "#085041";
+const BTN_TOP     = "#0F8F83";
+const BTN_BOT     = "#0B7468";
 const RADIUS      = 12;
 
 // Set true only to debug Supabase connectivity in dev builds.
@@ -619,7 +619,7 @@ const styles = StyleSheet.create({
     marginTop: 20,
     borderRadius: RADIUS,
     overflow: "hidden",
-    shadowColor: "#085041",
+    shadowColor: "#0B7468",
     shadowOffset: { width: 0, height: 5 },
     shadowOpacity: 0.4,
     shadowRadius: 14,

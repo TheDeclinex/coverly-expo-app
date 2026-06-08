@@ -34,8 +34,8 @@ import { supabase } from "@/lib/supabase";
 // ─── Design tokens ─────────────────────────────────────────────────────────────
 const DARK_BG    = "#111C2A";
 const DOT_COLOR  = "rgba(255,255,255,0.07)";
-const BTN_TOP    = "#137058";
-const BTN_BOT    = "#085041";
+const BTN_TOP    = "#0F8F83";
+const BTN_BOT    = "#0B7468";
 const TEAL_TOP   = "#0D7A6F";
 const TEAL_BOT   = "#064E46";
 
@@ -89,7 +89,7 @@ function ProgressDots({
             backgroundColor:
               i === activeIndex
                 ? light ? "rgba(255,255,255,0.9)" : "#0F8F83"
-                : light ? "rgba(255,255,255,0.28)" : "#DDE7E3",
+                : light ? "rgba(255,255,255,0.28)" : "#E2E8F0",
           }}
         />
       ))}
@@ -314,8 +314,8 @@ export default function OnboardingScreen() {
 
         <View style={{ flex: 1, justifyContent: "center", gap: 10, marginTop: 12 }}>
           <Animated.View style={[styles.featureRow, { backgroundColor: colors.background, borderColor: colors.border, borderRadius: colors.radius }, row1Style]}>
-            <View style={[styles.featureIcon, { backgroundColor: "#E6F6F3" }]}>
-              <Feather name="zap" size={22} color="#0B6F66" />
+            <View style={[styles.featureIcon, { backgroundColor: "#EEF9F6" }]}>
+              <Feather name="zap" size={22} color="#0F766E" />
             </View>
             <View style={{ flex: 1, gap: 3 }}>
               <Text style={[styles.featureLabel, { color: colors.foreground }]}>AI Scanning</Text>
@@ -326,8 +326,8 @@ export default function OnboardingScreen() {
           </Animated.View>
 
           <Animated.View style={[styles.featureRow, { backgroundColor: colors.background, borderColor: colors.border, borderRadius: colors.radius }, row2Style]}>
-            <View style={[styles.featureIcon, { backgroundColor: "#E6F6F3" }]}>
-              <Feather name="home" size={22} color="#0B6F66" />
+            <View style={[styles.featureIcon, { backgroundColor: "#EEF9F6" }]}>
+              <Feather name="home" size={22} color="#0F766E" />
             </View>
             <View style={{ flex: 1, gap: 3 }}>
               <Text style={[styles.featureLabel, { color: colors.foreground }]}>Room by room</Text>
@@ -754,7 +754,7 @@ const styles = StyleSheet.create({
   propertyPillText: {
     fontSize: 14,
     fontFamily: "Inter_600SemiBold",
-    color: "#0B6F66",
+    color: "#0F766E",
   },
   celebBody: {
     fontSize: 15,

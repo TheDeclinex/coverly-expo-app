@@ -1,0 +1,85 @@
+Apply a general “de-green” visual refinement across the Coverly mobile app.
+
+Goal:
+Coverly teal should remain the main brand/action colour, but it is currently being overused across backgrounds, cards, charts, icons, buttons, placeholders, progress bars, and section panels. Refine the app-wide visual system so teal is used intentionally as an accent/action colour, not as the dominant colour on every screen.
+
+Important:
+
+* Do not change data logic, Supabase logic, auth, scan logic, room/item logic, pricing, billing, entitlements, navigation, or schemas.
+* This is a visual styling pass only.
+* Prefer shared theme/style tokens where possible instead of one-off screen fixes.
+* Keep the existing app structure and functionality.
+
+App-wide design rules:
+
+1. Use Coverly teal mainly for:
+
+   * Primary CTA buttons
+   * Active/selected states
+   * Key value accents
+   * Small icons
+   * Thin progress fills
+   * Important highlights
+
+2. Avoid large teal surfaces unless there is a strong reason.
+
+   * Large dashboard cards, insight panels, placeholder blocks, and section backgrounds should generally be white, off-white, very pale aqua, or dark slate instead of full teal.
+
+3. Use a more premium neutral base:
+
+   * App background: soft off-white/light grey
+   * Cards: white
+   * Main text: dark slate/charcoal
+   * Borders/shadows: subtle neutral grey
+   * Secondary accents: very pale aqua/mint only in small amounts
+
+4. Primary buttons can remain teal.
+   Secondary buttons should usually be white/outline with dark text or teal text.
+
+5. Charts, progress bars, and status indicators should use teal sparingly:
+
+   * Teal fill/active portion
+   * Pale neutral track/background
+   * Avoid multiple green tones competing on the same screen
+
+6. Image/photo placeholders should not default to large green blocks.
+   Use light neutral cards, subtle line illustrations, small teal camera/image icons, and clear text.
+
+7. Room, item, property, and dashboard cards should usually be white cards with small teal accents only.
+
+8. Use dark slate/charcoal accents where a stronger premium contrast is needed, especially for value/summary areas.
+
+9. Preserve accessibility:
+
+   * Strong text contrast
+   * No pale text on pale backgrounds
+   * No low-contrast teal-on-mint combinations
+   * Buttons must remain clearly tappable
+
+10. Keep the Coverly brand feel:
+
+* Clean
+* Calm
+* Trustworthy
+* Insurance/home-documentation appropriate
+* Not overly green or washed out
+
+Apply this consistently across:
+
+* Property dashboard
+* Room list/detail screens
+* Item cards/detail screens
+* Scan screens and scan review screens
+* Empty states
+* Onboarding/home prompts
+* Charts, progress bars, and summary cards
+* Shared buttons/cards/placeholders
+
+Done when:
+
+* The app still works exactly as before.
+* Teal is still recognisably Coverly’s brand colour.
+* The UI feels cleaner, more premium, and less green-heavy.
+* Shared style/theme usage is improved where practical.
+* No TypeScript errors.
+* No functional regressions.

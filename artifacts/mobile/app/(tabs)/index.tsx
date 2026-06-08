@@ -312,10 +312,10 @@ export default function HomeScreen() {
       <View style={{ gap: 12, paddingHorizontal: 16, paddingTop: 16 }}>
         {/* Welcome header */}
         <View style={{ paddingBottom: 2 }}>
-          <Text style={{ fontSize: 17, fontFamily: "Inter_600SemiBold", color: "#172A27" }}>
+          <Text style={{ fontSize: 17, fontFamily: "Inter_600SemiBold", color: "#1E293B" }}>
             Welcome back
           </Text>
-          <Text style={{ fontSize: 13, fontFamily: "Inter_400Regular", color: "#64736F", marginTop: 2 }}>
+          <Text style={{ fontSize: 13, fontFamily: "Inter_400Regular", color: "#64748B", marginTop: 2 }}>
             Continue building your home inventory
           </Text>
         </View>

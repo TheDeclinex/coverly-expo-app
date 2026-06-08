@@ -571,7 +571,7 @@ export default function ScanScreen() {
                               left: (item.pin!.x / 100) * PHOTO_W - PIN_R,
                               top: (item.pin!.y / 100) * PHOTO_H - PIN_R,
                               width: PIN_R * 2, height: PIN_R * 2, borderRadius: PIN_R,
-                              backgroundColor: activePinIndex === idx ? "#1D9E75" : "#085041",
+                              backgroundColor: activePinIndex === idx ? "#1D9E75" : "#334155",
                               transform: [{ scale: activePinIndex === idx ? 1.2 : 1 }],
                             },
                           ]}
@@ -663,7 +663,7 @@ export default function ScanScreen() {
                     />
                     {/* Pin number badge — only shown when item has a pin */}
                     {item.pin != null && (
-                      <View style={[pinStyles.cardBadge, { backgroundColor: isActive ? "#1D9E75" : "#085041" }]}>
+                      <View style={[pinStyles.cardBadge, { backgroundColor: isActive ? "#1D9E75" : "#334155" }]}>
                         <Text style={pinStyles.cardBadgeLabel}>{index + 1}</Text>
                       </View>
                     )}
