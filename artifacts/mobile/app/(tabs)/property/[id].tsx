@@ -1160,21 +1160,23 @@ function RoomCard({
             height={RING_SIZE}
             style={StyleSheet.absoluteFillObject}
           >
-            {/* Track — full rounded-rect, path starts at top-center */}
-            <Path
-              d={RING_PATH}
-              fill="none"
-              stroke={BRAND_BORDER}
-              strokeWidth={4}
-              strokeLinecap="round"
-            />
-            {/* Progress — same path, dashed to show only completionPct */}
+            {/* Track — only visible when the room has items, very subtle */}
+            {itemCount > 0 && (
+              <Path
+                d={RING_PATH}
+                fill="none"
+                stroke={BRAND_BORDER}
+                strokeWidth={2.5}
+                strokeLinecap="round"
+              />
+            )}
+            {/* Progress arc — teal, proportional to completionPct */}
             {completionPct > 0 && (
               <Path
                 d={RING_PATH}
                 fill="none"
-                stroke={BRAND_TEAL}
-                strokeWidth={4}
+                stroke={colors.primary}
+                strokeWidth={completionPct >= 1 ? 3 : 2.5}
                 strokeLinecap="round"
                 strokeDasharray={`${RING_CIRC} ${RING_CIRC}`}
                 strokeDashoffset={ringOffset}
@@ -1191,14 +1193,26 @@ function RoomCard({
             <View
               style={[
                 styles.roomThumbPlaceholder,
-                { backgroundColor: colors.secondary },
+                { backgroundColor: colors.muted },
               ]}
             >
               <Feather
                 name={roomIcon(item.room_type) as any}
                 size={20}
                 color={colors.primary}
+                style={{ opacity: 0.6 }}
               />
+            </View>
+          )}
+          {/* Check badge — only at 100% completion */}
+          {completionPct >= 1 && itemCount > 0 && (
+            <View
+              style={[
+                styles.roomThumbBadge,
+                { backgroundColor: colors.primary, borderColor: colors.card },
+              ]}
+            >
+              <Feather name="check" size={9} color="#FFFFFF" />
             </View>
           )}
         </Animated.View>
@@ -2713,6 +2727,18 @@ const styles = StyleSheet.create({
     height: 72,
     alignItems: "center",
     justifyContent: "center",
+    borderRadius: 6,
+  },
+  roomThumbBadge: {
+    position: "absolute",
+    bottom: 3,
+    right: 3,
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 2,
   },
   cardBody: { flex: 1, padding: 12, gap: 2 },
   cardRow: {

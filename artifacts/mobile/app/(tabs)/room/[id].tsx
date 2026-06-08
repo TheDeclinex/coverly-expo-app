@@ -206,7 +206,7 @@ function ItemCard({
         ]}
       >
         {/* Thumbnail */}
-        <View style={[styles.thumbWrap, { borderColor: TEAL }]}>
+        <View style={[styles.thumbWrap, { borderColor: colors.border }]}>
           <ExpandableImage
             uri={imageUri}
             style={styles.thumb}
