@@ -284,16 +284,16 @@ function CompactSummary({
 
 // ─── Donut chart helpers ───────────────────────────────────────────────────────
 
-/** Pastel palette for donut segments (works on the teal card background) */
+/** Muted pastel palette for donut segments — calm and premium on the dark card */
 const DONUT_COLORS = [
-  "#80CBC4", // teal-mint  — Furniture
-  "#81D4A8", // green      — Electronics
-  "#FFB74D", // amber      — Appliances
-  "#CE93D8", // purple     — General
-  "#90CAF9", // blue       — Other
-  "#F48FB1", // pink
-  "#A5D6A7", // light green
-  "#BCAAA4", // warm grey
+  "#93C5D4", // dusty sky-blue    — Furniture
+  "#8FC4A6", // soft sage-green   — Electronics
+  "#E8C07A", // warm sand         — Appliances
+  "#C4A8D8", // soft lilac        — General
+  "#8FBBD6", // calm periwinkle   — Other
+  "#E0AFBB", // blush rose
+  "#9ABFA0", // muted sage
+  "#C5B5AF", // warm mushroom
 ];
 
 function segmentPath(
@@ -324,36 +324,73 @@ function CategoryDonut({
   total: number;
   size?: number;
 }) {
-  const cx = size / 2, cy = size / 2;
+  // Animated progress 0 → 1 drives the sweep of every segment simultaneously
+  const [progress, setProgress] = useState(0);
+  useEffect(() => {
+    const anim = new Animated.Value(0);
+    const listenerId = anim.addListener(({ value }) => setProgress(value));
+    Animated.timing(anim, {
+      toValue: 1,
+      duration: 800,
+      delay: 120,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: false,
+    }).start();
+    return () => anim.removeListener(listenerId);
+  }, []);
+
+  const cx = size / 2;
+  const cy = size / 2;
   const outerR = size / 2 - 3;
   const innerR = outerR * 0.56;
+  const midR = (outerR + innerR) / 2;
+  const strokeW = outerR - innerR;
+  const circ = 2 * Math.PI * midR;
+  const GAP_PX = 2; // fixed-pixel gap between segments
 
   if (total <= 0 || data.length === 0) {
     return (
       <Svg width={size} height={size}>
         <Circle
-          cx={cx} cy={cy}
-          r={(outerR + innerR) / 2}
+          cx={cx}
+          cy={cy}
+          r={midR}
           fill="none"
-          stroke="rgba(255,255,255,0.2)"
-          strokeWidth={outerR - innerR}
+          stroke="rgba(255,255,255,0.15)"
+          strokeWidth={strokeW}
         />
       </Svg>
     );
   }
 
-  const GAP = 0.02;
-  let angle = -Math.PI / 2;
+  // Each segment is a full Circle with strokeDasharray to show only its arc.
+  // startOffset = circ/4 rotates the default 3-o'clock start to 12 o'clock.
+  // Subsequent segments offset by the cumulative raw arc of all prior segments.
+  const startOffset = circ / 4;
+  let accumulated = 0;
+
   return (
     <Svg width={size} height={size}>
       {data.map((seg, i) => {
-        const sweep = Math.max((seg.value / total) * 2 * Math.PI - GAP, 0.01);
-        const ea = angle + sweep;
-        const d = segmentPath(cx, cy, outerR, innerR, angle, ea);
-        angle += (seg.value / total) * 2 * Math.PI;
-        return <Path key={i} d={d} fill={DONUT_COLORS[i % DONUT_COLORS.length]} />;
+        const fraction = seg.value / total;
+        const fullArc = fraction * circ;
+        const visibleArc = Math.max(fullArc * progress - GAP_PX, 0.001);
+        const dashOffset = startOffset - accumulated;
+        accumulated += fullArc;
+        return (
+          <Circle
+            key={i}
+            cx={cx}
+            cy={cy}
+            r={midR}
+            fill="none"
+            stroke={DONUT_COLORS[i % DONUT_COLORS.length]}
+            strokeWidth={strokeW}
+            strokeDasharray={`${visibleArc} ${circ}`}
+            strokeDashoffset={dashOffset}
+          />
+        );
       })}
-      <Circle cx={cx} cy={cy} r={innerR - 1} fill="rgba(255,255,255,0.1)" />
     </Svg>
   );
 }
@@ -433,7 +470,7 @@ function InsightCard({
 
   return (
     <LinearGradient
-      colors={["#1E293B", "#0F172A"]}
+      colors={["#344E6B", "#1E3348"]}
       start={{ x: 0, y: 0 }}
       end={{ x: 1, y: 1 }}
       style={[styles.insightCard, { borderRadius: colors.radius + 2 }]}
@@ -542,12 +579,27 @@ function RadialCoverage({
   size?: number;
   strokeWidth?: number;
 }) {
+  // Animate from 0 → percent on mount for a smooth fill-in effect
+  const [animPct, setAnimPct] = useState(0);
+  useEffect(() => {
+    const anim = new Animated.Value(0);
+    const listenerId = anim.addListener(({ value }) => setAnimPct(value));
+    Animated.timing(anim, {
+      toValue: percent,
+      duration: 900,
+      delay: 200,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: false,
+    }).start();
+    return () => anim.removeListener(listenerId);
+  }, [percent]);
+
   const r = (size - strokeWidth) / 2;
   const cx = size / 2;
   const cy = size / 2;
   const circumference = 2 * Math.PI * r;
-  const filled = (Math.min(percent, 100) / 100) * circumference;
-  const stroke = coverageColor(percent);
+  const filled = (Math.min(animPct, 100) / 100) * circumference;
+  const stroke = coverageColor(percent); // derive colour from actual percent, not animated
 
   return (
     <View
@@ -688,18 +740,18 @@ function CoverageBar({
 
 // ─── Room distribution stacked bars ───────────────────────────────────────────
 
-/** Pastel palette — one colour per room, consistent across both bars */
+/** Muted pastel palette — one colour per room, calm and premium */
 const ROOM_BAR_PALETTE = [
-  "#80CBC4", // teal-mint
-  "#A5D6A7", // sage-green
-  "#FFCC80", // peachy-amber
-  "#CE93D8", // soft-lavender
-  "#90CAF9", // sky-blue
-  "#F48FB1", // dusty-rose
-  "#FFE082", // warm-yellow
-  "#BCAAA4", // warm-grey
-  "#80DEEA", // cyan-light
-  "#EF9A9A", // soft-coral
+  "#93C5D4", // dusty sky-blue
+  "#9ABFA0", // soft sage-green
+  "#E8C07A", // warm sand
+  "#C4A8D8", // soft lilac
+  "#8FBBD6", // calm periwinkle
+  "#E0AFBB", // blush rose
+  "#D4C07A", // muted gold
+  "#C5B5AF", // warm mushroom
+  "#8FC4BA", // dusty teal
+  "#E0A08A", // soft terracotta
 ];
 
 const LEGEND_LIMIT = 4; // dots shown beneath bars before "+N more"
@@ -2324,6 +2376,14 @@ export default function PropertyDetailScreen() {
       <Stack.Screen
         options={{
           title: name ?? "Property",
+          headerStyle: { backgroundColor: colors.card },
+          headerShadowVisible: true,
+          headerTitleStyle: {
+            fontFamily: "Inter_600SemiBold",
+            fontSize: 17,
+            color: colors.foreground,
+          },
+          headerTintColor: colors.primary,
           headerRight: () => (
             <Pressable
               onPress={() =>

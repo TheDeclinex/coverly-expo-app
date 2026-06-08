@@ -1,0 +1,48 @@
+Refine the Coverly mobile UI styling for the property dashboard and related shared components. This is a visual polish pass only.
+
+Do not change:
+
+* Supabase logic
+* data loading/saving
+* scan logic
+* item/room/property logic
+* billing/entitlements
+* navigation
+* schema
+* the room completion ring work already in progress
+
+Changes required:
+
+1. Lighten the dark dashboard insight card
+   The “You’ve documented so far” card currently uses a very dark slate/navy and feels a bit heavy. Keep the premium contrast direction, but soften it to a lighter slate grey / blue-grey so it feels calmer and less dominant. Maintain strong readable contrast for white/light text.
+
+2. Soften chart colours
+   Make chart/category colours more pastel and muted across the dashboard. Keep enough distinction between categories, but avoid bright or saturated greens/yellows/oranges unless they are warning states. Charts should feel soft, premium, and calm.
+
+3. Add chart/ring load animation
+   Add a subtle growing animation on page load for dashboard rings/charts where practical:
+
+* Donut/ring charts should animate from 0 to their final value.
+* Bar/progress visuals should softly grow/fill in.
+* Keep animation quick, smooth, and non-distracting.
+* Respect reduced-motion settings if already available in the app.
+
+4. Improve the header visual treatment and safe area
+   The current header looks plain and needs more polish. Improve the property screen header so it feels more integrated and premium while still simple:
+
+* Ensure correct SafeAreaView / safe-area inset handling for iPhone notch/dynamic island/status bar.
+* Header title and icons must never overlap the notch/status area.
+* Add subtle visual life: softer background, slight elevation/border, improved spacing, or a tasteful accent treatment.
+* Keep edit/back actions clear and tappable.
+* Avoid making the header green-heavy.
+
+Done when:
+
+* UI feels lighter, calmer, and more premium.
+* Dark slate areas are softened.
+* Charts use muted/pastel colours.
+* Ring/chart animations work smoothly on load.
+* Coverage warning behaviour remains intact.
+* Header safe area and visual polish are improved.
+* No TypeScript errors.
+* No functional regressions.
