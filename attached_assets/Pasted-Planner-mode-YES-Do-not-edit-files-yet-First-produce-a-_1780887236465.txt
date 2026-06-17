@@ -1,0 +1,672 @@
+Planner mode: YES.
+
+Do not edit files yet. First produce a detailed implementation plan for adding the Coverly replacement pricing module to the Expo/Replit mobile app.
+
+Goal:
+Hook up the replacement pricing module in the mobile app, closely replicating the existing UI Bakery replacement pricing flow and contracts. This should not be a new architecture. It should reuse existing Coverly production conventions, Supabase table names, Edge Function names, item fields, image handling patterns, and entitlement/usage logic wherever available.
+
+Reference:
+Use the existing UI Bakery replacement pricing code/logic as the source of truth. The important UIB concepts/functions to mirror are listed below.
+
+High-level user flow:
+Item detail → Find replacement price → pricing bottom sheet/full-screen sheet → item context and image → editable search query → dynamic price filter chips → search existing Supabase Edge Function → image-first listing cards → user chooses a result → save as replacement price evidence → update item replacement value → return/update item detail.
+
+Important:
+This prompt is for planning only. Before implementation, audit the existing mobile code and produce a clear phase-by-phase plan. Do not create new tables, new Edge Functions, new buckets, or incompatible field names. If a required contract is missing, say exactly what is missing rather than guessing.
+
+Existing UI Bakery behaviour to replicate:
+
+1. Entry point and UX
+
+* Add replacement pricing from the item detail screen.
+* The action can be labelled:
+
+  * `Find replacement price` when no price is linked.
+  * `View linked price`, `Refresh price`, or `Search again` when a price already exists.
+* Use a mobile-friendly bottom sheet or full-screen sheet, not a disconnected page unless the existing navigation structure makes that simpler.
+* The sheet should preserve item context and allow easy return to item detail.
+* Show read-only item context at the top:
+
+  * item image
+  * item name
+  * category
+  * brand/model if present
+  * estimated value
+  * quantity
+  * current replacement price if already saved
+* The only editable field should be `Search query`.
+* Editing the search query must not rename or mutate the item.
+
+2. Item image handling
+
+* Use the app’s existing Supabase storage-path-to-signed-URL helper for item photos.
+* Existing UI Bakery equivalents:
+
+  * `sbResolvePhotoUrls`
+  * `sbGetPhotoSignedUrl`
+  * `signed-url-cache`
+* Storage bucket:
+
+  * `inventory-photos`
+* Item photos should render from existing `image_url` / `photo_url` storage paths using signed URLs at display time.
+* Do not persist temporary signed URLs back into `inventory_items`.
+* Show a clean placeholder only if the item genuinely has no image.
+* Result/product listing images are external thumbnails from the search result and may be stored as `thumbnail_url` / `web_listing_thumbnail`.
+* Pricing result cards must show product thumbnails prominently.
+* Tapping item/product images should open an expandable/full-screen preview where practical.
+* Avoid blank image boxes; include loading/error/fallback states.
+
+3. Dynamic price filter chips
+   Replicate the UIB `buildDynamicChips` behaviour.
+
+Relevant UIB functions:
+
+* `buildDynamicChips`
+* `roundBoundary`
+* `fmtRange`
+* `applyPriceRange`
+* `PriceRangeSelector`
+
+Anchor price logic:
+
+* `qty = Math.max(1, Math.round(item.quantity ?? 1))`
+* if `qty > 1` and `item.unitEstimatedPrice > 0`, use `unitEstimatedPrice`
+* otherwise use `item.estimatedPrice`
+* mobile improvement allowed: if `qty > 1`, `unitEstimatedPrice` is missing, and `estimatedPrice` exists, derive unit anchor as `estimatedPrice / qty`
+* If no usable anchor exists, show only:
+
+  * `Any`
+  * `Custom`
+
+Rounding logic must match UIB:
+
+* anchor `< 50` → nearest `5`
+* anchor `< 150` → nearest `10`
+* anchor `< 500` → nearest `25`
+* anchor `< 1500` → nearest `50`
+* otherwise → nearest `100`
+
+Chip IDs:
+
+* `any`
+* `lower`
+* `around`
+* `higher`
+* `premium`
+* `custom`
+
+Price bands:
+
+* `Any` — no min/max
+* `Lower` — `0.25x` to `0.75x` anchor
+* `Around` — `0.75x` to `1.25x` anchor
+* `Higher` — `1.25x` to `2.0x` anchor
+* `Premium` — `2.0x+`
+* `Custom` — user-entered min/max
+
+Mobile labels should be consumer-friendly:
+
+* Any
+* Lower $60–$100
+* Around $100–$170
+* Higher $170–$270
+* Premium $270+
+* Custom
+
+Use NZD formatting by default but keep the logic country-ready for future rollout.
+
+4. Search query building
+   Replicate the UIB `buildSearchQuery` behaviour.
+
+Relevant source fields:
+
+* `brand_maker`
+* `model_series`
+* `attributes.brand`
+* `brand_guess`
+* `model_guess`
+* `name`
+* `category`
+
+Logic:
+
+* Prefer user-entered `brand_maker` / `model_series`.
+* Fall back to AI fields:
+
+  * `attributes.brand`
+  * `brand_guess`
+  * `model_guess`
+* If brand and model are known, build query from brand + item name + model.
+* If only brand is known, use brand + item name.
+* If only model is known, use item name + model.
+* Otherwise use item name.
+* Append category only when it adds useful specificity and is not a broad category.
+* Always append `NZ`.
+* Do not allow the pricing search query to rename the item.
+
+5. Edge Function contract
+   Use the existing Supabase Edge Function:
+
+`replacement-price-search`
+
+Relevant UIB wrapper:
+
+* `callReplacementPriceSearch`
+
+Endpoint:
+
+* `/functions/v1/replacement-price-search`
+
+Request interface supports:
+
+* `itemName`
+* `description`
+* `category`
+* `brand`
+* `barcode`
+* `country`
+* `minPrice`
+* `maxPrice`
+* `searchQuery`
+* `num`
+* `itemId`
+
+UIB currently calls it mainly with:
+
+* `itemName: item.name`
+* `category: item.category`
+* `searchQuery: query`
+* `num: 8`
+
+Expected response result fields:
+
+* `title`
+* `source`
+* `price`
+* `priceRaw`
+* `link`
+* `snippet`
+* `thumbnail`
+* `position`
+* `matchType`
+
+Edge `matchType` values:
+
+* `best_match`
+* `close_match`
+* `similar_item`
+
+UI display values:
+
+* `best`
+* `close`
+* `similar`
+
+Important:
+UIB currently applies price range chips client-side with `applyPriceRange`. Do not rely only on backend `minPrice` / `maxPrice` filtering unless adding it as a safe enhancement. Required behaviour:
+
+* Search once.
+* Store raw results.
+* When a price chip changes, filter/sort locally without another network request.
+* Do not charge another usage credit for changing filter chips.
+
+6. Result processing
+   Relevant UIB functions:
+
+* `parsePrice`
+* `assignMatchType`
+* `applyPriceRange`
+* `isPartOrSupportResult`
+* `isWeakResultSet`
+* `buildFallbackQuery`
+* `fetchResults`
+* `fetchPanelResults`
+
+Two-pass fallback search:
+
+* First pass searches the exact built/user query.
+* After pass 1, call `isWeakResultSet`.
+* A result set is weak if:
+
+  * zero results, or
+  * fewer than 2 priced full-product results, or
+  * more than 50% of results look like support/parts/manual pages.
+* If weak, call `buildFallbackQuery`.
+* `buildFallbackQuery` strips model-code tokens using equivalent logic to:
+
+  * `\b[A-Z][A-Z0-9]{4,14}\b`
+* Run pass 2 only if the fallback query differs and is meaningful.
+* Use pass 2 only if it produces more priced full-product results.
+* Show a small user-facing notice:
+
+  * `No strong exact-model listings found — showing comparable replacements.`
+
+Part/support/manual detection:
+Replicate the UIB `PARTS_SUPPORT_PATTERNS` concept. De-emphasise results that look like:
+
+* manual
+* user guide
+* driver
+* firmware
+* download
+* support
+* spare part
+* replacement part
+* repair kit
+* battery
+* charger
+* power adapter
+* cable
+* adapter
+* screen replacement
+* hinge
+* motherboard
+* keyboard replacement
+* dock
+* warranty
+* support URLs such as `/support/`, `/drivers/`, `/manuals/`, `/downloads/`
+
+Do not necessarily hide these results, but visually de-emphasise them:
+
+* dimmed card
+* small badge: `May be part/support`
+* avoid making them feel like the recommended default
+* disable or de-prioritise `Use as replacement price` if no valid product price exists
+
+7. Results UI
+   Relevant UIB components:
+
+* `ResultsList`
+* `ResultCard`
+* `ResultCardImage`
+
+Result cards should be image-first and mobile-friendly.
+
+Show:
+
+* product thumbnail
+* title
+* retailer/source
+* NZD price
+* match badge:
+
+  * best → `Best match`
+  * close → `Close match`
+  * similar → `Similar item`
+* range status badge where applicable:
+
+  * below-range → `Below range`
+  * above-range → `Above range`
+* optional snippet/details
+* secondary action:
+
+  * `View listing`
+* primary action:
+
+  * `Use as replacement price`
+
+Use `Use as replacement price` rather than only `Use this listing`, because it is clearer for consumers.
+
+Disable `Use as replacement price` if `price == null`.
+
+Do not show `View listing` for unsafe/useless Google wrapper links if the existing UIB logic already filters these.
+
+Handle:
+
+* loading state while searching
+* empty result state
+* error state with retry
+* search again after query change
+* fallback comparable-results notice
+* image unavailable state
+* product thumbnail preview where practical
+
+8. Evidence save flow
+   Relevant UIB actions/tables:
+
+* `dbInsertPriceEvidence`
+* `dbUpdateItemReplacementValue`
+* `dbLoadPriceEvidence`
+* table: `item_price_evidence`
+* item table: `inventory_items`
+
+When user taps `Use as replacement price`:
+
+Step 1 — Insert into `public.item_price_evidence`:
+
+* `item_id`
+* `source_type = 'online_listing'`
+* `source_name = result.source`
+* `source_domain = domainFromUrl(result.link)`
+* `listing_url = result.link`
+* `listing_title = result.title`
+* `listing_price = price`
+* `currency = 'NZD'`
+* `match_confidence`
+
+  * best → `0.9`
+  * close → `0.7`
+  * similar → `0.5`
+* `match_reason = result.matchType`
+* `status = 'current'`
+* `thumbnail_url = result.thumbnail`
+* `raw_search_query`
+* `found_at = now`
+
+Step 2 — Update `public.inventory_items`:
+
+* `replacement_value = selected listing price`
+* `replacement_value_source_id = inserted evidence id`
+* `replacement_value_updated_at = now`
+* `replacement_value_status = 'current'`
+
+Step 3 — Preserve/update legacy UI compatibility fields:
+
+* `price_source_type = 'web_listing'`
+* `web_listing_url = result.link`
+* `web_listing_title = result.title`
+* `web_listing_price = price`
+* `web_listing_source = result.source`
+* `web_listing_thumbnail = result.thumbnail`
+* `web_listing_match_type = result.matchType`
+* `web_listing_checked_at = now`
+
+Step 4 — Mobile UX:
+
+* Update local item state immediately with both the legacy `web_listing_*` fields and the new `replacement_value*` fields so the item detail screen updates without requiring a reload.
+* Show a saved confirmation state:
+
+  * `Replacement price saved`
+  * selected price
+  * retailer/source
+  * date checked
+  * button/action: `Back to item`
+
+9. Existing price evidence table
+   Use existing table name and fields:
+
+`public.item_price_evidence`
+
+* `id`
+* `item_id`
+* `source_type`
+* `source_name`
+* `source_domain`
+* `listing_url`
+* `listing_title`
+* `listing_price`
+* `currency`
+* `match_confidence`
+* `match_reason`
+* `status`
+* `found_at`
+* `last_checked_at`
+* `unavailable_at`
+* `thumbnail_url`
+* `cached_thumbnail_path`
+* `raw_search_query`
+* `raw_result`
+* `created_at`
+
+Do not invent a new table.
+
+10. Existing item fields
+    Use existing `inventory_items` fields:
+
+* `estimated_price`
+* `quantity`
+* `unit_estimated_price`
+* `quantity_estimate`
+* `valuation_basis`
+* `price_source_type`
+* `web_listing_url`
+* `web_listing_title`
+* `web_listing_price`
+* `web_listing_source`
+* `web_listing_thumbnail`
+* `web_listing_match_type`
+* `web_listing_checked_at`
+* `replacement_value`
+* `replacement_value_source_id`
+* `replacement_value_updated_at`
+* `replacement_value_status`
+
+Do not invent incompatible item fields.
+
+11. Quantity/value handling
+    Preserve quantity logic:
+
+* If item quantity > 1, selected listing price should generally be treated as unit replacement price unless the existing schema/UI clearly expects total replacement price.
+* Keep total replacement value coherent with quantity.
+* Do not break existing `quantity`, `unit_estimated_price`, `quantity_estimate`, and total estimated/replacement value relationships.
+* In the plan, explicitly confirm how the current mobile app represents quantity and whether replacement value should be stored as unit or total.
+
+12. Current linked price display on item detail
+    Relevant UIB file:
+
+* `components/price-evidence-detail.tsx`
+
+Relevant utility functions:
+
+* `computeDisplayStatus`
+* `cardStalenessLabel`
+* `pricingActionLabel`
+* `statusLineCopy`
+* `domainFromUrl`
+* `claimsPdfPriceSource`
+
+Replicate the current linked replacement block on item detail.
+
+Show:
+
+* listing thumbnail
+* saved title
+* saved replacement price
+* retailer/source
+* checked/found date
+* status line
+* status badge
+* actions:
+
+  * `View listing`
+  * `Refresh price` / `Search again`
+  * `Remove linked price`
+
+Status badge values:
+
+* Current
+* Needs refresh
+* Historical
+* Listing unavailable
+* Manual
+
+Staleness logic:
+
+* `< 365 days` → `current`
+* `365–547 days` → `needs_refresh`
+* `> 547 days` → `historical`
+* stored `manual` stays manual
+* stored `unavailable` stays unavailable
+
+13. Entitlements / usage
+    Replacement pricing is a metered Free-tier feature.
+
+Use the existing entitlement/usage pattern if present.
+
+UIB pattern:
+
+* `reserveFeatureUsage('replacement_pricing', 'ProductSearchBody')`
+* `commitFeatureUsage('replacement_pricing', idempotencyKey)` after successful search
+* `refundFeatureUsage('replacement_pricing', idempotencyKey)` if search fails
+
+Required behaviour:
+
+* Do not charge usage just for opening the pricing sheet.
+* Do not charge usage for editing the query.
+* Do not charge usage for changing price chips.
+* Do not charge usage for selecting/saving a listing.
+* Charge only for a real successful search request.
+* If the user is blocked, show the existing upgrade/limit UI pattern for `replacement_pricing`.
+* Plus/Family should feel included/fair-use. Do not show a visible paid-plan credit meter.
+
+Free tier context:
+
+* Free users have limited replacement pricing lookups.
+* Voice actions are not part of the visible AI credit pool.
+* Paid plans should not expose explicit token-style limits unless existing app copy already does.
+
+14. Recommended implementation sequencing
+    Do not build the entire replacement-pricing module in one uncontrolled pass.
+
+Plan around these phases:
+
+Phase 1 — Audit and helper logic only:
+
+* Confirm existing contracts.
+* Add/reuse pure helper functions for:
+
+  * dynamic price chips
+  * price rounding
+  * search query building
+  * price parsing
+  * match assignment
+  * client-side price filtering
+  * weak result detection
+  * fallback query building
+  * part/support/manual result detection
+  * domain extraction
+  * status/staleness display
+* No database writes yet.
+* No entitlement usage yet.
+* No new schema.
+
+Phase 2 — Mobile search UI:
+
+* Add the replacement-pricing bottom sheet/full-screen sheet from item detail.
+* Show item image and item context.
+* Add editable search query.
+* Add dynamic filter chips.
+* Call `replacement-price-search`.
+* Show image-first result cards.
+* Add fallback comparable-result notice.
+* Add part/support/manual de-emphasis.
+* Use `Use as replacement price` as the primary CTA.
+* At this phase, selecting a listing can use a temporary handler, but do not finalize DB writes until Phase 3.
+
+Phase 3 — Save selected listing:
+
+* Insert into `item_price_evidence`.
+* Update `inventory_items.replacement_value*`.
+* Preserve/update legacy `web_listing_*` fields.
+* Update local item state immediately.
+* Add saved confirmation state.
+* Add current linked price block on item detail.
+
+Phase 4 — Entitlements:
+
+* Add replacement-pricing usage reserve/commit/refund after the core search/save flow is working.
+* Charge usage only for successful real searches.
+* Use existing upgrade/limit UI if blocked.
+
+15. Production-readiness constraints
+
+* Do not create new Supabase table names if existing names can be reused.
+* Do not create a new replacement price Edge Function.
+* Do not create a new storage bucket.
+* Do not store temporary signed image URLs in the database.
+* Do not break the UI Bakery web app contracts.
+* Keep naming compatible with future production migration.
+* Add TypeScript interfaces for request/response/listing/evidence data.
+* Add small helper functions rather than duplicating logic across screens.
+* Add basic diagnostics/logging for function failures, but do not expose noisy debug output to normal users.
+* Do not provide Git/release workflow instructions unless specifically asked.
+
+16. Files/functions to inspect before planning
+    Please inspect the existing mobile app for likely equivalents of:
+
+* item detail screen
+* item card/image component
+* Supabase client
+* signed URL helper
+* entitlement context/service
+* item update helper
+* local cache/store
+* existing database type definitions
+* existing Edge Function wrapper pattern
+* existing upgrade/limit modal/sheet
+
+Please also inspect any UI Bakery reference files available in the project, especially:
+
+* `components/product-search-panel.tsx`
+* `components/pricing-modal.tsx`
+* `components/price-evidence-detail.tsx`
+* `lib/coverly-edge-client.ts`
+* `lib/price-evidence-utils.ts`
+
+17. Required planner output
+    Before editing, output a clear plan with these headings:
+
+A. Confirmed existing mobile contracts
+
+* item detail file/component
+* item data type and field names
+* image/signed URL helper
+* Supabase client/function call pattern
+* item update helper
+* entitlement helper
+* local cache/state refresh pattern
+
+B. Confirmed UIB replacement-pricing contracts
+
+* Edge Function payload
+* response shape
+* chip logic
+* fallback logic
+* result-card logic
+* evidence insert/update logic
+* status/staleness logic
+
+C. Missing or unclear contracts
+List anything not found, especially:
+
+* whether `item_price_evidence` exists in the connected Supabase schema/types
+* whether mobile app has type definitions for `replacement_value*` and `web_listing_*`
+* whether mobile app already has entitlement reserve/commit/refund helpers
+* whether mobile app has signed URL helpers
+* whether quantity is stored as unit or total value
+
+D. Proposed implementation phases
+Break into the four phases above.
+
+E. Proposed files to add/change
+List file paths and what each will do.
+
+F. Risks
+Call out likely breakpoints:
+
+* image display
+* signed URL persistence mistakes
+* entitlement double-charging
+* wrong unit-vs-total replacement value
+* RLS insert/update failures
+* Edge Function response mismatch
+* stale local cache after save
+
+G. Test plan
+Include tests/checks for:
+
+* item with image
+* item without image
+* item with estimated price
+* item without estimated price
+* quantity > 1
+* exact model weak results triggering fallback
+* parts/manual results de-emphasised
+* successful evidence save
+* item detail refresh after save
+* Free user with allowance
+* Free user with no allowance
+* Plus/Family user
+* Edge Function error/refund path
+
+Do not implement until this plan has been reviewed.
