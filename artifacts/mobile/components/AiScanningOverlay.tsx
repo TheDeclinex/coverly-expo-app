@@ -32,6 +32,7 @@ const BRACKET_COLOR = "#93C5FD";       // blue-200
 const SCAN_GLOW = "rgba(147,197,253,0.10)";
 const SCAN_LINE_COLOR = "rgba(186,217,254,0.90)";
 const SWEEP_MS = 1900;                 // scan line sweep duration
+const PHOTO_CYCLE_MS = 2200;           // keep each batch photo visible for a full sweep
 
 const STATUS_MESSAGES = [
   "Analysing photo…",
@@ -54,6 +55,7 @@ export function AiScanningOverlay({
   images: ScanEncodedImage[];
 }) {
   const [statusIdx, setStatusIdx] = useState(0);
+  const [photoIdx, setPhotoIdx] = useState(0);
 
   // ── Shared values ────────────────────────────────────────────────────────────
   const scanY         = useSharedValue(0);
@@ -99,6 +101,18 @@ export function AiScanningOverlay({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Cycle the faux scanner through the complete submitted batch. A single
+  // photo remains static, preserving the existing single-scan experience.
+  useEffect(() => {
+    setPhotoIdx(0);
+    if (images.length <= 1) return;
+
+    const id = setInterval(() => {
+      setPhotoIdx((current) => (current + 1) % images.length);
+    }, PHOTO_CYCLE_MS);
+    return () => clearInterval(id);
+  }, [images.length]);
+
   // ── Status text cycling ───────────────────────────────────────────────────────
   useEffect(() => {
     const id = setInterval(() => {
@@ -123,7 +137,7 @@ export function AiScanningOverlay({
   const d2Style          = useAnimatedStyle(() => ({ opacity: d2Opac.value }));
   const d3Style          = useAnimatedStyle(() => ({ opacity: d3Opac.value }));
 
-  const photoUri = images[0]?.uri ?? null;
+  const photoUri = images[photoIdx]?.uri ?? images[0]?.uri ?? null;
 
   return (
     <View style={styles.container}>
@@ -146,6 +160,7 @@ export function AiScanningOverlay({
               source={{ uri: photoUri }}
               style={StyleSheet.absoluteFill}
               contentFit="cover"
+              transition={300}
             />
           ) : (
             <View style={[StyleSheet.absoluteFill, styles.photoPlaceholder]} />
@@ -204,7 +219,7 @@ export function AiScanningOverlay({
       {/* ── Multi-photo indicator ────────────────────────────────────────────── */}
       {images.length > 1 && (
         <Text style={styles.multiText}>
-          {images.length} photos being analysed
+          Photo {photoIdx + 1} of {images.length} · Analysing full scan batch
         </Text>
       )}
     </View>

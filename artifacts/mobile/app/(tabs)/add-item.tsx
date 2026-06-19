@@ -20,13 +20,16 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { CategoryPicker } from "@/components/CategoryPicker";
 import { ExpandableImage } from "@/components/ExpandableImage";
+import { QuantityStepper } from "@/components/QuantityStepper";
+import { useToast } from "@/components/Toast";
 import { useAuth } from "@/context/AuthContext";
 import { useColors } from "@/hooks/useColors";
+import { formatCurrencyFull } from "@/lib/inventory-mappers";
 import { buildItemInsertPayload } from "@/lib/item-insert-helpers";
+import { formatUploadFailure, uploadItemPhoto } from "@/lib/photo-upload";
+import { markRecentItem } from "@/lib/recent-items";
 import { supabase } from "@/lib/supabase";
 import type { InventoryFile, InventoryRoom } from "@/types";
-
-const ITEM_PHOTOS_BUCKET = "inventory-photos";
 
 function FormField({
   label,
@@ -112,6 +115,7 @@ export default function AddItemScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const queryClient = useQueryClient();
+  const { showToast } = useToast();
 
   const [selectedFileId, setSelectedFileId] = useState(fileId ?? "");
   const [selectedRoomId, setSelectedRoomId] = useState(roomId ?? "");
@@ -204,27 +208,11 @@ export default function AddItemScreen() {
     uri: string,
     itemFileId: string
   ): Promise<{ path: string | null; uploadErrMsg: string | null }> => {
-    try {
-      const userId = session?.user?.id ?? "anon";
-      const response = await fetch(uri);
-      const blob = await response.blob();
-      const filename = uri.split("/").pop()?.split("?")[0] ?? "";
-      const ext = filename.includes(".") ? (filename.split(".").pop()?.toLowerCase() ?? "jpeg") : "jpeg";
-      const storagePath = `${userId}/${itemFileId}/${Date.now()}.${ext}`;
-      const { data: uploadData, error: uploadError } = await supabase.storage
-        .from(ITEM_PHOTOS_BUCKET)
-        .upload(storagePath, blob, { contentType: `image/${ext}`, upsert: false });
-      if (uploadError) {
-        console.warn("[AddItem] Photo upload failed:", uploadError.message, "path:", storagePath, "bucket:", ITEM_PHOTOS_BUCKET);
-        return { path: null, uploadErrMsg: uploadError.message };
-      }
-      // Return the durable path — display code will generate signed URLs at render time.
-      return { path: uploadData.path, uploadErrMsg: null };
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      console.warn("[AddItem] Photo upload error:", msg);
-      return { path: null, uploadErrMsg: msg };
-    }
+    const userId = session?.user?.id;
+    if (!userId) return { path: null, uploadErrMsg: "Not signed in" };
+    const uploaded = await uploadItemPhoto(uri, userId, itemFileId);
+    if (!uploaded.ok) return { path: null, uploadErrMsg: formatUploadFailure(uploaded) };
+    return { path: uploaded.path, uploadErrMsg: null };
   };
 
   const handleSave = async () => {
@@ -277,6 +265,7 @@ export default function AddItemScreen() {
       description: description || null,
       category: category || null,
       estimatedPrice: price,
+      unitEstimatedPrice: price,
       quantity: qty,
       imageUrl: uploadedPhotoUrl,
       photoUrl: uploadedPhotoUrl,
@@ -324,6 +313,8 @@ export default function AddItemScreen() {
     }
 
     console.log("[AddItem] Insert succeeded — navigating to room", selectedRoomId);
+    markRecentItem(payload.id);
+    showToast(`Item added to ${destRoomName ?? "room"}`);
 
     queryClient.invalidateQueries({ queryKey: ["items", selectedRoomId] });
     queryClient.invalidateQueries({ queryKey: ["all-items"] });
@@ -526,7 +517,7 @@ export default function AddItemScreen() {
 
             <View style={{ flexDirection: "row", gap: 12 }}>
               <View style={{ flex: 2 }}>
-                <FormField label="Estimated value ($)" colors={colors}>
+                <FormField label="Each price ($)" colors={colors}>
                   <StyledInput
                     value={estimatedPrice}
                     onChangeText={setEstimatedPrice}
@@ -538,16 +529,24 @@ export default function AddItemScreen() {
               </View>
               <View style={{ flex: 1 }}>
                 <FormField label="Quantity" colors={colors}>
-                  <StyledInput
+                  <QuantityStepper
                     value={quantity}
-                    onChangeText={setQuantity}
-                    placeholder="1"
-                    keyboardType="numeric"
-                    colors={colors}
+                    onChange={setQuantity}
                   />
                 </FormField>
               </View>
             </View>
+            {(Number.parseInt(quantity, 10) || 1) > 1 && estimatedPrice ? (
+              <View style={[styles.linkedTotal, { borderColor: colors.border }]}>
+                <Text style={[styles.linkedTotalLabel, { color: colors.mutedForeground }]}>Total price</Text>
+                <Text style={[styles.linkedTotalValue, { color: colors.foreground }]}>
+                  {formatCurrencyFull(
+                    (Number.parseFloat(estimatedPrice.replace(/[^0-9.]/g, "")) || 0) *
+                      (Number.parseInt(quantity, 10) || 1),
+                  )}
+                </Text>
+              </View>
+            ) : null}
           </View>
 
           {/* PHOTO */}
@@ -776,6 +775,15 @@ const styles = StyleSheet.create({
     padding: 12,
     borderWidth: 1,
   },
+  linkedTotal: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    borderTopWidth: StyleSheet.hairlineWidth,
+    paddingTop: 10,
+  },
+  linkedTotalLabel: { fontSize: 12, fontFamily: "Inter_400Regular" },
+  linkedTotalValue: { fontSize: 15, fontFamily: "Inter_700Bold" },
   saveBtn: {
     flexDirection: "row",
     alignItems: "center",

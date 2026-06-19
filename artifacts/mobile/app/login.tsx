@@ -142,7 +142,7 @@ export default function LoginScreen() {
     setShowConfirm(false);
   };
 
-  const HEALTH_URL = "https://krbrmskfvpjukcbkbegc.supabase.co/auth/v1/health";
+  const HEALTH_URL = `${debugSupabaseUrl}/auth/v1/health`;
 
   const handleTestConnection = async () => {
     setTestLoading(true);

@@ -1,8 +1,9 @@
 import { Feather } from "@expo/vector-icons";
 import * as ImagePicker from "expo-image-picker";
 import * as Haptics from "expo-haptics";
+import * as WebBrowser from "expo-web-browser";
 import { Image } from "expo-image";
-import { Stack, router, useLocalSearchParams } from "expo-router";
+import { Stack, router, useLocalSearchParams, type Href } from "expo-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import React, { useEffect, useRef, useState } from "react";
 import {
@@ -15,6 +16,7 @@ import {
   RefreshControl,
   StyleSheet,
   Text,
+  TextInput,
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -23,12 +25,15 @@ import { EmptyState } from "@/components/EmptyState";
 import { ErrorState } from "@/components/ErrorState";
 import { ExpandableImage } from "@/components/ExpandableImage";
 import { LoadingState } from "@/components/LoadingState";
+import { useToast } from "@/components/Toast";
+import { getCategoryColor } from "@/constants/categoryColors";
 import { useAuth } from "@/context/AuthContext";
 import { useColors } from "@/hooks/useColors";
-import { formatCurrency } from "@/lib/inventory-mappers";
+import { formatCurrencyFull, getItemUnitPrice } from "@/lib/inventory-mappers";
 import { useSignedUrl, useSignedUrls } from "@/hooks/useSignedUrls";
 import { isStoragePath } from "@/lib/storage-helpers";
-import { uploadCoverPhoto } from "@/lib/photo-upload";
+import { formatUploadFailure, uploadCoverPhoto } from "@/lib/photo-upload";
+import { isRecentItem } from "@/lib/recent-items";
 import { supabase } from "@/lib/supabase";
 import type { InventoryItem, InventoryRoom } from "@/types";
 
@@ -54,25 +59,6 @@ const CATEGORY_ICONS: Record<string, keyof typeof Feather.glyphMap> = {
   automotive: "truck",
 };
 
-/** Maps category key → colored dot */
-const CATEGORY_COLORS: Record<string, string> = {
-  electronics: "#1D9E75",
-  furniture: "#8B5CF6",
-  appliances: "#3B82F6",
-  decor: "#14B8A6",
-  jewellery: "#EC4899",
-  jewelry: "#EC4899",
-  clothing: "#F59E0B",
-  kitchen: "#F97316",
-  outdoor: "#22C55E",
-  garden: "#16A34A",
-  lighting: "#EAB308",
-  art: "#F472B6",
-  sport: "#06B6D4",
-  tools: "#64748B",
-  automotive: "#78716C",
-};
-
 function categoryIcon(cat: string | null): keyof typeof Feather.glyphMap {
   if (!cat) return "package";
   const key = cat.toLowerCase().split(/[\s&]/)[0];
@@ -80,18 +66,20 @@ function categoryIcon(cat: string | null): keyof typeof Feather.glyphMap {
 }
 
 function categoryDotColor(cat: string | null): string {
-  if (!cat) return "#94a3b8";
-  const key = cat.toLowerCase().split(/[\s&]/)[0];
-  return CATEGORY_COLORS[key] ?? "#94a3b8";
+  return getCategoryColor(cat);
 }
 
 function valuationLabel(item: InventoryItem): string | null {
   const src = ((item.price_source_type ?? item.valuation_basis ?? "") as string).toLowerCase();
   if (src.includes("user") || src.includes("manual")) return "User added";
-  if (src.includes("listing") || src.includes("link")) return "Listing linked";
+  if (src.includes("listing") || src.includes("link")) return "Replacement listing";
   if (src.includes("ai") || src.includes("scan")) return "AI identified";
   if (item.estimated_price != null || item.unit_estimated_price != null) return "Estimated";
   return null;
+}
+
+function isWebUrl(value: string | null | undefined): value is string {
+  return typeof value === "string" && /^https?:\/\//i.test(value);
 }
 
 const ROOM_ICONS: Record<string, string> = {
@@ -115,16 +103,50 @@ function roomIconName(roomType: string | null): keyof typeof Feather.glyphMap {
   return (ROOM_ICONS[key] ?? "home") as keyof typeof Feather.glyphMap;
 }
 
+function parsePrice(value: string): number | null {
+  const parsed = Number(value.replace(/[^0-9.]/g, ""));
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
+}
+
+type CardEditTarget = "name" | "valuation";
+
 function ItemCard({
   item,
   colors,
   resolvedImageUrl,
+  evidenceCount = 0,
+  isNew = false,
+  editingTarget,
+  onBeginEdit,
+  onCloseEdit,
 }: {
   item: InventoryItem;
   colors: ReturnType<typeof import("@/hooks/useColors").useColors>;
   /** Pre-resolved signed URL from the parent's batch useSignedUrls() call. */
   resolvedImageUrl?: string | null;
+  evidenceCount?: number;
+  isNew?: boolean;
+  editingTarget: CardEditTarget | null;
+  onBeginEdit: (target: CardEditTarget) => void;
+  onCloseEdit: (target: CardEditTarget) => void;
 }) {
+  const queryClient = useQueryClient();
+  const { showToast } = useToast();
+  const activeEditorRef = useRef<View>(null);
+  const nameActionPressRef = useRef(false);
+  const [nameDraft, setNameDraft] = useState(item.name);
+  const [quantityDraft, setQuantityDraft] = useState(String(item.quantity ?? 1));
+  const [unitPriceDraft, setUnitPriceDraft] = useState(String(getItemUnitPrice(item)));
+  const [savingCard, setSavingCard] = useState(false);
+
+  useEffect(() => {
+    if (!editingTarget) {
+      setNameDraft(item.name);
+      setQuantityDraft(String(item.quantity ?? 1));
+      setUnitPriceDraft(String(getItemUnitPrice(item)));
+    }
+  }, [editingTarget, item]);
+
   // The single source of truth for this item's image reference in the DB.
   // image_url takes priority; photo_url is the legacy fallback column.
   const rawImageRef = item.image_url ?? item.photo_url ?? null;
@@ -163,12 +185,131 @@ function ItemCard({
       ? { x: rawPin.x, y: rawPin.y }
       : null;
 
-  const totalValue =
-    (item.estimated_price ?? item.unit_estimated_price ?? 0) *
-    (item.quantity ?? 1);
+  const quantity = item.quantity ?? 1;
+  const unitPrice = getItemUnitPrice(item);
+  const totalValue = unitPrice * quantity;
+  const draftQuantity = Math.max(1, Number.parseInt(quantityDraft, 10) || 1);
+  const draftUnitPrice = parsePrice(unitPriceDraft) ?? 0;
+  const draftTotal = draftUnitPrice * draftQuantity;
   const valLabel = valuationLabel(item);
   const dotColor = categoryDotColor(item.category);
   const placeholderIcon = categoryIcon(item.category);
+
+  const persistCardUpdate = async (updates: Partial<InventoryItem>): Promise<boolean> => {
+    setSavingCard(true);
+    try {
+      const { error: updateError } = await supabase
+        .from("inventory_items")
+        .update(updates)
+        .eq("id", item.id)
+        .select("*")
+        .single();
+      if (updateError) throw updateError;
+
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["item", item.id] }),
+        queryClient.invalidateQueries({ queryKey: ["items", item.room_id] }),
+        queryClient.invalidateQueries({ queryKey: ["all-items"] }),
+        queryClient.invalidateQueries({ queryKey: ["property-items", item.file_id] }),
+      ]);
+      showToast("Item updated");
+      return true;
+    } catch (updateFailure) {
+      Alert.alert(
+        "Couldn’t update item",
+        updateFailure instanceof Error ? updateFailure.message : "Please try again.",
+      );
+      return false;
+    } finally {
+      setSavingCard(false);
+    }
+  };
+
+  const beginNameEdit = () => {
+    setNameDraft(item.name);
+    onBeginEdit("name");
+    void Haptics.selectionAsync().catch(() => undefined);
+  };
+
+  const beginValuationEdit = () => {
+    setQuantityDraft(String(quantity));
+    setUnitPriceDraft(String(unitPrice));
+    onBeginEdit("valuation");
+    void Haptics.selectionAsync().catch(() => undefined);
+  };
+
+  const cancelInlineEdit = () => {
+    setNameDraft(item.name);
+    setQuantityDraft(String(quantity));
+    setUnitPriceDraft(String(unitPrice));
+    if (editingTarget) onCloseEdit(editingTarget);
+    void Haptics.selectionAsync().catch(() => undefined);
+  };
+
+  const saveNameEdit = async () => {
+    if (savingCard) return;
+    const nextName = nameDraft.trim();
+    if (!nextName) {
+      Alert.alert("Item name required", "Enter a name before saving.");
+      return;
+    }
+    if (nextName === item.name) {
+      onCloseEdit("name");
+      return;
+    }
+    if (await persistCardUpdate({ name: nextName })) onCloseEdit("name");
+  };
+
+  const saveValuationEdit = async () => {
+    if (savingCard) return;
+    const nextUnitPrice = parsePrice(unitPriceDraft);
+    if (nextUnitPrice === null) {
+      Alert.alert("Check price", "Enter a valid each price of zero or more.");
+      return;
+    }
+
+    const roundedUnitPrice = Math.round(nextUnitPrice * 100) / 100;
+    const priceChanged = roundedUnitPrice !== unitPrice;
+    const updates: Partial<InventoryItem> = {
+      quantity: draftQuantity,
+      estimated_price: roundedUnitPrice,
+      unit_estimated_price: roundedUnitPrice,
+      ...(priceChanged
+        ? { price_source_type: "user_entered", valuation_basis: "manual" }
+        : {}),
+    };
+
+    if (await persistCardUpdate(updates)) onCloseEdit("valuation");
+  };
+
+  const handleNameBlur = () => {
+    setTimeout(() => {
+      if (!nameActionPressRef.current) void saveNameEdit();
+    }, 0);
+  };
+
+  const finishNameActionPress = () => {
+    setTimeout(() => {
+      nameActionPressRef.current = false;
+    }, 100);
+  };
+
+  useEffect(() => {
+    if (Platform.OS !== "web" || !editingTarget) return;
+
+    const handlePointerDown = (event: PointerEvent) => {
+      const editor = activeEditorRef.current as unknown as {
+        contains?: (target: EventTarget | null) => boolean;
+      } | null;
+      if (editor?.contains?.(event.target)) return;
+
+      if (editingTarget === "name") void saveNameEdit();
+      else void saveValuationEdit();
+    };
+
+    document.addEventListener("pointerdown", handlePointerDown, true);
+    return () => document.removeEventListener("pointerdown", handlePointerDown, true);
+  }, [editingTarget, nameDraft, quantityDraft, unitPriceDraft, savingCard]);
 
   const goToDetail = async () => {
     await Haptics.selectionAsync();
@@ -178,12 +319,23 @@ function ItemCard({
     });
   };
 
-  const goToEdit = async () => {
+  const goToEvidence = async () => {
     await Haptics.selectionAsync();
     router.push({
-      pathname: "/(tabs)/edit-item/[id]",
-      params: { id: item.id },
+      pathname: "/(tabs)/item/[id]",
+      params: { id: item.id, name: item.name, evidence: "add" },
     });
+  };
+
+  const goToReplacementPricing = async () => {
+    await Haptics.selectionAsync();
+    router.push(`/(tabs)/replacement-pricing/${item.id}` as Href);
+  };
+
+  const openReplacementListing = async () => {
+    if (!isWebUrl(item.web_listing_url)) return;
+    await Haptics.selectionAsync();
+    await WebBrowser.openBrowserAsync(item.web_listing_url);
   };
 
   return (
@@ -193,18 +345,12 @@ function ItemCard({
         {
           backgroundColor: colors.card,
           borderRadius: colors.radius,
-          borderColor: colors.border,
+          borderColor: isNew ? colors.primary : colors.border,
         },
       ]}
     >
       {/* ── Summary row ── */}
-      <Pressable
-        onPress={goToDetail}
-        style={({ pressed }) => [
-          styles.cardSummary,
-          { opacity: pressed ? 0.88 : 1 },
-        ]}
-      >
+      <View style={styles.cardSummary}>
         {/* Thumbnail */}
         <View style={[styles.thumbWrap, { borderColor: colors.border }]}>
           <ExpandableImage
@@ -223,26 +369,171 @@ function ItemCard({
         <View style={styles.cardBody}>
           {/* Name (left) + Price (right) — same row */}
           <View style={styles.nameRow}>
-            <Text
-              style={[styles.cardName, { color: colors.foreground }]}
-              numberOfLines={2}
-            >
-              {item.name}
-            </Text>
-            {totalValue > 0 && (
-              <View style={styles.priceBlock}>
-                <Text style={[styles.price, { color: colors.foreground }]}>
-                  {formatCurrency(totalValue)}
-                </Text>
-                {valLabel && (
-                  <Text
-                    style={[styles.valLabel, { color: colors.mutedForeground }]}
+            <View style={styles.nameBlock}>
+              {isNew ? (
+                <View style={[styles.newBadge, { backgroundColor: colors.primary }]}>
+                  <Text style={[styles.newBadgeText, { color: colors.primaryForeground }]}>NEW</Text>
+                </View>
+              ) : null}
+              {editingTarget === "name" ? (
+                <View ref={activeEditorRef} style={styles.compactNameEdit}>
+                  <TextInput
+                    autoFocus
+                    accessibilityLabel="Item name"
+                    value={nameDraft}
+                    onChangeText={setNameDraft}
+                    editable={!savingCard}
+                    onSubmitEditing={() => void saveNameEdit()}
+                    onBlur={handleNameBlur}
+                    style={[
+                      styles.compactNameInput,
+                      { color: colors.foreground, backgroundColor: colors.card, borderColor: colors.primary },
+                    ]}
+                  />
+                  <Pressable
+                    accessibilityLabel="Save item name"
+                    onPress={() => void saveNameEdit()}
+                    onPressIn={() => {
+                      nameActionPressRef.current = true;
+                    }}
+                    onPressOut={finishNameActionPress}
+                    disabled={savingCard}
+                    hitSlop={5}
                   >
-                    {valLabel}
+                    {savingCard ? (
+                      <ActivityIndicator size="small" color={colors.primary} />
+                    ) : (
+                      <Feather name="check" size={15} color={colors.primary} />
+                    )}
+                  </Pressable>
+                  <Pressable
+                    accessibilityLabel="Cancel item name edit"
+                    onPress={cancelInlineEdit}
+                    onPressIn={() => {
+                      nameActionPressRef.current = true;
+                    }}
+                    onPressOut={finishNameActionPress}
+                    disabled={savingCard}
+                    hitSlop={5}
+                  >
+                    <Feather name="x" size={15} color={colors.mutedForeground} />
+                  </Pressable>
+                </View>
+              ) : (
+                <Pressable accessibilityLabel="Edit item name" onPress={beginNameEdit} hitSlop={5}>
+                  <Text style={[styles.cardName, { color: colors.foreground }]} numberOfLines={2}>
+                    {item.name}
                   </Text>
-                )}
-              </View>
-            )}
+                </Pressable>
+              )}
+            </View>
+            <View style={[styles.priceBlock, editingTarget === "valuation" ? styles.priceBlockEditing : null]}>
+              {editingTarget === "valuation" ? (
+                <View ref={activeEditorRef} style={styles.compactValuationEdit}>
+                  <View style={styles.compactQuantityRow}>
+                    <Text style={[styles.compactEditLabel, { color: colors.mutedForeground }]}>Qty</Text>
+                    <Pressable
+                      accessibilityLabel="Decrease quantity"
+                      onPress={() => setQuantityDraft(String(Math.max(1, draftQuantity - 1)))}
+                      disabled={savingCard || draftQuantity <= 1}
+                      hitSlop={4}
+                      style={[
+                        styles.compactStepButton,
+                        { borderColor: colors.border, opacity: draftQuantity <= 1 ? 0.4 : 1 },
+                      ]}
+                    >
+                      <Feather name="minus" size={12} color={colors.foreground} />
+                    </Pressable>
+                    <Text style={[styles.compactQuantityValue, { color: colors.foreground }]}>{draftQuantity}</Text>
+                    <Pressable
+                      accessibilityLabel="Increase quantity"
+                      onPress={() => setQuantityDraft(String(draftQuantity + 1))}
+                      disabled={savingCard}
+                      hitSlop={4}
+                      style={[styles.compactStepButton, { borderColor: colors.border }]}
+                    >
+                      <Feather name="plus" size={12} color={colors.foreground} />
+                    </Pressable>
+                  </View>
+                  <View style={styles.compactPriceRow}>
+                    <Text style={[styles.compactEditLabel, { color: colors.mutedForeground }]}>
+                      {draftQuantity > 1 ? "Each" : "Price"}
+                    </Text>
+                    <View style={[styles.compactPriceInputWrap, { borderColor: colors.primary, backgroundColor: colors.card }]}>
+                      <Text style={[styles.compactCurrency, { color: colors.mutedForeground }]}>$</Text>
+                      <TextInput
+                        autoFocus
+                        accessibilityLabel={draftQuantity > 1 ? "Each price" : "Price"}
+                        value={unitPriceDraft}
+                        onChangeText={setUnitPriceDraft}
+                        keyboardType="decimal-pad"
+                        inputMode="decimal"
+                        selectTextOnFocus
+                        editable={!savingCard}
+                        onSubmitEditing={() => void saveValuationEdit()}
+                        style={[styles.compactPriceInput, { color: colors.foreground }]}
+                      />
+                    </View>
+                  </View>
+                  <Text style={[styles.compactTotalPreview, { color: colors.mutedForeground }]}>
+                    Total {formatCurrencyFull(draftTotal)}
+                  </Text>
+                  <View style={styles.compactEditFooter}>
+                    <Pressable
+                      accessibilityLabel="Save valuation"
+                      onPress={() => void saveValuationEdit()}
+                      disabled={savingCard}
+                      hitSlop={5}
+                      style={styles.compactIconButton}
+                    >
+                      {savingCard ? (
+                        <ActivityIndicator size="small" color={colors.primary} />
+                      ) : (
+                        <Feather name="check" size={16} color={colors.primary} />
+                      )}
+                    </Pressable>
+                    <Pressable
+                      accessibilityLabel="Cancel valuation edit"
+                      onPress={cancelInlineEdit}
+                      disabled={savingCard}
+                      hitSlop={5}
+                      style={styles.compactIconButton}
+                    >
+                      <Feather name="x" size={16} color={colors.mutedForeground} />
+                    </Pressable>
+                  </View>
+                </View>
+              ) : (
+                <>
+                  <Pressable accessibilityLabel="Edit item valuation" onPress={beginValuationEdit} hitSlop={5}>
+                    <View style={styles.compactValuation}>
+                      <Text style={[styles.mainValue, { color: colors.foreground }]}>
+                        {formatCurrencyFull(totalValue)}
+                      </Text>
+                      {quantity > 1 ? (
+                        <Text style={[styles.valueMeta, { color: colors.mutedForeground }]}>
+                          Qty {quantity} · Each {formatCurrencyFull(unitPrice)}
+                        </Text>
+                      ) : null}
+                    </View>
+                  </Pressable>
+                  {valLabel && item.price_source_type === "web_listing" && isWebUrl(item.web_listing_url) ? (
+                    <Pressable
+                      accessibilityRole="link"
+                      accessibilityLabel="Open replacement listing"
+                      onPress={() => void openReplacementListing()}
+                      hitSlop={6}
+                    >
+                      <Text style={[styles.valLabel, styles.listingLink, { color: TEAL }]}>
+                        {valLabel} <Feather name="external-link" size={10} color={TEAL} />
+                      </Text>
+                    </Pressable>
+                  ) : valLabel ? (
+                    <Text style={[styles.valLabel, { color: colors.mutedForeground }]}>{valLabel}</Text>
+                  ) : null}
+                </>
+              )}
+            </View>
           </View>
 
           {/* Category chip */}
@@ -254,22 +545,10 @@ function ItemCard({
             >
               {item.category ?? "General items"}
             </Text>
-            {item.quantity != null && item.quantity > 1 && (
-              <Text style={[styles.qty, { color: colors.mutedForeground }]}>
-                {" "}
-                ×{item.quantity}
-              </Text>
-            )}
           </View>
         </View>
 
-        <Feather
-          name="chevron-right"
-          size={16}
-          color={colors.mutedForeground}
-          style={{ marginLeft: 2 }}
-        />
-      </Pressable>
+      </View>
 
       {/* ── Divider ── */}
       <View style={[styles.divider, { backgroundColor: colors.border }]} />
@@ -278,7 +557,7 @@ function ItemCard({
       <View style={styles.actions}>
         {/* Primary: Find replacement price */}
         <Pressable
-          onPress={goToDetail}
+          onPress={goToReplacementPricing}
           style={({ pressed }) => [
             styles.findPriceBtn,
             { borderColor: TEAL, opacity: pressed ? 0.75 : 1 },
@@ -290,25 +569,25 @@ function ItemCard({
           </Text>
         </Pressable>
 
-        {/* Secondary: Edit + View details */}
+        {/* Compact secondary actions; quick edits live in the summary above. */}
         <View style={styles.secondaryRow}>
           <Pressable
-            onPress={goToEdit}
+            onPress={goToEvidence}
             style={({ pressed }) => [
               styles.secondaryBtn,
               {
                 borderColor: colors.border,
                 backgroundColor: colors.secondary,
+                flex: 1,
                 opacity: pressed ? 0.75 : 1,
               },
             ]}
           >
-            <Feather name="edit-2" size={13} color={colors.foreground} />
+            <Feather name="paperclip" size={13} color={colors.primary} />
             <Text style={[styles.secondaryTxt, { color: colors.foreground }]}>
-              Edit
+              {evidenceCount > 0 ? `Evidence · ${evidenceCount}` : "Add evidence"}
             </Text>
           </Pressable>
-
           <Pressable
             onPress={goToDetail}
             style={({ pressed }) => [
@@ -346,8 +625,14 @@ export default function ItemsScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const queryClient = useQueryClient();
+  const { showToast } = useToast();
 
   const [coverUploading, setCoverUploading] = useState(false);
+  const [recentTick, setRecentTick] = useState(0);
+  const [activeEdit, setActiveEdit] = useState<{
+    itemId: string;
+    target: CardEditTarget;
+  } | null>(null);
 
   // Parallax hero — scrollY drives image translateY 0→-40 as user scrolls down
   const scrollY = useRef(new Animated.Value(0)).current;
@@ -377,6 +662,12 @@ export default function ItemsScreen() {
     enabled: !!session && !!id,
   });
 
+  useEffect(() => {
+    if (!(items ?? []).some((item) => isRecentItem(item.id))) return;
+    const timer = setTimeout(() => setRecentTick((value) => value + 1), 6000);
+    return () => clearTimeout(timer);
+  }, [items]);
+
   const { data: room } = useQuery({
     queryKey: ["room", id, session?.user.id],
     queryFn: async () => {
@@ -389,6 +680,40 @@ export default function ItemsScreen() {
       return data as InventoryRoom;
     },
     enabled: !!session && !!id,
+  });
+
+  const roomItemIds = React.useMemo(() => (items ?? []).map((item) => item.id), [items]);
+  const roomItemIdsKey = React.useMemo(
+    () => [...roomItemIds].sort().join(","),
+    [roomItemIds],
+  );
+  const { data: evidenceCounts = {} } = useQuery<Record<string, number>>({
+    queryKey: ["room-evidence-counts", id, session?.user.id, roomItemIdsKey],
+    queryFn: async () => {
+      if (roomItemIds.length === 0) return {};
+
+      const { data, error: countError } = await supabase
+        .from("claim_evidence_items")
+        .select("item_id")
+        .in("item_id", roomItemIds);
+
+      if (countError) {
+        console.warn("[roomEvidenceCounts] unable to load", {
+          roomId: id,
+          message: countError.message,
+          code: countError.code,
+          details: countError.details,
+          hint: countError.hint,
+        });
+        return {};
+      }
+
+      return (data ?? []).reduce<Record<string, number>>((counts, link) => {
+        if (link.item_id) counts[link.item_id] = (counts[link.item_id] ?? 0) + 1;
+        return counts;
+      }, {});
+    },
+    enabled: !!session && !!id && roomItemIds.length > 0,
   });
 
   // Signed URL for the room cover photo (resolves storage path → 1-hr signed URL)
@@ -440,10 +765,13 @@ export default function ItemsScreen() {
     try {
       const uploaded = await uploadCoverPhoto(
         result.assets[0].uri,
-        session.user.id
+        session.user.id,
+        { source: "room_cover", fileId: fileId ?? undefined }
       );
-      if (!uploaded) {
-        Alert.alert("Upload failed", "Could not upload cover photo. Please try again.");
+      if (!uploaded.ok) {
+        const diagnostic = formatUploadFailure(uploaded);
+        console.error("[roomCover] Upload diagnostic\n" + diagnostic);
+        Alert.alert("Room cover upload failed", diagnostic);
         return;
       }
       // Store the durable storage path in the DB, not the short-lived signed URL.
@@ -470,6 +798,7 @@ export default function ItemsScreen() {
         queryClient.invalidateQueries({ queryKey: ["rooms", fileId] }),
         queryClient.invalidateQueries({ queryKey: ["rooms", fileId, session.user.id] }),
       ]);
+      showToast("Room photo saved");
     } finally {
       setCoverUploading(false);
     }
@@ -554,14 +883,23 @@ export default function ItemsScreen() {
               <ItemCard
                 item={item}
                 colors={colors}
+                evidenceCount={evidenceCounts[item.id] ?? 0}
+                isNew={isRecentItem(item.id) && recentTick >= 0}
                 resolvedImageUrl={itemSignedUrls.get(item.image_url ?? item.photo_url ?? "") ?? null}
+                editingTarget={activeEdit?.itemId === item.id ? activeEdit.target : null}
+                onBeginEdit={(target) => setActiveEdit({ itemId: item.id, target })}
+                onCloseEdit={(target) =>
+                  setActiveEdit((current) =>
+                    current?.itemId === item.id && current.target === target ? null : current,
+                  )
+                }
               />
             )}
             ListHeaderComponent={renderRoomCover}
             contentContainerStyle={[
               styles.list,
               {
-                paddingBottom: insets.bottom + 88,
+                paddingBottom: insets.bottom + 160,
                 ...(Platform.OS === "web" ? { paddingTop: 0 } : {}),
               },
             ]}
@@ -605,7 +943,7 @@ export default function ItemsScreen() {
             >
               <Feather name="zap" size={20} color={colors.primaryForeground} />
               <Text style={[styles.fabText, { color: colors.primaryForeground }]}>
-                Scan room
+                Scan items
               </Text>
             </Pressable>
             <Pressable
@@ -689,7 +1027,20 @@ const styles = StyleSheet.create({
   nameRow: {
     flexDirection: "row",
     alignItems: "flex-start",
-    gap: 8,
+    justifyContent: "space-between",
+    gap: 10,
+  },
+  nameBlock: { flex: 1, minWidth: 0, gap: 4 },
+  compactNameEdit: { flexDirection: "row", alignItems: "center", gap: 6 },
+  compactNameInput: {
+    flex: 1,
+    minWidth: 72,
+    height: 36,
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingHorizontal: 8,
+    fontSize: 13,
+    fontFamily: "Inter_500Medium",
   },
   cardName: {
     fontSize: 15,
@@ -697,13 +1048,56 @@ const styles = StyleSheet.create({
     lineHeight: 20,
     flex: 1,
   },
-  priceBlock: { alignItems: "flex-end", gap: 1, flexShrink: 0 },
-  price: { fontSize: 14, fontFamily: "Inter_700Bold" },
+  newBadge: { borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2, marginTop: 1 },
+  newBadgeText: { fontSize: 9, fontFamily: "Inter_700Bold", letterSpacing: 0.5 },
+  priceBlock: { alignItems: "stretch", gap: 3, width: 124, flexShrink: 0 },
+  priceBlockEditing: { width: 184 },
+  compactValuation: { alignItems: "flex-end", gap: 2, paddingTop: 1 },
+  compactValuationEdit: { alignItems: "stretch", gap: 6 },
+  compactQuantityRow: { flexDirection: "row", alignItems: "center", justifyContent: "flex-end", gap: 6 },
+  compactEditLabel: { width: 32, fontSize: 10, fontFamily: "Inter_400Regular", textAlign: "right" },
+  compactStepButton: {
+    width: 25,
+    height: 25,
+    borderWidth: 1,
+    borderRadius: 6,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  compactQuantityValue: { minWidth: 18, fontSize: 12, fontFamily: "Inter_600SemiBold", textAlign: "center" },
+  compactPriceRow: { flexDirection: "row", alignItems: "center", justifyContent: "flex-end", gap: 5 },
+  compactPriceInputWrap: {
+    width: 88,
+    height: 32,
+    borderWidth: 1,
+    borderRadius: 7,
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 5,
+    overflow: "hidden",
+  },
+  compactCurrency: { fontSize: 11, fontFamily: "Inter_400Regular" },
+  compactPriceInput: {
+    flex: 1,
+    width: 0,
+    minWidth: 0,
+    paddingHorizontal: 2,
+    paddingVertical: 4,
+    fontSize: 12,
+    fontFamily: "Inter_500Medium",
+    textAlign: "right",
+  },
+  compactIconButton: { width: 18, height: 26, alignItems: "center", justifyContent: "center" },
+  compactTotalPreview: { fontSize: 10, lineHeight: 14, fontFamily: "Inter_500Medium", textAlign: "right", paddingRight: 2 },
+  compactEditFooter: { flexDirection: "row", alignItems: "center", justifyContent: "flex-end", gap: 8, paddingRight: 1 },
+  mainValue: { fontSize: 15, lineHeight: 20, fontFamily: "Inter_700Bold", textAlign: "right" },
+  valueMeta: { fontSize: 10, lineHeight: 15, fontFamily: "Inter_400Regular", textAlign: "right" },
   valLabel: {
     fontSize: 10,
     fontFamily: "Inter_400Regular",
     textAlign: "right",
   },
+  listingLink: { textDecorationLine: "underline" },
   chipRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -712,7 +1106,6 @@ const styles = StyleSheet.create({
   },
   dot: { width: 8, height: 8, borderRadius: 4 },
   chipText: { fontSize: 12, fontFamily: "Inter_400Regular", flexShrink: 1 },
-  qty: { fontSize: 12, fontFamily: "Inter_400Regular" },
   /* ── Divider ── */
   divider: { height: StyleSheet.hairlineWidth, marginHorizontal: 12 },
   /* ── Actions ── */

@@ -14,6 +14,7 @@
 import { supabase } from "@/lib/supabase";
 
 export const INVENTORY_PHOTOS_BUCKET = "inventory-photos";
+export const CLAIM_EVIDENCE_BUCKET = "claim-evidence";
 
 /**
  * Expiry in seconds for signed display URLs.

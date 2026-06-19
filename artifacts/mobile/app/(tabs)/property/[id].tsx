@@ -24,11 +24,13 @@ import {
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import Svg, { Circle, Line, Path, Polyline, Rect } from "react-native-svg";
+import Svg, { Circle, Defs, G, Line, Mask, Path, Polyline, Rect } from "react-native-svg";
 
 import { EmptyState } from "@/components/EmptyState";
 import { ErrorState } from "@/components/ErrorState";
 import { LoadingState } from "@/components/LoadingState";
+import { useToast } from "@/components/Toast";
+import { getCategoryColor, getCategoryLegendEntry } from "@/constants/categoryColors";
 import { useAuth } from "@/context/AuthContext";
 import { useColors } from "@/hooks/useColors";
 import { useSignedUrl, useSignedUrls } from "@/hooks/useSignedUrls";
@@ -43,7 +45,7 @@ import {
   hasPhoto,
   hasValue,
 } from "@/lib/inventory-mappers";
-import { uploadCoverPhoto } from "@/lib/photo-upload";
+import { formatUploadFailure, uploadCoverPhoto } from "@/lib/photo-upload";
 import { supabase } from "@/lib/supabase";
 import type { InventoryFile, InventoryItem, InventoryRoom } from "@/types";
 
@@ -285,16 +287,7 @@ function CompactSummary({
 // ─── Donut chart helpers ───────────────────────────────────────────────────────
 
 /** Muted pastel palette for donut segments — calm and premium on the dark card */
-const DONUT_COLORS = [
-  "#93C5D4", // dusty sky-blue    — Furniture
-  "#8FC4A6", // soft sage-green   — Electronics
-  "#E8C07A", // warm sand         — Appliances
-  "#C4A8D8", // soft lilac        — General
-  "#8FBBD6", // calm periwinkle   — Other
-  "#E0AFBB", // blush rose
-  "#9ABFA0", // muted sage
-  "#C5B5AF", // warm mushroom
-];
+const AnimatedSvgCircle = Animated.createAnimatedComponent(Circle);
 
 function segmentPath(
   cx: number, cy: number,
@@ -317,28 +310,13 @@ function segmentPath(
 
 function CategoryDonut({
   data,
-  total,
   size = 110,
 }: {
-  data: { name: string; value: number }[];
-  total: number;
+  data: { key: string; name: string; value: number }[];
   size?: number;
 }) {
-  // Animated progress 0 → 1 drives the sweep of every segment simultaneously
-  const [progress, setProgress] = useState(0);
-  useEffect(() => {
-    const anim = new Animated.Value(0);
-    const listenerId = anim.addListener(({ value }) => setProgress(value));
-    Animated.timing(anim, {
-      toValue: 1,
-      duration: 800,
-      delay: 120,
-      easing: Easing.out(Easing.cubic),
-      useNativeDriver: false,
-    }).start();
-    return () => anim.removeListener(listenerId);
-  }, []);
-
+  // Category composition always totals 100%; it is not cover/documentation progress.
+  // Insurance-cover progress is intentionally rendered in a separate component.
   const cx = size / 2;
   const cy = size / 2;
   const outerR = size / 2 - 3;
@@ -346,20 +324,41 @@ function CategoryDonut({
   const midR = (outerR + innerR) / 2;
   const strokeW = outerR - innerR;
   const circ = 2 * Math.PI * midR;
-  const GAP_PX = 2; // fixed-pixel gap between segments
+  const categoryTotal = data.reduce((sum, segment) => sum + Math.max(0, segment.value), 0);
+  const growth = useRef(new Animated.Value(0)).current;
+  const maskId = React.useId().replace(/:/g, "");
 
-  if (total <= 0 || data.length === 0) {
+  useEffect(() => {
+    if (categoryTotal <= 0) return;
+    growth.setValue(0);
+    const animation = Animated.timing(growth, {
+      toValue: 1,
+      duration: 750,
+      delay: 100,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: false,
+    });
+    animation.start();
+    return () => animation.stop();
+  }, [categoryTotal, growth]);
+
+  if (categoryTotal <= 0 || data.length === 0) {
     return (
-      <Svg width={size} height={size}>
-        <Circle
-          cx={cx}
-          cy={cy}
-          r={midR}
-          fill="none"
-          stroke="rgba(255,255,255,0.15)"
-          strokeWidth={strokeW}
-        />
-      </Svg>
+      <View style={{ width: size, height: size, alignItems: "center", justifyContent: "center" }}>
+        <View
+          style={{
+            width: size - 8,
+            height: size - 8,
+            borderRadius: size / 2,
+            borderWidth: strokeW,
+            borderColor: "#E2E8F0",
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+        >
+          <Feather name="pie-chart" size={18} color="#94A3B8" />
+        </View>
+      </View>
     );
   }
 
@@ -368,29 +367,52 @@ function CategoryDonut({
   // Subsequent segments offset by the cumulative raw arc of all prior segments.
   const startOffset = circ / 4;
   let accumulated = 0;
+  const animatedDashOffset = growth.interpolate({
+    inputRange: [0, 1],
+    outputRange: [circ, 0],
+  });
 
   return (
     <Svg width={size} height={size}>
-      {data.map((seg, i) => {
-        const fraction = seg.value / total;
-        const fullArc = fraction * circ;
-        const visibleArc = Math.max(fullArc * progress - GAP_PX, 0.001);
-        const dashOffset = startOffset - accumulated;
-        accumulated += fullArc;
-        return (
-          <Circle
-            key={i}
+      <Defs>
+        <Mask id={maskId} x={0} y={0} width={size} height={size} maskUnits="userSpaceOnUse">
+          <AnimatedSvgCircle
             cx={cx}
             cy={cy}
             r={midR}
             fill="none"
-            stroke={DONUT_COLORS[i % DONUT_COLORS.length]}
-            strokeWidth={strokeW}
-            strokeDasharray={`${visibleArc} ${circ}`}
-            strokeDashoffset={dashOffset}
+            stroke="#FFFFFF"
+            strokeWidth={strokeW + 2}
+            strokeDasharray={`${circ} ${circ}`}
+            strokeDashoffset={animatedDashOffset}
+            strokeLinecap="butt"
+            rotation={-90}
+            origin={`${cx}, ${cy}`}
           />
-        );
-      })}
+        </Mask>
+      </Defs>
+      <G mask={`url(#${maskId})`}>
+        {data.map((seg) => {
+          const fraction = Math.max(0, seg.value) / categoryTotal;
+          const fullArc = fraction * circ;
+          const dashOffset = startOffset - accumulated;
+          accumulated += fullArc;
+          return (
+            <Circle
+              key={seg.key}
+              cx={cx}
+              cy={cy}
+              r={midR}
+              fill="none"
+              stroke={getCategoryColor(seg.key)}
+              strokeWidth={strokeW}
+              strokeDasharray={`${Math.max(fullArc, 0.001)} ${Math.max(circ - fullArc, 0.001)}`}
+              strokeDashoffset={dashOffset}
+              strokeLinecap="butt"
+            />
+          );
+        })}
+      </G>
     </Svg>
   );
 }
@@ -409,6 +431,8 @@ function InsightCard({
   const [innerW, setInnerW] = useState(0);
   const [sparkPeriod, setSparkPeriod] = useState(3);
   const [showPeriodPicker, setShowPeriodPicker] = useState(false);
+  const [showCategoryBreakdown, setShowCategoryBreakdown] = useState(false);
+  const insets = useSafeAreaInsets();
   const sparkPoints = useMemo(() => buildSparklinePoints(items, sparkPeriod), [items, sparkPeriod]);
 
   // Animated counting total + haptic feedback (fast → slow deceleration)
@@ -444,14 +468,19 @@ function InsightCard({
   const categoryData = useMemo(() => {
     const map = new Map<string, number>();
     for (const item of items) {
-      const raw = item.category ?? "Other";
-      const cat = raw.charAt(0).toUpperCase() + raw.slice(1).replace(/_/g, " ");
-      map.set(cat, (map.get(cat) ?? 0) + getItemTotalValue(item));
+      const category = getCategoryLegendEntry(item.category);
+      map.set(category.key, (map.get(category.key) ?? 0) + getItemTotalValue(item));
     }
     return [...map.entries()]
+      .filter(([, value]) => value > 0)
       .sort((a, b) => b[1] - a[1])
-      .map(([name, value]) => ({ name, value }));
+      .map(([key, value]) => ({
+        key,
+        name: getCategoryLegendEntry(key).label,
+        value,
+      }));
   }, [items]);
+  const categoryTotal = categoryData.reduce((sum, item) => sum + item.value, 0);
 
   const insightText = useMemo(() => {
     if (categoryData.length === 0 || totalValue === 0) {
@@ -460,13 +489,16 @@ function InsightCard({
         : "Keep adding items to see a category breakdown.";
     }
     const top = categoryData[0];
-    const pct = Math.round((top.value / totalValue) * 100);
+    const pct = Math.round((top.value / categoryTotal) * 100);
     return `Your biggest category is ${top.name}, making up ${pct}% of your total.`;
-  }, [categoryData, totalValue, items.length]);
+  }, [categoryData, categoryTotal, totalValue, items.length]);
 
   const LEGEND_MAX = 4;
   const legendItems = categoryData.slice(0, LEGEND_MAX);
-  const moreCount = Math.max(0, categoryData.length - LEGEND_MAX);
+  const remainderItems = categoryData.slice(LEGEND_MAX);
+  const moreCount = remainderItems.length;
+  // Keep the compact legend short, but render every real category in the ring.
+  const donutData = categoryData;
 
   return (
     <LinearGradient
@@ -488,22 +520,44 @@ function InsightCard({
 
       {/* ── What's documented ────────────────────────── */}
       <View style={styles.insightInner}>
-        <Text style={styles.insightSectionLabel}>WHAT'S DOCUMENTED</Text>
+        <View style={styles.insightSectionHeader}>
+          <Text style={styles.insightSectionLabel}>WHAT'S DOCUMENTED</Text>
+          {categoryData.length > 0 && (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="View full category breakdown"
+              onPress={() => setShowCategoryBreakdown(true)}
+              style={styles.insightViewAll}
+            >
+              <Text style={styles.insightViewAllText}>View all</Text>
+              <Feather name="chevron-right" size={12} color="#64748B" />
+            </Pressable>
+          )}
+        </View>
         <View
           style={styles.insightBody}
           onLayout={(e) => setInnerW(e.nativeEvent.layout.width)}
         >
           {/* Pastel donut */}
-          <CategoryDonut data={categoryData} total={totalValue} size={110} />
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Category composition. View full breakdown"
+            disabled={categoryData.length === 0}
+            onPress={() => setShowCategoryBreakdown(true)}
+            style={({ pressed }) => pressed ? { opacity: 0.75 } : null}
+          >
+            {/* Complete category composition; insurance-cover progress is separate. */}
+            <CategoryDonut data={donutData} size={110} />
+          </Pressable>
 
           {/* Legend */}
           <View style={styles.insightLegend}>
-            {legendItems.map((item, i) => (
-              <View key={i} style={styles.insightLegendRow}>
+            {legendItems.map((item) => (
+              <View key={item.name} style={styles.insightLegendRow}>
                 <View
                   style={[
                     styles.insightLegendDot,
-                    { backgroundColor: DONUT_COLORS[i % DONUT_COLORS.length] },
+                    { backgroundColor: getCategoryColor(item.key) },
                   ]}
                 />
                 <Text style={styles.insightLegendText} numberOfLines={1}>
@@ -512,7 +566,15 @@ function InsightCard({
               </View>
             ))}
             {moreCount > 0 && (
-              <Text style={styles.insightMoreText}>+{moreCount} more</Text>
+              <Pressable
+                onPress={() => setShowCategoryBreakdown(true)}
+                style={styles.insightLegendRow}
+              >
+                <Text style={styles.insightMoreText}>+{moreCount} more</Text>
+              </Pressable>
+            )}
+            {categoryData.length === 0 && (
+              <Text style={styles.insightMoreText}>No valued categories yet</Text>
             )}
           </View>
 
@@ -564,6 +626,84 @@ function InsightCard({
 
         <Text style={styles.insightSubtext}>{insightText}</Text>
       </View>
+
+      <Modal
+        visible={showCategoryBreakdown}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setShowCategoryBreakdown(false)}
+      >
+        <Pressable
+          style={styles.categoryModalBackdrop}
+          onPress={() => setShowCategoryBreakdown(false)}
+        >
+          <Pressable
+            onPress={(event) => event.stopPropagation()}
+            style={[
+              styles.categoryModalSheet,
+              {
+                backgroundColor: colors.card,
+                paddingBottom: insets.bottom + 16,
+              },
+            ]}
+          >
+            <View style={styles.categoryModalHandleWrap}>
+              <View style={[styles.categoryModalHandle, { backgroundColor: colors.border }]} />
+            </View>
+            <View style={styles.categoryModalHeader}>
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.categoryModalTitle, { color: colors.foreground }]}>Category breakdown</Text>
+                <Text style={[styles.categoryModalSubtitle, { color: colors.mutedForeground }]}>Composition of documented value · totals 100%</Text>
+              </View>
+              <Pressable
+                accessibilityLabel="Close category breakdown"
+                onPress={() => setShowCategoryBreakdown(false)}
+                hitSlop={8}
+                style={[styles.categoryModalClose, { backgroundColor: colors.secondary }]}
+              >
+                <Feather name="x" size={18} color={colors.foreground} />
+              </Pressable>
+            </View>
+
+            <View style={styles.categoryModalChartRow}>
+              <CategoryDonut data={categoryData} size={128} />
+              <View style={{ flex: 1, gap: 3 }}>
+                <Text style={[styles.categoryModalTotal, { color: colors.foreground }]}>100%</Text>
+                <Text style={[styles.categoryModalTotalLabel, { color: colors.mutedForeground }]}>of documented value</Text>
+                <Text style={[styles.categoryModalValue, { color: colors.foreground }]}>{formatCurrency(categoryTotal || null)}</Text>
+              </View>
+            </View>
+
+            <ScrollView showsVerticalScrollIndicator={false} style={{ maxHeight: 330 }}>
+              {categoryData.map((item) => {
+                const percent = categoryTotal > 0 ? (item.value / categoryTotal) * 100 : 0;
+                return (
+                  <View
+                    key={item.name}
+                    style={[styles.categoryModalRow, { borderBottomColor: colors.border }]}
+                  >
+                    <View
+                      style={[
+                        styles.categoryModalDot,
+                        { backgroundColor: getCategoryColor(item.key) },
+                      ]}
+                    />
+                    <Text style={[styles.categoryModalName, { color: colors.foreground }]} numberOfLines={1}>
+                      {item.name}
+                    </Text>
+                    <Text style={[styles.categoryModalValueCell, { color: colors.foreground }]}>
+                      {formatCurrency(item.value || null)}
+                    </Text>
+                    <Text style={[styles.categoryModalPercent, { color: colors.mutedForeground }]}>
+                      {percent.toFixed(percent >= 10 ? 0 : 1)}%
+                    </Text>
+                  </View>
+                );
+              })}
+            </ScrollView>
+          </Pressable>
+        </Pressable>
+      </Modal>
     </LinearGradient>
   );
 }
@@ -1072,7 +1212,7 @@ function RoomCard({
   item,
   itemCount,
   totalValue,
-  maxValue,
+  categoryValues,
   completedCount,
   colors,
   resolvedCoverUrl,
@@ -1080,7 +1220,7 @@ function RoomCard({
   item: InventoryRoom;
   itemCount: number;
   totalValue: number;
-  maxValue: number;
+  categoryValues: RoomStat["categoryValues"];
   completedCount: number;
   colors: ReturnType<typeof import("@/hooks/useColors").useColors>;
   /** Pre-resolved signed URL from the parent's batch useSignedUrls() call. */
@@ -1094,7 +1234,7 @@ function RoomCard({
     });
   };
 
-  const pct = maxValue > 0 ? Math.min(totalValue / maxValue, 1) : 0;
+  const categoryTotal = categoryValues.reduce((sum, category) => sum + category.value, 0);
   const completionPct = itemCount > 0 ? Math.min(completedCount / itemCount, 1) : 0;
   const ringOffset = RING_CIRC * (1 - completionPct);
 
@@ -1291,20 +1431,27 @@ function RoomCard({
           <View
             style={{
               flex: 1,
+              flexDirection: "row",
               height: 4,
               borderRadius: 2,
               backgroundColor: BRAND_BORDER,
               overflow: "hidden",
             }}
           >
-            <View
-              style={{
-                height: 4,
-                borderRadius: 2,
-                width: `${pct * 100}%` as any,
-                backgroundColor: BRAND_TEAL,
-              }}
-            />
+            {categoryTotal > 0
+              ? categoryValues.map((category) => (
+                  <View
+                    key={category.key}
+                    accessibilityLabel={`${category.label} ${Math.round((category.value / categoryTotal) * 100)} percent`}
+                    style={{
+                      height: 4,
+                      flexGrow: category.value,
+                      flexBasis: 0,
+                      backgroundColor: getCategoryColor(category.key),
+                    }}
+                  />
+                ))
+              : null}
           </View>
         </View>
       </View>
@@ -1613,6 +1760,7 @@ export default function PropertyDetailScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const queryClient = useQueryClient();
+  const { showToast } = useToast();
   const [coverModalVisible, setCoverModalVisible] = useState(false);
   const [coverPhotoUploading, setCoverPhotoUploading] = useState(false);
 
@@ -1721,10 +1869,6 @@ export default function PropertyDetailScreen() {
     return calcPropertyStats(property, rooms, items);
   }, [property, rooms, items]);
 
-  const maxRoomValue = stats
-    ? Math.max(...stats.roomStats.map((r) => r.totalValue), 1)
-    : 1;
-
   // Per-room completion: items that have a photo are considered "documented".
   // Value is NOT required — the ring should reach 100% once everything is
   // photographed, which is the primary insurance-readiness signal.
@@ -1789,6 +1933,7 @@ export default function PropertyDetailScreen() {
       setAddRoomVisible(false);
       setAddRoomName("");
       setAddRoomType(null);
+      showToast(`${trimmed} added`);
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     } catch (err) {
       setAddRoomError(err instanceof Error ? err.message : "Failed to create room.");
@@ -1810,13 +1955,19 @@ export default function PropertyDetailScreen() {
 
   const handlePickPropertyCover = async () => {
     if (coverPhotoUploading) return;
-    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (status !== "granted") {
-      Alert.alert(
-        "Permission needed",
-        "Allow access to your photos to set a property cover image."
-      );
-      return;
+    // Browsers require the file picker to open directly from the user's click.
+    // Awaiting a permission request first consumes that user activation and can
+    // cause the picker to be silently blocked. Native platforms still need the
+    // explicit media-library permission flow.
+    if (Platform.OS !== "web") {
+      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (status !== "granted") {
+        Alert.alert(
+          "Permission needed",
+          "Allow access to your photos to set a property cover image."
+        );
+        return;
+      }
     }
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ["images"],
@@ -1826,18 +1977,27 @@ export default function PropertyDetailScreen() {
     });
     if (result.canceled || !result.assets[0]) return;
     if (!session?.user.id) return;
+    const selectedUri = result.assets[0].uri;
     setCoverPhotoUploading(true);
+    // Keep the chosen image visible throughout upload/save. On web this is a
+    // local blob URL; on native it is the picked file URI. The database still
+    // receives only the durable Supabase Storage path below.
+    setLocalCoverUrl(selectedUri);
     try {
       const uploaded = await uploadCoverPhoto(
-        result.assets[0].uri,
-        session.user.id
+        selectedUri,
+        session.user.id,
+        { source: "property_cover", fileId: id }
       );
-      if (!uploaded) {
-        Alert.alert("Upload failed", "Could not upload cover photo. Please try again.");
+      if (!uploaded.ok) {
+        const diagnostic = formatUploadFailure(uploaded);
+        console.error("[propertyCover] Upload diagnostic\n" + diagnostic);
+        setLocalCoverUrl(null);
+        Alert.alert("Property cover upload failed", diagnostic);
         return;
       }
       // Show immediately via the 1-hr signed URL while the DB write is in-flight.
-      setLocalCoverUrl(uploaded.displayUrl);
+      setLocalCoverUrl(uploaded.displayUrl ?? selectedUri);
       const { data: updatedRows, error: updateError } = await supabase
         .from("inventory_files")
         .update({ property_cover_image_url: uploaded.path })
@@ -1858,7 +2018,6 @@ export default function PropertyDetailScreen() {
       }
       // DB write confirmed — clear optimistic state and let the signed URL from
       // the freshly-invalidated property query drive the display.
-      setLocalCoverUrl(null);
       // Invalidate both the property query and the cached signed URL for the new
       // path so useSignedUrl immediately re-fetches the correct signed URL.
       await Promise.all([
@@ -1867,6 +2026,7 @@ export default function PropertyDetailScreen() {
         queryClient.invalidateQueries({ queryKey: ["files"] }),
         queryClient.invalidateQueries({ queryKey: ["inventory-files"] }),
       ]);
+      showToast("Cover photo saved");
     } finally {
       setCoverPhotoUploading(false);
     }
@@ -2423,7 +2583,7 @@ export default function PropertyDetailScreen() {
                 item={rs.room}
                 itemCount={rs.itemCount}
                 totalValue={rs.totalValue}
-                maxValue={maxRoomValue}
+                categoryValues={rs.categoryValues}
                 completedCount={completionMap.get(rs.room.id) ?? 0}
                 colors={colors}
                 resolvedCoverUrl={roomSignedUrlById.get(rs.room.id) ?? null}
@@ -2662,6 +2822,23 @@ const styles = StyleSheet.create({
     letterSpacing: 1.1,
     color: "#334155",
   },
+  insightSectionHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  insightViewAll: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 2,
+    paddingVertical: 3,
+    paddingLeft: 8,
+  },
+  insightViewAllText: {
+    fontSize: 10,
+    fontFamily: "Inter_500Medium",
+    color: "#64748B",
+  },
   insightBody: {
     flexDirection: "row",
     alignItems: "center",
@@ -2744,6 +2921,37 @@ const styles = StyleSheet.create({
   insightPeriodChipTextActive: {
     color: "#FFFFFF",
   },
+  categoryModalBackdrop: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.4)",
+    justifyContent: "flex-end",
+  },
+  categoryModalSheet: {
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    paddingHorizontal: 20,
+    maxHeight: "82%",
+  },
+  categoryModalHandleWrap: { alignItems: "center", paddingTop: 12, paddingBottom: 8 },
+  categoryModalHandle: { width: 36, height: 4, borderRadius: 2 },
+  categoryModalHeader: { flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 8 },
+  categoryModalTitle: { fontSize: 18, fontFamily: "Inter_700Bold" },
+  categoryModalSubtitle: { fontSize: 12, fontFamily: "Inter_400Regular", marginTop: 2 },
+  categoryModalClose: { width: 36, height: 36, borderRadius: 18, alignItems: "center", justifyContent: "center" },
+  categoryModalChartRow: { flexDirection: "row", alignItems: "center", gap: 20, paddingVertical: 14 },
+  categoryModalTotal: { fontSize: 28, fontFamily: "Inter_700Bold" },
+  categoryModalTotalLabel: { fontSize: 12, fontFamily: "Inter_400Regular" },
+  categoryModalValue: { fontSize: 15, fontFamily: "Inter_600SemiBold", marginTop: 8 },
+  categoryModalRow: {
+    minHeight: 48,
+    flexDirection: "row",
+    alignItems: "center",
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  categoryModalDot: { width: 10, height: 10, borderRadius: 5, marginRight: 9 },
+  categoryModalName: { flex: 1, fontSize: 14, fontFamily: "Inter_400Regular" },
+  categoryModalValueCell: { width: 90, textAlign: "right", fontSize: 13, fontFamily: "Inter_500Medium" },
+  categoryModalPercent: { width: 48, textAlign: "right", fontSize: 12, fontFamily: "Inter_400Regular" },
 
   // Action buttons
   actionBtn: {

@@ -1,16 +1,6 @@
-/**
- * Shared photo upload helper for all inventory photos.
- *
- * All photo uploads (scan items, add-item, edit-item, cover photos) use the
- * `inventory-photos` bucket. The bucket is PRIVATE — display code must use
- * getSignedDisplayUrl / getSignedDisplayUrls from storage-helpers.ts.
- *
- * Architecture:
- *   - Callers receive { path, displayUrl }.
- *   - `path` is the durable Supabase Storage object path — store this in the DB.
- *   - `displayUrl` is a 1-hour signed URL for immediate UI feedback only.
- *     Do NOT persist displayUrl to the database.
- */
+/** Shared Supabase Storage upload helpers for inventory photos. */
+import { File } from "expo-file-system";
+import { Platform } from "react-native";
 
 import {
   INVENTORY_PHOTOS_BUCKET,
@@ -18,135 +8,276 @@ import {
 } from "@/lib/storage-helpers";
 import { supabase } from "@/lib/supabase";
 
-export interface UploadResult {
-  /** Durable Supabase Storage object path. Store this in the database. */
+export interface UploadSuccess {
+  ok: true;
+  /** Durable Supabase Storage path. Store this value in the database. */
   path: string;
-  /**
-   * Signed display URL valid for SIGNED_URL_EXPIRY_SECS seconds.
-   * Use for immediate optimistic UI only — do NOT persist to the database.
-   */
+  /** Short-lived signed URL for immediate display only. */
   displayUrl: string | null;
 }
 
-/** Per-session upload cache: localUri → UploadResult */
-const uploadCache = new Map<string, UploadResult>();
+export type UploadSource =
+  | "scan_photo"
+  | "property_cover"
+  | "room_cover"
+  | "item_photo";
+
+export interface UploadFailure {
+  ok: false;
+  error: string;
+  statusCode?: string | number;
+  details?: string;
+  bucket: string;
+  uploadPath: string;
+  authenticatedUserIdPresent: boolean;
+  userId?: string;
+  fileId?: string;
+  contentType?: string;
+  fileSize?: number;
+  source: UploadSource;
+}
+
+export type UploadResult = UploadSuccess | UploadFailure;
+
+interface UploadContext {
+  source: UploadSource;
+  fileId?: string;
+}
+
+interface UploadBody {
+  data: Blob | ArrayBuffer;
+  contentType: string;
+  fileSize: number;
+  extension: string;
+}
+
+/** Per-session cache of successful scan-photo uploads only. */
+const uploadCache = new Map<string, UploadSuccess>();
+
+function imageMetadata(localUri: string, reportedType?: string | null) {
+  const uriExtension = localUri
+    .split("?")[0]
+    .match(/\.([a-zA-Z0-9]+)$/)?.[1]
+    ?.toLowerCase();
+  const extension = uriExtension === "jpeg" ? "jpg" : (uriExtension || "jpg");
+  const contentType = reportedType || (extension === "jpg" ? "image/jpeg" : `image/${extension}`);
+  const typeExtension = contentType.split("/")[1]?.toLowerCase().replace("jpeg", "jpg");
+  return { contentType, extension: typeExtension || extension };
+}
 
 /**
- * Upload a local image URI to `inventory-photos` and return its storage path
- * plus a short-lived signed URL for immediate display.
- *
- * @param localUri   - Local device URI (file:// or content://) from ImagePicker.
- * @param userId     - Supabase user ID used as the storage path prefix.
- * @param dedupeKey  - Optional key for de-duplication (default: localUri).
- *                     Pass the same key for multiple items sharing one source photo.
- * @returns UploadResult or null on failure.
+ * Web blob URLs are read with fetch. Native camera/image-picker file URIs are
+ * read directly by Expo FileSystem because React Native's fetch(...).blob()
+ * can produce a Blob that Supabase Storage cannot upload reliably.
  */
-export async function uploadScanPhoto(
-  localUri: string,
-  userId: string,
-  dedupeKey?: string,
-): Promise<UploadResult | null> {
-  const cacheKey = dedupeKey ?? localUri;
-
-  const cached = uploadCache.get(cacheKey);
-  if (cached) return cached;
-
-  try {
+async function readUploadBody(localUri: string): Promise<UploadBody> {
+  if (Platform.OS === "web") {
     const response = await fetch(localUri);
     if (!response.ok) {
-      console.warn("[photoUpload] fetch failed:", localUri, response.status);
-      return null;
+      throw Object.assign(
+        new Error(`Source image fetch failed with HTTP ${response.status}`),
+        { statusCode: response.status, details: response.statusText },
+      );
     }
     const blob = await response.blob();
-    const mime = blob.type || "image/jpeg";
-    const ext = mime.split("/")[1]?.replace("jpeg", "jpg") ?? "jpg";
+    const metadata = imageMetadata(localUri, blob.type);
+    return {
+      data: blob,
+      contentType: metadata.contentType,
+      fileSize: blob.size,
+      extension: metadata.extension,
+    };
+  }
 
+  const file = new File(localUri);
+  const data = await file.arrayBuffer();
+  const metadata = imageMetadata(localUri, file.type);
+  return {
+    data,
+    contentType: metadata.contentType,
+    fileSize: file.size,
+    extension: metadata.extension,
+  };
+}
+
+function uploadPrefix(source: UploadSource): "scan" | "cover" | "item" {
+  if (source === "scan_photo") return "scan";
+  if (source === "item_photo") return "item";
+  return "cover";
+}
+
+async function uploadInventoryPhoto(
+  localUri: string,
+  userId: string,
+  context: UploadContext,
+): Promise<UploadResult> {
+  if (!context.fileId) {
+    return createUploadFailure(
+      context,
+      userId,
+      "not generated (missing property/file id)",
+      { message: "Required property/file id is missing", code: "MISSING_FILE_ID" },
+    );
+  }
+
+  let uploadPath = "not generated";
+  try {
+    const file = await readUploadBody(localUri);
     const timestamp = Date.now();
     const rand = Math.random().toString(36).slice(2, 7);
-    const path = `${userId}/scan-${timestamp}-${rand}.${ext}`;
+    uploadPath = `${userId}/${context.fileId}/${uploadPrefix(context.source)}-${timestamp}-${rand}.${file.extension}`;
+
+    console.info("[storageUpload] prepared", {
+      bucket: INVENTORY_PHOTOS_BUCKET,
+      uploadPath,
+      source: context.source,
+      platform: Platform.OS,
+      contentType: file.contentType,
+      fileSize: file.fileSize,
+    });
 
     const { data: uploadData, error: uploadError } = await supabase.storage
       .from(INVENTORY_PHOTOS_BUCKET)
-      .upload(path, blob, { contentType: mime, upsert: false });
+      .upload(uploadPath, file.data, { contentType: file.contentType, upsert: false });
 
     if (uploadError) {
-      console.warn("[photoUpload] upload error:", uploadError.message, "path:", path);
-      return null;
+      return createUploadFailure(context, userId, uploadPath, uploadError, file);
     }
 
     const { data: signedData, error: signedError } = await supabase.storage
       .from(INVENTORY_PHOTOS_BUCKET)
       .createSignedUrl(uploadData.path, SIGNED_URL_EXPIRY_SECS);
-
     if (signedError) {
       console.warn("[photoUpload] signed URL error:", signedError.message);
     }
 
-    const result: UploadResult = {
+    return {
+      ok: true,
       path: uploadData.path,
       displayUrl: signedData?.signedUrl ?? null,
     };
-    uploadCache.set(cacheKey, result);
-    return result;
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    console.warn("[photoUpload] unexpected error:", msg);
-    return null;
+  } catch (error) {
+    return createUploadFailure(context, userId, uploadPath, error);
   }
 }
 
-/**
- * Clear the upload cache. Call this when the scan session resets.
- */
+function errorMetadata(error: unknown): {
+  error: string;
+  statusCode?: string | number;
+  details?: string;
+} {
+  if (error instanceof Error) {
+    const record = error as Error & {
+      statusCode?: string | number;
+      status?: string | number;
+      code?: string | number;
+      details?: string;
+    };
+    return {
+      error: error.message,
+      statusCode: record.statusCode ?? record.status ?? record.code,
+      details: record.details ?? error.name,
+    };
+  }
+
+  if (typeof error === "object" && error !== null) {
+    const record = error as Record<string, unknown>;
+    return {
+      error: typeof record.message === "string" ? record.message : "Unknown upload error",
+      statusCode:
+        typeof record.statusCode === "string" || typeof record.statusCode === "number"
+          ? record.statusCode
+          : typeof record.status === "string" || typeof record.status === "number"
+            ? record.status
+            : typeof record.code === "string" || typeof record.code === "number"
+              ? record.code
+              : undefined,
+      details: typeof record.details === "string" ? record.details : undefined,
+    };
+  }
+
+  return { error: String(error) };
+}
+
+function createUploadFailure(
+  context: UploadContext,
+  userId: string,
+  uploadPath: string,
+  error: unknown,
+  file?: { contentType?: string; fileSize?: number },
+): UploadFailure {
+  const failure: UploadFailure = {
+    ok: false,
+    ...errorMetadata(error),
+    bucket: INVENTORY_PHOTOS_BUCKET,
+    uploadPath,
+    authenticatedUserIdPresent: Boolean(userId),
+    userId: userId || undefined,
+    fileId: context.fileId,
+    contentType: file?.contentType,
+    fileSize: file?.fileSize,
+    source: context.source,
+  };
+  console.error("[storageUpload] failed", failure);
+  return failure;
+}
+
+export function formatUploadFailure(failure: UploadFailure): string {
+  const user = failure.authenticatedUserIdPresent
+    ? `present (${failure.userId ?? "unknown"})`
+    : "missing";
+  const size = failure.fileSize != null
+    ? `${Math.max(1, Math.round(failure.fileSize / 1024))} KB`
+    : "unknown";
+
+  return [
+    `${failure.source}: ${failure.error}`,
+    `Bucket: ${failure.bucket}`,
+    `Path: ${failure.uploadPath}`,
+    `Authenticated user: ${user}`,
+    `Property/file: ${failure.fileId ?? "not provided"}`,
+    `Content: ${failure.contentType ?? "unknown"}, ${size}`,
+    `Status/code: ${failure.statusCode ?? "not provided"}`,
+    failure.details ? `Details: ${failure.details}` : null,
+  ]
+    .filter((line): line is string => Boolean(line))
+    .join("\n");
+}
+
+export async function uploadScanPhoto(
+  localUri: string,
+  userId: string,
+  dedupeKey?: string,
+  context: Omit<UploadContext, "source"> = {},
+): Promise<UploadResult> {
+  const uploadContext: UploadContext = { ...context, source: "scan_photo" };
+  const cacheKey = dedupeKey ?? localUri;
+  const cached = uploadCache.get(cacheKey);
+  if (cached) return cached;
+
+  const result = await uploadInventoryPhoto(localUri, userId, uploadContext);
+  if (result.ok) {
+    uploadCache.set(cacheKey, result);
+  }
+  return result;
+}
+
 export function clearScanPhotoUploadCache(): void {
   uploadCache.clear();
 }
 
-/**
- * Upload a local image URI as a cover photo for a property or room.
- *
- * @param localUri  - Local device URI from ImagePicker (file:// or content://)
- * @param userId    - Supabase user ID used as the storage path prefix.
- * @returns UploadResult or null on failure.
- */
 export async function uploadCoverPhoto(
   localUri: string,
   userId: string,
-): Promise<UploadResult | null> {
-  try {
-    const response = await fetch(localUri);
-    if (!response.ok) return null;
-    const blob = await response.blob();
-    const mime = blob.type || "image/jpeg";
-    const ext = mime.split("/")[1]?.replace("jpeg", "jpg") ?? "jpg";
-    const timestamp = Date.now();
-    const rand = Math.random().toString(36).slice(2, 7);
-    const path = `${userId}/cover-${timestamp}-${rand}.${ext}`;
+  context: UploadContext = { source: "property_cover" },
+): Promise<UploadResult> {
+  return uploadInventoryPhoto(localUri, userId, context);
+}
 
-    const { data: uploadData, error: uploadError } = await supabase.storage
-      .from(INVENTORY_PHOTOS_BUCKET)
-      .upload(path, blob, { contentType: mime, upsert: false });
-
-    if (uploadError) {
-      console.warn("[photoUpload] cover upload error:", uploadError.message);
-      return null;
-    }
-
-    const { data: signedData, error: signedError } = await supabase.storage
-      .from(INVENTORY_PHOTOS_BUCKET)
-      .createSignedUrl(uploadData.path, SIGNED_URL_EXPIRY_SECS);
-
-    if (signedError) {
-      console.warn("[photoUpload] cover signed URL error:", signedError.message);
-    }
-
-    return {
-      path: uploadData.path,
-      displayUrl: signedData?.signedUrl ?? null,
-    };
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    console.warn("[photoUpload] cover unexpected error:", msg);
-    return null;
-  }
+export async function uploadItemPhoto(
+  localUri: string,
+  userId: string,
+  fileId: string,
+): Promise<UploadResult> {
+  return uploadInventoryPhoto(localUri, userId, { source: "item_photo", fileId });
 }

@@ -1,7 +1,12 @@
 import type { InventoryItem, ItemPhoto } from "@/types";
 
 export function getItemPrice(item: InventoryItem): number {
-  return item.estimated_price ?? item.unit_estimated_price ?? 0;
+  return getItemUnitPrice(item);
+}
+
+/** Canonical per-item replacement price. Legacy rows may only have estimated_price. */
+export function getItemUnitPrice(item: InventoryItem): number {
+  return item.unit_estimated_price ?? item.estimated_price ?? 0;
 }
 
 export function getItemTotalValue(item: InventoryItem): number {

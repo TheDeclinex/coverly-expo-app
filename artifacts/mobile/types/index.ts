@@ -33,6 +33,8 @@ export interface ItemPhoto {
 
 export interface InventoryItem {
   id: string;
+  /** Negative newest-first ordering value assigned when an item is created. */
+  sort_order?: number | null;
   file_id: string;
   room_id: string | null;
   room: string | null;
@@ -45,6 +47,11 @@ export interface InventoryItem {
   quantity_estimate: string | null;
   valuation_basis: string | null;
   price_source_type: string | null;
+  web_listing_url?: string | null;
+  web_listing_title?: string | null;
+  web_listing_price?: number | null;
+  web_listing_source?: string | null;
+  web_listing_match_type?: string | null;
   description: string | null;
   image_url: string | null;
   photo_url: string | null;

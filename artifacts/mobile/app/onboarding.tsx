@@ -191,6 +191,12 @@ export default function OnboardingScreen() {
     setStep(next);
   };
 
+  const handleSkipOnboarding = async () => {
+    await Haptics.selectionAsync();
+    await markOnboardingComplete();
+    router.replace("/(tabs)");
+  };
+
   const handleCreateProperty = async () => {
     if (!session.user || creating) return;
     const trimmedName = propertyName.trim();
@@ -292,9 +298,9 @@ export default function OnboardingScreen() {
               <Feather name="arrow-right" size={16} color="rgba(255,255,255,0.7)" />
             </LinearGradient>
           </Pressable>
-          <Pressable onPress={() => advanceTo(2)} style={({ pressed }) => [styles.skipLink, { opacity: pressed ? 0.5 : 1 }]}>
+          <Pressable onPress={() => void handleSkipOnboarding()} style={({ pressed }) => [styles.skipLink, { opacity: pressed ? 0.5 : 1 }]}>
             <Text style={{ color: "rgba(255,255,255,0.5)", fontSize: 14, fontFamily: "Inter_400Regular" }}>
-              Skip intro
+              Skip for now
             </Text>
           </Pressable>
         </View>
@@ -366,9 +372,9 @@ export default function OnboardingScreen() {
               <Feather name="arrow-right" size={16} color="rgba(255,255,255,0.7)" />
             </LinearGradient>
           </Pressable>
-          <Pressable onPress={() => advanceTo(2)} style={({ pressed }) => [styles.skipLink, { opacity: pressed ? 0.5 : 1 }]}>
+          <Pressable onPress={() => void handleSkipOnboarding()} style={({ pressed }) => [styles.skipLink, { opacity: pressed ? 0.5 : 1 }]}>
             <Text style={{ color: colors.mutedForeground, fontSize: 14, fontFamily: "Inter_400Regular" }}>
-              Skip intro
+              Skip for now
             </Text>
           </Pressable>
         </View>

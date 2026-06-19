@@ -47,3 +47,15 @@ Thumbs.db
 # Replit
 .cache/
 .local/
+
+# Reference-only collateral
+reference/
+
+# Local environment values
+.env
+.env.local
+.env.*.local
+
+# Local package/cache folders
+.pnpm-store/
+node_modules/

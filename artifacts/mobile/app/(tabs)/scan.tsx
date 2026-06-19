@@ -4,12 +4,14 @@ import * as Haptics from "expo-haptics";
 import * as ImagePicker from "expo-image-picker";
 import { Stack, router, useLocalSearchParams } from "expo-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import React, { useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
   Dimensions,
   FlatList,
+  Modal,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -22,6 +24,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { AiScanningOverlay } from "@/components/AiScanningOverlay";
 import { EmptyState } from "@/components/EmptyState";
 import { ExpandableImage } from "@/components/ExpandableImage";
+import { useToast } from "@/components/Toast";
 import { useAuth } from "@/context/AuthContext";
 import { useColors } from "@/hooks/useColors";
 import { buildItemInsertPayload } from "@/lib/item-insert-helpers";
@@ -31,7 +34,13 @@ import {
   runAiScan,
   validateScanInput,
 } from "@/lib/scan-service";
-import { clearScanPhotoUploadCache, uploadScanPhoto } from "@/lib/photo-upload";
+import {
+  clearScanPhotoUploadCache,
+  formatUploadFailure,
+  uploadScanPhoto,
+  type UploadFailure,
+} from "@/lib/photo-upload";
+import { markRecentItem, markRecentItems } from "@/lib/recent-items";
 import { supabase } from "@/lib/supabase";
 import type { InventoryFile, InventoryRoom } from "@/types";
 import type {
@@ -108,6 +117,7 @@ export default function ScanScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const queryClient = useQueryClient();
+  const { showToast } = useToast();
 
   const [selectedMode, setSelectedMode] = useState<ScanMode | null>(null);
   const [selectedFileId, setSelectedFileId] = useState(paramFileId ?? "");
@@ -122,8 +132,16 @@ export default function ScanScreen() {
   const [partialFailures, setPartialFailures] = useState<PartialFailure[]>([]);
   const [activePinIndex, setActivePinIndex] = useState<number | null>(null);
   const [activeSourcePhotoIdx, setActiveSourcePhotoIdx] = useState(0);
+  const [multiPhotoPromptVisible, setMultiPhotoPromptVisible] = useState(false);
 
   const flatListRef = useRef<FlatList<ScanDetectedItem>>(null);
+  const multiPhotoCameraTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => () => {
+    if (multiPhotoCameraTimerRef.current) {
+      clearTimeout(multiPhotoCameraTimerRef.current);
+    }
+  }, []);
 
   const { data: properties } = useQuery({
     queryKey: ["properties", session?.user.id],
@@ -176,15 +194,28 @@ export default function ScanScreen() {
           base64: a.base64!,
           mimeType: a.mimeType ?? "image/jpeg",
         }));
-      setImages(isMulti ? picked : picked.slice(0, 1));
+      if (isMulti) {
+        setImages((current) => [...current, ...picked].slice(0, MAX_MULTI_PHOTO_IMAGES));
+        if (picked.length > 0) setMultiPhotoPromptVisible(true);
+      } else {
+        setImages(picked.slice(0, 1));
+      }
     }
   };
 
-  const takePhoto = async () => {
-    const { status } = await ImagePicker.requestCameraPermissionsAsync();
-    if (status !== "granted") {
-      Alert.alert("Permission needed", "Allow camera access to continue.");
-      return;
+  const takePhoto = async (
+    mode: ScanMode | null = selectedMode,
+    autoStart = false,
+  ) => {
+    if (!mode) return;
+    // On web the camera/file prompt must be opened directly from the mode-card
+    // click. Awaiting a permission request first causes browsers to block it.
+    if (Platform.OS !== "web") {
+      const { status } = await ImagePicker.requestCameraPermissionsAsync();
+      if (status !== "granted") {
+        Alert.alert("Permission needed", "Allow camera access to continue.");
+        return;
+      }
     }
     const result = await ImagePicker.launchCameraAsync({
       quality: 0.8,
@@ -192,14 +223,37 @@ export default function ScanScreen() {
     });
     if (!result.canceled && result.assets[0]?.base64) {
       const a = result.assets[0];
-      setImages([
-        {
-          uri: a.uri,
-          base64: a.base64!,
-          mimeType: a.mimeType ?? "image/jpeg",
-        },
-      ]);
+      const capturedImage: ScanEncodedImage = {
+        uri: a.uri,
+        base64: a.base64!,
+        mimeType: a.mimeType ?? "image/jpeg",
+      };
+      const capturedImages = [capturedImage];
+      if (mode === "multi_photo_room") {
+        setImages((current) => [...current, capturedImage].slice(0, MAX_MULTI_PHOTO_IMAGES));
+        setMultiPhotoPromptVisible(true);
+      } else {
+        setImages(capturedImages);
+      }
+      if (autoStart) {
+        await handleStartScan(mode, capturedImages);
+      }
     }
+  };
+
+  const takeAnotherMultiPhoto = () => {
+    setMultiPhotoPromptVisible(false);
+    if (multiPhotoCameraTimerRef.current) {
+      clearTimeout(multiPhotoCameraTimerRef.current);
+    }
+
+    // Let the native modal finish dismissing before presenting ImagePicker.
+    // Launching the picker in the same tick can leave iOS/Android on the scan
+    // type screen because the previous native presentation is still closing.
+    multiPhotoCameraTimerRef.current = setTimeout(() => {
+      multiPhotoCameraTimerRef.current = null;
+      void takePhoto("multi_photo_room", false);
+    }, Platform.OS === "ios" ? 350 : 150);
   };
 
   const getDestRoomName = (resolvedRoomId?: string) => {
@@ -248,10 +302,15 @@ export default function ScanScreen() {
     queryClient.invalidateQueries({ queryKey: ["signed-urls"] });
   };
 
-  const handleStartScan = async () => {
-    if (!selectedMode) { setScanError("Select a scan type above."); return; }
+  const handleStartScan = async (
+    modeOverride?: ScanMode,
+    imagesOverride?: ScanEncodedImage[],
+  ) => {
+    const mode = modeOverride ?? selectedMode;
+    const scanImages = imagesOverride ?? images;
+    if (!mode) { setScanError("Select a scan type above."); return; }
     if (!selectedFileId) { setScanError("Select a property."); return; }
-    if (images.length === 0) { setScanError("Add at least one photo."); return; }
+    if (scanImages.length === 0) { setScanError("Add at least one photo."); return; }
 
     // Resolve room: use existing selection, or create a new room from the typed name.
     let resolvedRoomId = selectedRoomId;
@@ -279,11 +338,11 @@ export default function ScanScreen() {
     setScanError(null);
 
     const input = {
-      mode: selectedMode,
+      mode,
       fileId: selectedFileId,
       roomId: resolvedRoomId,
       roomName: getDestRoomName(resolvedRoomId) ?? undefined,
-      images,
+      images: scanImages,
     };
 
     const validationError = validateScanInput(input);
@@ -313,12 +372,12 @@ export default function ScanScreen() {
 
     // Attach source image thumbnails for review cards.
     // Use sourcePhotoIndex returned by Edge Function to route each item to the correct source photo.
-    const fallbackUri = images[0]?.uri ?? null;
+    const fallbackUri = scanImages[0]?.uri ?? null;
     const itemsWithThumbs: ScanDetectedItem[] = result.items.map((item) => ({
       ...item,
       sourceImageUri:
         item.sourcePhotoIndex != null
-          ? (images[item.sourcePhotoIndex]?.uri ?? fallbackUri)
+          ? (scanImages[item.sourcePhotoIndex]?.uri ?? fallbackUri)
           : (item.sourceImageUri ?? fallbackUri),
     }));
 
@@ -356,15 +415,20 @@ export default function ScanScreen() {
     }
 
     const dedupeKey = `${item.sourcePhotoIndex ?? 0}:${item.sourceImageUri}`;
-    const uploaded = await uploadScanPhoto(item.sourceImageUri, userId, dedupeKey);
-    if (!uploaded) {
-      setScanSaveError("Photo upload failed. Check your connection and try again.");
+    const uploaded = await uploadScanPhoto(item.sourceImageUri, userId, dedupeKey, {
+      fileId: selectedFileId,
+    });
+    if (!uploaded.ok) {
+      const diagnostic = formatUploadFailure(uploaded);
+      console.error("[Scan] Photo upload diagnostic\n" + diagnostic);
+      setScanSaveError(diagnostic);
       setSavingIds((prev) => { const n = new Set(prev); n.delete(index); return n; });
       return;
     }
 
     // Store the durable storage path in the DB, not the short-lived signed URL.
-    const { error } = await supabase.from("inventory_items").insert(buildPayload(item, uploaded.path));
+    const payload = buildPayload(item, uploaded.path);
+    const { error } = await supabase.from("inventory_items").insert(payload);
 
     setSavingIds((prev) => {
       const next = new Set(prev);
@@ -377,6 +441,8 @@ export default function ScanScreen() {
       setScanSaveError(`Failed to save "${item.name}": ${error.message}`);
     } else {
       void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+      markRecentItem(payload.id);
+      showToast(`${item.name} added`);
       invalidateRoomQueries();
       setDetectedItems((prev) => prev.filter((_, i) => i !== index));
     }
@@ -402,6 +468,7 @@ export default function ScanScreen() {
     // Stores durable storage paths (not signed URLs) keyed by photo index.
     const photoUrlByIndex = new Map<number, string>();
     const failedPhotoIndices = new Set<number>();
+    const uploadFailureByPhotoIndex = new Map<number, UploadFailure>();
 
     for (const item of detectedItems) {
       const photoIdx = item.sourcePhotoIndex ?? 0;
@@ -409,14 +476,21 @@ export default function ScanScreen() {
       const uri = item.sourceImageUri ?? images[photoIdx]?.uri ?? null;
       if (!uri) { failedPhotoIndices.add(photoIdx); continue; }
       const dedupeKey = `${photoIdx}:${uri}`;
-      const uploaded = await uploadScanPhoto(uri, userId, dedupeKey);
+      const uploaded = await uploadScanPhoto(uri, userId, dedupeKey, {
+        fileId: selectedFileId,
+      });
       // Store the durable path (not the short-lived displayUrl) in the DB map.
-      if (uploaded) { photoUrlByIndex.set(photoIdx, uploaded.path); }
-      else { failedPhotoIndices.add(photoIdx); }
+      if (uploaded.ok) { photoUrlByIndex.set(photoIdx, uploaded.path); }
+      else {
+        failedPhotoIndices.add(photoIdx);
+        uploadFailureByPhotoIndex.set(photoIdx, uploaded);
+        console.error("[Scan] Photo upload diagnostic\n" + formatUploadFailure(uploaded));
+      }
     }
 
     const failures: PartialFailure[] = [];
     const savedIndices: number[] = [];
+    const savedItemIds: string[] = [];
 
     // Phase 2: Sequential insert — skip items whose source photo failed to upload.
     for (let i = 0; i < detectedItems.length; i++) {
@@ -424,17 +498,25 @@ export default function ScanScreen() {
       const photoIdx = item.sourcePhotoIndex ?? 0;
 
       if (failedPhotoIndices.has(photoIdx)) {
-        failures.push({ itemName: item.name, error: "Photo upload failed — check your connection" });
+        const uploadFailure = uploadFailureByPhotoIndex.get(photoIdx);
+        failures.push({
+          itemName: item.name,
+          error: uploadFailure
+            ? formatUploadFailure(uploadFailure)
+            : "scan_photo: Source image is missing before upload",
+        });
         continue;
       }
 
       const uploadedUrl = photoUrlByIndex.get(photoIdx) ?? null;
-      const { error } = await supabase.from("inventory_items").insert(buildPayload(item, uploadedUrl));
+      const payload = buildPayload(item, uploadedUrl);
+      const { error } = await supabase.from("inventory_items").insert(payload);
       if (error) {
         console.error("[Scan] Save all — item failed:", item.name, error.message);
         failures.push({ itemName: item.name, error: error.message });
       } else {
         savedIndices.push(i);
+        savedItemIds.push(payload.id);
       }
     }
 
@@ -444,6 +526,10 @@ export default function ScanScreen() {
 
     if (failures.length > 0) {
       // Keep unsaved items in review; surface partial failure list
+      if (savedItemIds.length > 0) {
+        markRecentItems(savedItemIds);
+        showToast(`${savedItemIds.length} item${savedItemIds.length === 1 ? "" : "s"} saved`);
+      }
       setDetectedItems((prev) => prev.filter((_, i) => !savedIndices.includes(i)));
       setPartialFailures(failures);
       setScanStatus("reviewing");
@@ -451,6 +537,8 @@ export default function ScanScreen() {
     }
 
     void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    markRecentItems(savedItemIds);
+    showToast(`${savedItemIds.length} item${savedItemIds.length === 1 ? "" : "s"} added to ${getDestRoomName() ?? "room"}`);
     setScanStatus("done");
     setDetectedItems([]);
 
@@ -462,6 +550,10 @@ export default function ScanScreen() {
   };
 
   const resetScan = () => {
+    if (multiPhotoCameraTimerRef.current) {
+      clearTimeout(multiPhotoCameraTimerRef.current);
+      multiPhotoCameraTimerRef.current = null;
+    }
     setSelectedMode(null);
     setImages([]);
     setDetectedItems([]);
@@ -821,9 +913,14 @@ export default function ScanScreen() {
               key={m.mode}
               onPress={() => {
                 if (m.comingSoon) return;
+                if (multiPhotoCameraTimerRef.current) {
+                  clearTimeout(multiPhotoCameraTimerRef.current);
+                  multiPhotoCameraTimerRef.current = null;
+                }
                 setSelectedMode(m.mode);
                 setImages([]);
                 setScanError(null);
+                void takePhoto(m.mode, m.mode !== "multi_photo_room");
               }}
               style={({ pressed }) => [
                 styles.modeCard,
@@ -896,7 +993,7 @@ export default function ScanScreen() {
                 <Text style={[styles.fieldLabel, { color: colors.mutedForeground }]}>Property</Text>
                 <View style={[styles.chip, { backgroundColor: colors.primary, alignSelf: "flex-start" }]}>
                   <Text style={[styles.chipText, { color: colors.primaryForeground }]}>
-                    {paramFileName ?? paramFileId}
+                    {paramFileName ?? properties?.find((property) => property.id === paramFileId)?.name ?? "Loading property…"}
                   </Text>
                 </View>
               </View>
@@ -1018,7 +1115,7 @@ export default function ScanScreen() {
             ) : (
               <View style={{ flexDirection: "row", gap: 10 }}>
                 <Pressable
-                  onPress={takePhoto}
+                  onPress={() => void takePhoto()}
                   style={({ pressed }) => [
                     styles.photoBtn,
                     { backgroundColor: colors.card, borderColor: colors.border, borderRadius: colors.radius, opacity: pressed ? 0.8 : 1 },
@@ -1099,6 +1196,67 @@ export default function ScanScreen() {
           />
         )}
       </ScrollView>
+
+      <Modal
+        visible={multiPhotoPromptVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setMultiPhotoPromptVisible(false)}
+      >
+        <View style={styles.captureModalBackdrop}>
+          <View
+            style={[
+              styles.captureModalCard,
+              { backgroundColor: colors.card, borderColor: colors.border, borderRadius: colors.radius },
+            ]}
+          >
+            <View style={[styles.captureModalIcon, { backgroundColor: colors.secondary }]}>
+              <Feather name="check" size={24} color={colors.primary} />
+            </View>
+            <Text style={[styles.captureModalTitle, { color: colors.foreground }]}>Photo added</Text>
+            <Text style={[styles.captureModalSubtitle, { color: colors.mutedForeground }]}>
+              {images.length >= MAX_MULTI_PHOTO_IMAGES
+                ? `All ${MAX_MULTI_PHOTO_IMAGES} photos are ready to scan.`
+                : `${images.length} of ${MAX_MULTI_PHOTO_IMAGES} photos added. Capture another angle or scan this set now.`}
+            </Text>
+
+            {images.length < MAX_MULTI_PHOTO_IMAGES ? (
+              <Pressable
+                onPress={takeAnotherMultiPhoto}
+                style={({ pressed }) => [
+                  styles.captureModalButton,
+                  {
+                    backgroundColor: colors.primary,
+                    borderColor: colors.primary,
+                    opacity: pressed ? 0.85 : 1,
+                  },
+                ]}
+              >
+                <Feather name="camera" size={18} color={colors.primaryForeground} />
+                <Text style={[styles.captureModalButtonText, { color: colors.primaryForeground }]}>Take another photo</Text>
+              </Pressable>
+            ) : null}
+
+            <Pressable
+              onPress={() => {
+                setMultiPhotoPromptVisible(false);
+                void handleStartScan("multi_photo_room");
+              }}
+              style={({ pressed }) => [
+                styles.captureModalButton,
+                {
+                  backgroundColor: colors.card,
+                  borderColor: colors.border,
+                  opacity: pressed ? 0.75 : 1,
+                },
+              ]}
+            >
+              <Feather name="check-circle" size={18} color={colors.primary} />
+              <Text style={[styles.captureModalButtonText, { color: colors.primary }]}>Done</Text>
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
     </>
   );
 }
@@ -1136,6 +1294,49 @@ const styles = StyleSheet.create({
   errorText: { fontSize: 13, fontFamily: "Inter_400Regular", lineHeight: 18, flex: 1 },
   scanBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, paddingVertical: 15, marginTop: 4 },
   scanBtnText: { fontSize: 16, fontFamily: "Inter_600SemiBold" },
+  captureModalBackdrop: {
+    flex: 1,
+    justifyContent: "center",
+    padding: 24,
+    backgroundColor: "rgba(15, 23, 42, 0.48)",
+  },
+  captureModalCard: {
+    width: "100%",
+    maxWidth: 380,
+    alignSelf: "center",
+    alignItems: "center",
+    borderWidth: 1,
+    padding: 24,
+    gap: 12,
+  },
+  captureModalIcon: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 2,
+  },
+  captureModalTitle: { fontSize: 20, fontFamily: "Inter_700Bold" },
+  captureModalSubtitle: {
+    fontSize: 14,
+    fontFamily: "Inter_400Regular",
+    lineHeight: 20,
+    textAlign: "center",
+    marginBottom: 6,
+  },
+  captureModalButton: {
+    width: "100%",
+    minHeight: 48,
+    borderWidth: 1,
+    borderRadius: 12,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    paddingHorizontal: 16,
+  },
+  captureModalButtonText: { fontSize: 15, fontFamily: "Inter_600SemiBold" },
 });
 
 const revStyles = StyleSheet.create({

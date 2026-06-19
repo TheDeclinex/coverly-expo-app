@@ -23,14 +23,16 @@ import {
 } from "@/components/DraggablePhotoStrip";
 import { ErrorState } from "@/components/ErrorState";
 import { LoadingState } from "@/components/LoadingState";
+import { QuantityStepper } from "@/components/QuantityStepper";
+import { useToast } from "@/components/Toast";
 import { useAuth } from "@/context/AuthContext";
 import { useColors } from "@/hooks/useColors";
+import { formatCurrencyFull } from "@/lib/inventory-mappers";
 import { getItemPhotos } from "@/lib/inventory-mappers";
 import { buildItemUpdatePayload } from "@/lib/item-insert-helpers";
+import { formatUploadFailure, uploadItemPhoto } from "@/lib/photo-upload";
 import { supabase } from "@/lib/supabase";
 import type { InventoryItem, InventoryRoom } from "@/types";
-
-const ITEM_PHOTOS_BUCKET = "inventory-photos";
 
 function FormField({
   label,
@@ -107,6 +109,7 @@ export default function EditItemScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const queryClient = useQueryClient();
+  const { showToast } = useToast();
 
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
@@ -182,47 +185,11 @@ export default function EditItemScreen() {
     uri: string,
     fileId: string
   ): Promise<{ path: string | null; uploadErrMsg: string | null }> => {
-    try {
-      const { data: sessionData } = await supabase.auth.getSession();
-      const accessToken = sessionData?.session?.access_token;
-      const userId = sessionData?.session?.user?.id ?? "anon";
-      const email = sessionData?.session?.user?.email ?? "none";
-      const hasToken = !!accessToken;
-
-      const response = await fetch(uri);
-      const blob = await response.blob();
-      const filename = uri.split("/").pop()?.split("?")[0] ?? "";
-      const ext = filename.includes(".")
-        ? (filename.split(".").pop()?.toLowerCase() ?? "jpeg")
-        : "jpeg";
-      const storagePath = `${userId}/${fileId}/${Date.now()}.${ext}`;
-
-      console.log("[EditItem] Upload attempt:", {
-        bucket: ITEM_PHOTOS_BUCKET,
-        path: storagePath,
-        email,
-        user_id: userId,
-        has_access_token: hasToken,
-      });
-
-      const { data: uploadData, error: uploadError } = await supabase.storage
-        .from(ITEM_PHOTOS_BUCKET)
-        .upload(storagePath, blob, { contentType: `image/${ext}`, upsert: false });
-
-      if (uploadError) {
-        console.warn("[EditItem] Photo upload failed:", uploadError.message);
-        return {
-          path: null,
-          uploadErrMsg: `${uploadError.message} [bucket=${ITEM_PHOTOS_BUCKET} path=${storagePath} auth=${hasToken} user=${userId}]`,
-        };
-      }
-      // Return the durable path — display code will generate signed URLs at render time.
-      return { path: uploadData.path, uploadErrMsg: null };
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      console.warn("[EditItem] Photo upload error:", msg);
-      return { path: null, uploadErrMsg: msg };
-    }
+    const userId = session?.user.id;
+    if (!userId) return { path: null, uploadErrMsg: "Not signed in" };
+    const uploaded = await uploadItemPhoto(uri, userId, fileId);
+    if (!uploaded.ok) return { path: null, uploadErrMsg: formatUploadFailure(uploaded) };
+    return { path: uploaded.path, uploadErrMsg: null };
   };
 
   // Returns true if `url` is a local device URI that must be uploaded before saving.
@@ -299,6 +266,7 @@ export default function EditItemScreen() {
         description,
         category,
         estimatedPrice: price,
+        unitEstimatedPrice: price,
         quantity: qty,
         photos: photosForUpdate,
       });
@@ -329,6 +297,7 @@ export default function EditItemScreen() {
         queryKey: ["property-items", item?.file_id],
       });
 
+      showToast("Item updated");
       router.back();
     } catch (err) {
       console.error("[EditItem] Unexpected error:", err);
@@ -406,7 +375,7 @@ export default function EditItemScreen() {
 
             <View style={{ flexDirection: "row", gap: 12 }}>
               <View style={{ flex: 2 }}>
-                <FormField label="Estimated value ($)" colors={colors}>
+                <FormField label="Each price ($)" colors={colors}>
                   <StyledInput
                     value={estimatedPrice}
                     onChangeText={setEstimatedPrice}
@@ -418,16 +387,24 @@ export default function EditItemScreen() {
               </View>
               <View style={{ flex: 1 }}>
                 <FormField label="Quantity" colors={colors}>
-                  <StyledInput
+                  <QuantityStepper
                     value={quantity}
-                    onChangeText={setQuantity}
-                    placeholder="1"
-                    keyboardType="numeric"
-                    colors={colors}
+                    onChange={setQuantity}
                   />
                 </FormField>
               </View>
             </View>
+            {(Number.parseInt(quantity, 10) || 1) > 1 && estimatedPrice ? (
+              <View style={[styles.linkedTotal, { borderColor: colors.border }]}>
+                <Text style={[styles.linkedTotalLabel, { color: colors.mutedForeground }]}>Total price</Text>
+                <Text style={[styles.linkedTotalValue, { color: colors.foreground }]}>
+                  {formatCurrencyFull(
+                    (Number.parseFloat(estimatedPrice.replace(/[^0-9.]/g, "")) || 0) *
+                      (Number.parseInt(quantity, 10) || 1),
+                  )}
+                </Text>
+              </View>
+            ) : null}
           </View>
 
           {/* MOVE TO ROOM */}
@@ -635,6 +612,15 @@ const styles = StyleSheet.create({
     padding: 12,
     borderWidth: 1,
   },
+  linkedTotal: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    borderTopWidth: StyleSheet.hairlineWidth,
+    paddingTop: 10,
+  },
+  linkedTotalLabel: { fontSize: 12, fontFamily: "Inter_400Regular" },
+  linkedTotalValue: { fontSize: 15, fontFamily: "Inter_700Bold" },
   saveBtn: {
     flexDirection: "row",
     alignItems: "center",

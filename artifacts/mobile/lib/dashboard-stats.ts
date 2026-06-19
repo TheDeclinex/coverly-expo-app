@@ -1,4 +1,5 @@
 import type { InventoryFile, InventoryItem, InventoryRoom } from "@/types";
+import { getCategoryLegendEntry } from "@/constants/categoryColors";
 import {
   getItemTotalValue,
   hasPhoto,
@@ -10,6 +11,7 @@ export interface RoomStat {
   room: InventoryRoom;
   itemCount: number;
   totalValue: number;
+  categoryValues: { key: string; label: string; value: number }[];
 }
 
 export interface PropertyStats {
@@ -48,10 +50,26 @@ export function calcPropertyStats(
   const roomStats: RoomStat[] = rooms
     .map((room) => {
       const roomItems = items.filter((i) => i.room_id === room.id);
+      const categoryMap = new Map<string, number>();
+      for (const item of roomItems) {
+        const category = getCategoryLegendEntry(item.category);
+        categoryMap.set(
+          category.key,
+          (categoryMap.get(category.key) ?? 0) + getItemTotalValue(item),
+        );
+      }
       return {
         room,
         itemCount: roomItems.length,
         totalValue: roomItems.reduce((s, i) => s + getItemTotalValue(i), 0),
+        categoryValues: [...categoryMap.entries()]
+          .filter(([, value]) => value > 0)
+          .sort((a, b) => b[1] - a[1])
+          .map(([key, value]) => ({
+            key,
+            label: getCategoryLegendEntry(key).label,
+            value,
+          })),
       };
     })
     .sort((a, b) => b.totalValue - a.totalValue);

@@ -7,6 +7,7 @@ import type { InventoryItem, ItemPhoto } from "@/types";
  * Table: inventory_items
  * Real columns:
  *   id text NOT NULL (no default → must generate)
+ *   sort_order integer nullable
  *   file_id text NOT NULL
  *   room_id uuid nullable
  *   room text nullable
@@ -31,8 +32,13 @@ import type { InventoryItem, ItemPhoto } from "@/types";
  *   purchase_source text nullable
  *   original_purchase_price numeric nullable
  *   purchase_year_approx text nullable
+ *   web_listing_url text nullable
+ *   web_listing_title text nullable
+ *   web_listing_price numeric nullable
+ *   web_listing_source text nullable
+ *   web_listing_match_type text nullable
  *
- * NOT in table: user_id, sort_order, web_listing_url, web_listing_title, web_listing_price, web_listing_source
+ * NOT in table: user_id
  */
 
 export interface ItemFormData {
@@ -115,9 +121,26 @@ function generateItemId(): string {
   return result;
 }
 
+let lastGeneratedSortOrder = 0;
+
+/**
+ * Room lists sort by sort_order ascending. New items use negative Unix seconds,
+ * which keeps legacy positive ordering intact while placing newer additions first.
+ * The in-memory decrement also gives items created in the same second a stable order.
+ */
+function generateNewItemSortOrder(): number {
+  const currentSecond = -Math.floor(Date.now() / 1000);
+  const next = lastGeneratedSortOrder === 0
+    ? currentSecond
+    : Math.min(currentSecond, lastGeneratedSortOrder - 1);
+  lastGeneratedSortOrder = next;
+  return next;
+}
+
 export function buildItemInsertPayload(form: ItemFormData): InventoryItem {
   return {
     id: generateItemId(),
+    sort_order: generateNewItemSortOrder(),
     file_id: form.fileId,
     room_id: form.roomId || null,
     room: form.roomName?.trim() || null,
