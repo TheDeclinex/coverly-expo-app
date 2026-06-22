@@ -16,6 +16,7 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { ErrorState } from "@/components/ErrorState";
+import { ContextBackButton } from "@/components/ContextBackButton";
 import { LoadingState } from "@/components/LoadingState";
 import { ReplacementListingCard } from "@/components/ReplacementListingCard";
 import { useToast } from "@/components/Toast";
@@ -49,7 +50,15 @@ function formatEstimate(value: number | null): string {
 }
 
 export default function ReplacementPricingScreen() {
-  const { id } = useLocalSearchParams<{ id: string }>();
+  const { id, origin, itemName, roomId, roomName, fileId, fileName } = useLocalSearchParams<{
+    id: string;
+    origin?: "item" | "room";
+    itemName?: string;
+    roomId?: string;
+    roomName?: string;
+    fileId?: string;
+    fileName?: string;
+  }>();
   const { session } = useAuth();
   const colors = useColors();
   const insets = useSafeAreaInsets();
@@ -162,10 +171,29 @@ export default function ReplacementPricingScreen() {
         queryClient.invalidateQueries({ queryKey: ["property-items", item.file_id] }),
       ]);
       showToast("Replacement price updated");
-      router.dismissTo({
-        pathname: "/(tabs)/item/[id]",
-        params: { id: item.id, name: item.name },
-      } as Href);
+      if (origin === "room") {
+        router.dismissTo({
+          pathname: "/(tabs)/room/[id]",
+          params: {
+            id: roomId ?? item.room_id ?? "",
+            name: roomName ?? item.room ?? "Room",
+            fileId: fileId ?? item.file_id,
+            fileName: fileName ?? "Property",
+          },
+        } as Href);
+      } else {
+        router.dismissTo({
+          pathname: "/(tabs)/item/[id]",
+          params: {
+            id: item.id,
+            name: item.name,
+            roomId: roomId ?? item.room_id ?? "",
+            roomName: roomName ?? item.room ?? "Room",
+            fileId: fileId ?? item.file_id,
+            fileName: fileName ?? "Property",
+          },
+        } as Href);
+      }
     } catch (updateFailure) {
       console.error("[replacement-pricing] Listing save failed", updateFailure);
       Alert.alert(
@@ -179,7 +207,42 @@ export default function ReplacementPricingScreen() {
 
   return (
     <>
-      <Stack.Screen options={{ title: "Replacement pricing" }} />
+      <Stack.Screen
+        options={{
+          title: "Replacement pricing",
+          headerBackVisible: false,
+          headerLeft: () => (
+            <ContextBackButton
+              label={origin === "room" ? roomName ?? item?.room ?? "Room" : itemName ?? item?.name ?? "Item"}
+              onPress={() => {
+                if (origin === "room") {
+                  router.replace({
+                    pathname: "/(tabs)/room/[id]",
+                    params: {
+                      id: roomId ?? item?.room_id ?? "",
+                      name: roomName ?? item?.room ?? "Room",
+                      fileId: fileId ?? item?.file_id ?? "",
+                      fileName: fileName ?? "Property",
+                    },
+                  });
+                } else {
+                  router.replace({
+                    pathname: "/(tabs)/item/[id]",
+                    params: {
+                      id,
+                      name: itemName ?? item?.name ?? "Item",
+                      roomId: roomId ?? item?.room_id ?? "",
+                      roomName: roomName ?? item?.room ?? "Room",
+                      fileId: fileId ?? item?.file_id ?? "",
+                      fileName: fileName ?? "Property",
+                    },
+                  });
+                }
+              }}
+            />
+          ),
+        }}
+      />
       {isLoading ? (
         <LoadingState />
       ) : error ? (
@@ -244,7 +307,7 @@ export default function ReplacementPricingScreen() {
                 styles.searchButton,
                 {
                   backgroundColor: colors.primary,
-                  opacity: searching || !searchQuery.trim() ? 0.5 : pressed ? 0.8 : 1,
+                  opacity: searching ? 0.82 : !searchQuery.trim() ? 0.45 : pressed ? 0.8 : 1,
                 },
               ]}
             >

@@ -17,17 +17,26 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { ErrorState } from "@/components/ErrorState";
+import { ContextBackButton } from "@/components/ContextBackButton";
 import { ExpandableImage } from "@/components/ExpandableImage";
 import { ItemEvidenceSection } from "@/components/ItemEvidenceSection";
 import { LoadingState } from "@/components/LoadingState";
 import { QuantityStepper } from "@/components/QuantityStepper";
+import { VoiceFieldButton } from "@/components/voice/VoiceFieldButton";
+import { VoiceInputSheet } from "@/components/voice/VoiceInputSheet";
+import {
+  BarcodeScanFlow,
+  type BarcodeApplyValues,
+} from "@/components/BarcodeScanFlow";
 import { useToast } from "@/components/Toast";
 import { useAuth } from "@/context/AuthContext";
 import { useColors } from "@/hooks/useColors";
 import { useSignedUrls } from "@/hooks/useSignedUrls";
 import { formatCurrencyFull, getItemUnitPrice } from "@/lib/inventory-mappers";
 import { supabase } from "@/lib/supabase";
+import { buildVoiceItemUpdatePayload } from "@/lib/voice-item-update";
 import type { InventoryItem } from "@/types";
+import type { VoiceItemField, VoiceItemPatch } from "@/types/voice";
 
 // One-line rollback for the item review/edit trial.
 const ITEM_REVIEW_EDIT_TRIAL = true;
@@ -139,6 +148,7 @@ function QuickEditRow({
   onChange,
   onSave,
   onCancel,
+  onVoice,
 }: {
   label: string;
   value: string | number | null | undefined;
@@ -152,6 +162,7 @@ function QuickEditRow({
   onChange: (value: string) => void;
   onSave: () => void;
   onCancel: () => void;
+  onVoice: () => void;
 }) {
   return (
     <View style={[styles.quickEditRow, { borderBottomColor: colors.border }]}>
@@ -212,31 +223,42 @@ function QuickEditRow({
           )}
         </View>
       ) : (
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel={`Edit ${label}`}
-          onPress={onStart}
-          hitSlop={6}
-          style={styles.quickEditValueButton}
-        >
-          <Text
-            numberOfLines={2}
-            style={[
-              styles.quickEditValue,
-              { color: value === null || value === undefined || value === "" ? colors.mutedForeground : colors.foreground },
-            ]}
+        <View style={styles.quickEditReadControls}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={`Edit ${label}`}
+            onPress={onStart}
+            hitSlop={6}
+            style={styles.quickEditValueButton}
           >
-            {value === null || value === undefined || value === "" ? "Add" : String(value)}
-          </Text>
-          <Feather name="edit-2" size={13} color={colors.primary} />
-        </Pressable>
+            <Text
+              numberOfLines={2}
+              style={[
+                styles.quickEditValue,
+                { color: value === null || value === undefined || value === "" ? colors.mutedForeground : colors.foreground },
+              ]}
+            >
+              {value === null || value === undefined || value === "" ? "Add" : String(value)}
+            </Text>
+            <Feather name="edit-2" size={13} color={colors.primary} />
+          </Pressable>
+          <VoiceFieldButton label={label.toLowerCase()} onPress={onVoice} />
+        </View>
       )}
     </View>
   );
 }
 
 export default function ItemDetailScreen() {
-  const { id, name, evidence } = useLocalSearchParams<{ id: string; name: string; evidence?: string }>();
+  const { id, name, evidence, roomId, roomName, fileId, fileName } = useLocalSearchParams<{
+    id: string;
+    name: string;
+    evidence?: string;
+    roomId?: string;
+    roomName?: string;
+    fileId?: string;
+    fileName?: string;
+  }>();
   const { session } = useAuth();
   const colors = useColors();
   const insets = useSafeAreaInsets();
@@ -245,6 +267,9 @@ export default function ItemDetailScreen() {
   const [editingField, setEditingField] = React.useState<InlineField | null>(null);
   const [inlineDraft, setInlineDraft] = React.useState("");
   const [savingInline, setSavingInline] = React.useState(false);
+  const [barcodeScanOpen, setBarcodeScanOpen] = React.useState(false);
+  const [voiceInputOpen, setVoiceInputOpen] = React.useState(false);
+  const [voiceTargetField, setVoiceTargetField] = React.useState<VoiceItemField | undefined>();
 
   const {
     data: item,
@@ -289,15 +314,61 @@ export default function ItemDetailScreen() {
   const allPhotoUris = rawPhotoUris.map((u) => signedUriMap.get(u) ?? null).filter((u): u is string => u !== null);
   const primaryUri = allPhotoUris[0] ?? null;
 
-  const handleEdit = async () => {
+  const handleEdit = () => {
     router.push({
       pathname: "/(tabs)/edit-item/[id]",
       params: { id: id! },
     });
   };
 
+  const openVoiceInput = (targetField?: VoiceItemField) => {
+    cancelInlineEdit();
+    setVoiceTargetField(targetField);
+    setVoiceInputOpen(true);
+  };
+
   const handleReplacementPricing = () => {
-    router.push(`/(tabs)/replacement-pricing/${id}` as Href);
+    router.push({
+      pathname: "/(tabs)/replacement-pricing/[id]",
+      params: {
+        id,
+        origin: "item",
+        itemName: item?.name ?? name,
+        roomId: roomId ?? item?.room_id ?? "",
+        roomName: roomName ?? item?.room ?? "Room",
+        fileId: fileId ?? item?.file_id ?? "",
+        fileName: fileName ?? "Property",
+      },
+    } as Href);
+  };
+
+  const handleApplyBarcode = async (values: BarcodeApplyValues) => {
+    if (!item) throw new Error("Item not loaded.");
+
+    const updates: Partial<InventoryItem> = {
+      barcode: values.barcode,
+      barcode_verified: true,
+      ...(values.name ? { name: values.name } : {}),
+      ...(values.brandMaker ? { brand_maker: values.brandMaker } : {}),
+      ...(values.modelSeries ? { model_series: values.modelSeries } : {}),
+      ...(values.description ? { description: values.description } : {}),
+    };
+
+    const { data, error: updateError } = await supabase
+      .from("inventory_items")
+      .update(updates)
+      .eq("id", item.id)
+      .select("*")
+      .single();
+    if (updateError) throw updateError;
+
+    queryClient.setQueryData(["item", id, session?.user.id], data as InventoryItem);
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ["items", item.room_id] }),
+      queryClient.invalidateQueries({ queryKey: ["all-items"] }),
+      queryClient.invalidateQueries({ queryKey: ["property-items", item.file_id] }),
+    ]);
+    showToast("Barcode details applied");
   };
 
   const startInlineEdit = (field: InlineField, value: string | number | null) => {
@@ -364,6 +435,34 @@ export default function ItemDetailScreen() {
     }
   };
 
+  const handleApplyVoice = async (patch: VoiceItemPatch) => {
+    if (!item) throw new Error("Item not loaded.");
+
+    const updates = buildVoiceItemUpdatePayload(patch);
+    if (Object.keys(updates).length === 0) {
+      throw new Error("No supported changes were selected.");
+    }
+
+    const { data, error: updateError } = await supabase
+      .from("inventory_items")
+      .update(updates)
+      .eq("id", item.id)
+      .select("*")
+      .single();
+    if (updateError) throw updateError;
+
+    queryClient.setQueryData(
+      ["item", id, session?.user.id],
+      data as InventoryItem,
+    );
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ["items", item.room_id] }),
+      queryClient.invalidateQueries({ queryKey: ["all-items"] }),
+      queryClient.invalidateQueries({ queryKey: ["property-items", item.file_id] }),
+    ]);
+    showToast("Voice changes applied");
+  };
+
   const handleOpenReplacementListing = () => {
     if (!isWebUrl(item?.web_listing_url)) return;
     void WebBrowser.openBrowserAsync(item.web_listing_url);
@@ -399,10 +498,23 @@ export default function ItemDetailScreen() {
       <Stack.Screen
         options={{
           title: item?.name ?? name ?? "Item Detail",
-          headerRight: () => (
-            <Pressable onPress={handleEdit} style={{ padding: 4 }} hitSlop={8}>
-              <Feather name="edit-2" size={18} color={colors.primary} />
-            </Pressable>
+          headerTitleAlign: "center",
+          headerBackVisible: false,
+          headerLeft: () => (
+            <ContextBackButton
+              label={roomName ?? item?.room ?? "Room"}
+              onPress={() =>
+                router.replace({
+                  pathname: "/(tabs)/room/[id]",
+                  params: {
+                    id: roomId ?? item?.room_id ?? "",
+                    name: roomName ?? item?.room ?? "Room",
+                    fileId: fileId ?? item?.file_id ?? "",
+                    fileName: fileName ?? "Property",
+                  },
+                })
+              }
+            />
           ),
         }}
       />
@@ -474,6 +586,25 @@ export default function ItemDetailScreen() {
             {ITEM_REVIEW_EDIT_TRIAL ? (
               <>
                 <Section title="QUICK EDIT" colors={colors}>
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel="Edit item with voice"
+                    onPress={() => openVoiceInput()}
+                    style={({ pressed }) => [
+                      styles.voiceEditAction,
+                      {
+                        borderColor: colors.primary,
+                        backgroundColor: colors.background,
+                        opacity: pressed ? 0.72 : 1,
+                      },
+                    ]}
+                  >
+                    <Feather name="mic" size={16} color={colors.primary} />
+                    <View style={styles.voiceEditCopy}>
+                      <Text style={[styles.voiceEditTitle, { color: colors.primary }]}>Edit with voice</Text>
+                      <Text style={[styles.voiceEditHint, { color: colors.mutedForeground }]}>Speak item details, then review before applying</Text>
+                    </View>
+                  </Pressable>
                   <QuickEditRow
                     label="Item name"
                     value={item.name}
@@ -485,6 +616,7 @@ export default function ItemDetailScreen() {
                     onChange={setInlineDraft}
                     onSave={() => void saveInlineEdit()}
                     onCancel={cancelInlineEdit}
+                    onVoice={() => openVoiceInput("name")}
                   />
                   <QuickEditRow
                     label="Quantity"
@@ -499,6 +631,7 @@ export default function ItemDetailScreen() {
                     onChange={setInlineDraft}
                     onSave={() => void saveInlineEdit()}
                     onCancel={cancelInlineEdit}
+                    onVoice={() => openVoiceInput("quantity")}
                   />
                   <QuickEditRow
                     label="Brand / Maker"
@@ -511,109 +644,41 @@ export default function ItemDetailScreen() {
                     onChange={setInlineDraft}
                     onSave={() => void saveInlineEdit()}
                     onCancel={cancelInlineEdit}
+                    onVoice={() => openVoiceInput("brand_maker")}
                   />
                 </Section>
 
-                <Section title="NEXT STEPS" colors={colors}>
-                  {!rawPrimaryUri ? (
-                    <Pressable
-                      onPress={handleEdit}
-                      style={({ pressed }) => [
-                        styles.nextActionPrimary,
-                        { backgroundColor: colors.primary, opacity: pressed ? 0.82 : 1 },
-                      ]}
-                    >
-                      <Feather name="camera" size={16} color={colors.primaryForeground} />
-                      <View style={styles.nextActionCopy}>
-                        <Text style={[styles.nextActionTitle, { color: colors.primaryForeground }]}>Add photos</Text>
-                        <Text style={[styles.nextActionHint, { color: colors.primaryForeground }]}>Strengthen the item record</Text>
-                      </View>
-                      <Feather name="chevron-right" size={16} color={colors.primaryForeground} />
-                    </Pressable>
-                  ) : item.estimated_price == null || item.estimated_price <= 0 ? (
-                    <Pressable
-                      onPress={handleReplacementPricing}
-                      style={({ pressed }) => [
-                        styles.nextActionPrimary,
-                        { backgroundColor: colors.primary, opacity: pressed ? 0.82 : 1 },
-                      ]}
-                    >
-                      <Feather name="search" size={16} color={colors.primaryForeground} />
-                      <View style={styles.nextActionCopy}>
-                        <Text style={[styles.nextActionTitle, { color: colors.primaryForeground }]}>Find replacement price</Text>
-                        <Text style={[styles.nextActionHint, { color: colors.primaryForeground }]}>Add a current replacement value</Text>
-                      </View>
-                      <Feather name="chevron-right" size={16} color={colors.primaryForeground} />
-                    </Pressable>
-                  ) : !item.description || !item.category || !item.brand_maker ? (
-                    <Pressable
-                      onPress={handleEdit}
-                      style={({ pressed }) => [
-                        styles.nextActionPrimary,
-                        { backgroundColor: colors.primary, opacity: pressed ? 0.82 : 1 },
-                      ]}
-                    >
-                      <Feather name="check-circle" size={16} color={colors.primaryForeground} />
-                      <View style={styles.nextActionCopy}>
-                        <Text style={[styles.nextActionTitle, { color: colors.primaryForeground }]}>Complete item details</Text>
-                        <Text style={[styles.nextActionHint, { color: colors.primaryForeground }]}>Review photos, category and description</Text>
-                      </View>
-                      <Feather name="chevron-right" size={16} color={colors.primaryForeground} />
-                    </Pressable>
-                  ) : isWebUrl(item.web_listing_url) ? (
-                    <Pressable
-                      onPress={handleOpenReplacementListing}
-                      style={({ pressed }) => [
-                        styles.nextActionPrimary,
-                        { backgroundColor: colors.primary, opacity: pressed ? 0.82 : 1 },
-                      ]}
-                    >
-                      <Feather name="external-link" size={16} color={colors.primaryForeground} />
-                      <View style={styles.nextActionCopy}>
-                        <Text style={[styles.nextActionTitle, { color: colors.primaryForeground }]}>Open replacement listing</Text>
-                        <Text style={[styles.nextActionHint, { color: colors.primaryForeground }]}>Review the selected product source</Text>
-                      </View>
-                      <Feather name="chevron-right" size={16} color={colors.primaryForeground} />
-                    </Pressable>
-                  ) : (
-                    <Pressable
-                      onPress={handleReplacementPricing}
-                      style={({ pressed }) => [
-                        styles.nextActionPrimary,
-                        { backgroundColor: colors.primary, opacity: pressed ? 0.82 : 1 },
-                      ]}
-                    >
-                      <Feather name="refresh-cw" size={16} color={colors.primaryForeground} />
-                      <View style={styles.nextActionCopy}>
-                        <Text style={[styles.nextActionTitle, { color: colors.primaryForeground }]}>Review replacement price</Text>
-                        <Text style={[styles.nextActionHint, { color: colors.primaryForeground }]}>Compare current replacement listings</Text>
-                      </View>
-                      <Feather name="chevron-right" size={16} color={colors.primaryForeground} />
-                    </Pressable>
-                  )}
-
-                  <View style={styles.secondaryActions}>
-                    <Pressable
-                      onPress={handleEdit}
-                      style={({ pressed }) => [
-                        styles.secondaryAction,
-                        { borderColor: colors.border, backgroundColor: colors.secondary, opacity: pressed ? 0.8 : 1 },
-                      ]}
-                    >
-                      <Feather name="edit-2" size={14} color={colors.foreground} />
-                      <Text style={[styles.secondaryActionText, { color: colors.foreground }]}>Edit all details</Text>
-                    </Pressable>
-                    <Pressable
-                      onPress={handleReplacementPricing}
-                      style={({ pressed }) => [
-                        styles.secondaryAction,
-                        { borderColor: colors.border, backgroundColor: colors.secondary, opacity: pressed ? 0.8 : 1 },
-                      ]}
-                    >
-                      <Feather name="search" size={14} color={colors.foreground} />
-                      <Text style={[styles.secondaryActionText, { color: colors.foreground }]}>Replacement price</Text>
-                    </Pressable>
-                  </View>
+                <Section title="ACTIONS" colors={colors}>
+                  <Pressable
+                    onPress={handleReplacementPricing}
+                    style={({ pressed }) => [
+                      styles.nextActionPrimary,
+                      { backgroundColor: colors.primary, opacity: pressed ? 0.82 : 1 },
+                    ]}
+                  >
+                    <Feather name="search" size={16} color={colors.primaryForeground} />
+                    <View style={styles.nextActionCopy}>
+                      <Text style={[styles.nextActionTitle, { color: colors.primaryForeground }]}>Review replacement price</Text>
+                      <Text style={[styles.nextActionHint, { color: colors.primaryForeground }]}>Find or update the current replacement value</Text>
+                    </View>
+                    <Feather name="chevron-right" size={16} color={colors.primaryForeground} />
+                  </Pressable>
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel="Open advanced item editing"
+                    onPress={handleEdit}
+                    style={({ pressed }) => [
+                      styles.advancedEditAction,
+                      { borderTopColor: colors.border, opacity: pressed ? 0.65 : 1 },
+                    ]}
+                  >
+                    <Feather name="sliders" size={15} color={colors.mutedForeground} />
+                    <View style={styles.nextActionCopy}>
+                      <Text style={[styles.advancedEditTitle, { color: colors.foreground }]}>Advanced edit</Text>
+                      <Text style={[styles.advancedEditHint, { color: colors.mutedForeground }]}>Manage photos, category, room and additional details</Text>
+                    </View>
+                    <Feather name="chevron-right" size={15} color={colors.mutedForeground} />
+                  </Pressable>
                 </Section>
               </>
             ) : (
@@ -692,25 +757,38 @@ export default function ItemDetailScreen() {
               />
             ) : null}
 
-            {(item.brand_maker || item.model_series || item.condition_label) && (
-              <Section title="PRODUCT INFO" colors={colors}>
-                <DetailRow
-                  label="Brand / Maker"
-                  value={item.brand_maker}
-                  colors={colors}
-                />
-                <DetailRow
-                  label="Model / Series"
-                  value={item.model_series}
-                  colors={colors}
-                />
-                <DetailRow
-                  label="Condition"
-                  value={item.condition_label}
-                  colors={colors}
-                />
-              </Section>
-            )}
+            <Section title="PRODUCT INFO" colors={colors}>
+              {item.barcode_verified ? (
+                <View style={[styles.barcodeStatus, { backgroundColor: colors.accent }]}>
+                  <Feather name="check-circle" size={14} color={colors.primary} />
+                  <View style={styles.barcodeStatusCopy}>
+                    <Text style={[styles.barcodeStatusTitle, { color: colors.foreground }]}>Barcode verified</Text>
+                    {item.barcode ? (
+                      <Text style={[styles.barcodeStatusValue, { color: colors.mutedForeground }]}>{item.barcode}</Text>
+                    ) : null}
+                  </View>
+                </View>
+              ) : null}
+              <Pressable
+                onPress={() => setBarcodeScanOpen(true)}
+                style={({ pressed }) => [
+                  styles.barcodeAction,
+                  {
+                    borderColor: colors.primary,
+                    backgroundColor: colors.background,
+                    opacity: pressed ? 0.75 : 1,
+                  },
+                ]}
+              >
+                <Feather name="camera" size={15} color={colors.primary} />
+                <Text style={[styles.barcodeActionText, { color: colors.primary }]}>
+                  {item.barcode || item.barcode_verified ? "Update barcode" : "Scan barcode"}
+                </Text>
+              </Pressable>
+              <DetailRow label="Brand / Maker" value={item.brand_maker} colors={colors} />
+              <DetailRow label="Model / Series" value={item.model_series} colors={colors} />
+              <DetailRow label="Condition" value={item.condition_label} colors={colors} />
+            </Section>
 
             {(item.original_purchase_price ||
               item.purchase_year_approx ||
@@ -744,6 +822,44 @@ export default function ItemDetailScreen() {
           </View>
         </ScrollView>
       ) : null}
+      {item ? (
+        <BarcodeScanFlow
+          visible={barcodeScanOpen}
+          item={item}
+          onClose={() => setBarcodeScanOpen(false)}
+          onApply={handleApplyBarcode}
+        />
+      ) : null}
+      {item ? (
+        <VoiceInputSheet
+          visible={voiceInputOpen}
+          title={voiceTargetField ? "Edit field with voice" : "Edit item with voice"}
+          targetField={voiceTargetField}
+          currentValues={{
+            name: item.name,
+            quantity: item.quantity,
+            brand_maker: item.brand_maker,
+            model_series: item.model_series,
+            purchase_source: item.purchase_source,
+            purchase_year_approx: item.purchase_year_approx,
+            original_purchase_price: item.original_purchase_price,
+            estimated_price: item.estimated_price,
+            unit_estimated_price: item.unit_estimated_price,
+            description: item.description,
+            notes: item.notes,
+            price_source_type: item.price_source_type,
+            valuation_basis: item.valuation_basis,
+          }}
+          context={{
+            itemId: item.id,
+            currentName: item.name,
+            currentCategory: item.category ?? undefined,
+            currentDescription: item.description ?? undefined,
+          }}
+          onClose={() => setVoiceInputOpen(false)}
+          onApply={handleApplyVoice}
+        />
+      ) : null}
     </>
   );
 }
@@ -758,6 +874,12 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   content: { padding: 16, gap: 12 },
+  barcodeStatus: { flexDirection: "row", alignItems: "center", gap: 9, borderRadius: 10, paddingHorizontal: 11, paddingVertical: 9 },
+  barcodeStatusCopy: { flex: 1, gap: 1 },
+  barcodeStatusTitle: { fontSize: 13, fontWeight: "700" },
+  barcodeStatusValue: { fontSize: 11, fontFamily: "monospace" },
+  barcodeAction: { minHeight: 42, borderWidth: 1, borderRadius: 10, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 7 },
+  barcodeActionText: { fontSize: 13, fontWeight: "700" },
   titleRow: { gap: 8 },
   itemName: {
     fontSize: 22,
@@ -806,37 +928,40 @@ const styles = StyleSheet.create({
     fontFamily: "Inter_600SemiBold",
   },
   quickEditRow: {
-    minHeight: 50,
-    flexDirection: "row",
-    alignItems: "center",
+    minHeight: 62,
+    alignItems: "stretch",
     borderBottomWidth: StyleSheet.hairlineWidth,
-    gap: 10,
+    gap: 4,
+    paddingVertical: 8,
   },
-  quickEditLabel: { flex: 1, fontSize: 13, fontFamily: "Inter_400Regular" },
-  quickEditValueButton: {
-    flex: 1.4,
+  quickEditLabel: { fontSize: 12, fontFamily: "Inter_400Regular" },
+  quickEditReadControls: {
+    width: "100%",
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "flex-end",
+    justifyContent: "space-between",
+    gap: 7,
+  },
+  quickEditValueButton: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
     gap: 8,
     minHeight: 44,
   },
-  quickEditValue: { flexShrink: 1, fontSize: 13, fontFamily: "Inter_500Medium", textAlign: "right" },
+  quickEditValue: { flex: 1, fontSize: 14, lineHeight: 20, fontFamily: "Inter_500Medium", textAlign: "left" },
   quickEditControls: {
-    flex: 1.4,
+    width: "100%",
     minHeight: 44,
-    alignItems: "flex-end",
-    justifyContent: "center",
-    position: "relative",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
   },
   quickEditActions: {
-    position: "absolute",
-    right: "100%",
-    marginRight: 6,
     flexDirection: "row",
     alignItems: "center",
     gap: 6,
-    zIndex: 1,
   },
   quickEditInput: {
     flex: 1,
@@ -849,6 +974,19 @@ const styles = StyleSheet.create({
     fontFamily: "Inter_400Regular",
   },
   iconButton: { width: 34, height: 34, borderRadius: 8, alignItems: "center", justifyContent: "center" },
+  voiceEditAction: {
+    minHeight: 52,
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    marginBottom: 4,
+  },
+  voiceEditCopy: { flex: 1, gap: 1 },
+  voiceEditTitle: { fontSize: 13, fontFamily: "Inter_600SemiBold" },
+  voiceEditHint: { fontSize: 11, fontFamily: "Inter_400Regular" },
   nextActionPrimary: {
     minHeight: 62,
     borderRadius: 10,
@@ -860,19 +998,17 @@ const styles = StyleSheet.create({
   nextActionCopy: { flex: 1, gap: 2 },
   nextActionTitle: { fontSize: 14, fontFamily: "Inter_600SemiBold" },
   nextActionHint: { fontSize: 11, fontFamily: "Inter_400Regular", opacity: 0.82 },
-  secondaryActions: { flexDirection: "row", gap: 8, marginTop: 8 },
-  secondaryAction: {
-    flex: 1,
-    minHeight: 42,
-    borderWidth: 1,
-    borderRadius: 9,
+  advancedEditAction: {
+    minHeight: 52,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    marginTop: 10,
+    paddingTop: 10,
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "center",
-    gap: 6,
-    paddingHorizontal: 8,
+    gap: 10,
   },
-  secondaryActionText: { fontSize: 12, fontFamily: "Inter_500Medium", textAlign: "center" },
+  advancedEditTitle: { fontSize: 13, fontFamily: "Inter_500Medium" },
+  advancedEditHint: { fontSize: 11, fontFamily: "Inter_400Regular" },
   section: {
     borderWidth: 1,
     padding: 16,

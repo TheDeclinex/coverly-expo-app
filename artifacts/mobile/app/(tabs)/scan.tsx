@@ -22,6 +22,7 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { AiScanningOverlay } from "@/components/AiScanningOverlay";
+import { ContextBackButton } from "@/components/ContextBackButton";
 import { EmptyState } from "@/components/EmptyState";
 import { ExpandableImage } from "@/components/ExpandableImage";
 import { useToast } from "@/components/Toast";
@@ -545,7 +546,12 @@ export default function ScanScreen() {
     const roomName = getDestRoomName() ?? "Room";
     router.replace({
       pathname: "/(tabs)/room/[id]",
-      params: { id: selectedRoomId, name: roomName, fileId: selectedFileId },
+      params: {
+        id: selectedRoomId,
+        name: roomName,
+        fileId: selectedFileId,
+        fileName: paramFileName ?? "Property",
+      },
     });
   };
 
@@ -871,7 +877,9 @@ export default function ScanScreen() {
               <Text style={[revStyles.saveAllText, { color: colors.primaryForeground }]}>
                 {scanStatus === "saving"
                   ? "Saving…"
-                  : `Save all ${detectedItems.length} item${detectedItems.length !== 1 ? "s" : ""}`}
+                  : detectedItems.length === 1
+                    ? "Save 1 item"
+                    : `Save all ${detectedItems.length} items`}
               </Text>
             </Pressable>
           </View>
@@ -901,7 +909,37 @@ export default function ScanScreen() {
 
   return (
     <>
-      <Stack.Screen options={{ title: "Scan items" }} />
+      <Stack.Screen
+        options={{
+          title: "Scan items",
+          headerBackVisible: false,
+          headerLeft: () => (
+            <ContextBackButton
+              label={paramRoomName ?? paramFileName ?? "Home"}
+              onPress={() => {
+                if (paramRoomId) {
+                  router.replace({
+                    pathname: "/(tabs)/room/[id]",
+                    params: {
+                      id: paramRoomId,
+                      name: paramRoomName ?? "Room",
+                      fileId: paramFileId ?? "",
+                      fileName: paramFileName ?? "Property",
+                    },
+                  });
+                } else if (paramFileId) {
+                  router.replace({
+                    pathname: "/(tabs)/property/[id]",
+                    params: { id: paramFileId, name: paramFileName ?? "Property" },
+                  });
+                } else {
+                  router.replace("/(tabs)");
+                }
+              }}
+            />
+          ),
+        }}
+      />
       <ScrollView
         contentContainerStyle={[styles.scroll, { paddingBottom: insets.bottom + 32 }]}
       >

@@ -326,6 +326,8 @@ const styles = StyleSheet.create({
     borderWidth: 1.5,
     paddingHorizontal: 13,
     paddingVertical: 8,
+    maxWidth: "100%",
+    alignSelf: "flex-start",
   },
   errorBox: {
     flexDirection: "row",

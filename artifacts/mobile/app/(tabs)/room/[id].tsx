@@ -1,4 +1,4 @@
-import { Feather } from "@expo/vector-icons";
+import { Feather, MaterialCommunityIcons } from "@expo/vector-icons";
 import * as ImagePicker from "expo-image-picker";
 import * as Haptics from "expo-haptics";
 import * as WebBrowser from "expo-web-browser";
@@ -11,22 +11,31 @@ import {
   Alert,
   Animated,
   FlatList,
+  KeyboardAvoidingView,
+  Modal,
   Platform,
   Pressable,
   RefreshControl,
   StyleSheet,
   Text,
   TextInput,
+  useWindowDimensions,
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { EmptyState } from "@/components/EmptyState";
+import {
+  BarcodeScanFlow,
+  type BarcodeApplyValues,
+} from "@/components/BarcodeScanFlow";
+import { ContextBackButton } from "@/components/ContextBackButton";
 import { ErrorState } from "@/components/ErrorState";
 import { ExpandableImage } from "@/components/ExpandableImage";
 import { LoadingState } from "@/components/LoadingState";
 import { useToast } from "@/components/Toast";
 import { getCategoryColor } from "@/constants/categoryColors";
+import { getRoomPlaceholderIcon } from "@/constants/roomVisuals";
 import { useAuth } from "@/context/AuthContext";
 import { useColors } from "@/hooks/useColors";
 import { formatCurrencyFull, getItemUnitPrice } from "@/lib/inventory-mappers";
@@ -39,6 +48,7 @@ import type { InventoryItem, InventoryRoom } from "@/types";
 
 const COVER_H = 200;
 const TEAL = "#1D9E75";
+const STICKY_ACTION_CLEARANCE = 96;
 
 /** Maps category key → Feather icon name */
 const CATEGORY_ICONS: Record<string, keyof typeof Feather.glyphMap> = {
@@ -82,27 +92,6 @@ function isWebUrl(value: string | null | undefined): value is string {
   return typeof value === "string" && /^https?:\/\//i.test(value);
 }
 
-const ROOM_ICONS: Record<string, string> = {
-  kitchen: "coffee",
-  bedroom: "moon",
-  bathroom: "droplet",
-  living_room: "tv",
-  lounge: "tv",
-  dining: "scissors",
-  office: "monitor",
-  garage: "truck",
-  garden: "sun",
-  utility: "tool",
-  hallway: "navigation",
-  loft: "archive",
-};
-
-function roomIconName(roomType: string | null): keyof typeof Feather.glyphMap {
-  if (!roomType) return "home";
-  const key = roomType.toLowerCase().replace(/\s+/g, "_");
-  return (ROOM_ICONS[key] ?? "home") as keyof typeof Feather.glyphMap;
-}
-
 function parsePrice(value: string): number | null {
   const parsed = Number(value.replace(/[^0-9.]/g, ""));
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
@@ -112,6 +101,8 @@ type CardEditTarget = "name" | "valuation";
 
 function ItemCard({
   item,
+  parentRoomName,
+  parentPropertyName,
   colors,
   resolvedImageUrl,
   evidenceCount = 0,
@@ -121,6 +112,8 @@ function ItemCard({
   onCloseEdit,
 }: {
   item: InventoryItem;
+  parentRoomName: string;
+  parentPropertyName: string;
   colors: ReturnType<typeof import("@/hooks/useColors").useColors>;
   /** Pre-resolved signed URL from the parent's batch useSignedUrls() call. */
   resolvedImageUrl?: string | null;
@@ -132,12 +125,14 @@ function ItemCard({
 }) {
   const queryClient = useQueryClient();
   const { showToast } = useToast();
+  const { width: windowWidth } = useWindowDimensions();
+  const useStackedSummary = windowWidth < 390;
   const activeEditorRef = useRef<View>(null);
-  const nameActionPressRef = useRef(false);
   const [nameDraft, setNameDraft] = useState(item.name);
   const [quantityDraft, setQuantityDraft] = useState(String(item.quantity ?? 1));
   const [unitPriceDraft, setUnitPriceDraft] = useState(String(getItemUnitPrice(item)));
   const [savingCard, setSavingCard] = useState(false);
+  const [barcodeScanOpen, setBarcodeScanOpen] = useState(false);
 
   useEffect(() => {
     if (!editingTarget) {
@@ -192,6 +187,7 @@ function ItemCard({
   const draftUnitPrice = parsePrice(unitPriceDraft) ?? 0;
   const draftTotal = draftUnitPrice * draftQuantity;
   const valLabel = valuationLabel(item);
+  const hasReplacementListing = valLabel === "Replacement listing";
   const dotColor = categoryDotColor(item.category);
   const placeholderIcon = categoryIcon(item.category);
 
@@ -282,20 +278,8 @@ function ItemCard({
     if (await persistCardUpdate(updates)) onCloseEdit("valuation");
   };
 
-  const handleNameBlur = () => {
-    setTimeout(() => {
-      if (!nameActionPressRef.current) void saveNameEdit();
-    }, 0);
-  };
-
-  const finishNameActionPress = () => {
-    setTimeout(() => {
-      nameActionPressRef.current = false;
-    }, 100);
-  };
-
   useEffect(() => {
-    if (Platform.OS !== "web" || !editingTarget) return;
+    if (Platform.OS !== "web" || editingTarget !== "valuation") return;
 
     const handlePointerDown = (event: PointerEvent) => {
       const editor = activeEditorRef.current as unknown as {
@@ -303,8 +287,7 @@ function ItemCard({
       } | null;
       if (editor?.contains?.(event.target)) return;
 
-      if (editingTarget === "name") void saveNameEdit();
-      else void saveValuationEdit();
+      void saveValuationEdit();
     };
 
     document.addEventListener("pointerdown", handlePointerDown, true);
@@ -315,7 +298,14 @@ function ItemCard({
     await Haptics.selectionAsync();
     router.push({
       pathname: "/(tabs)/item/[id]",
-      params: { id: item.id, name: item.name },
+      params: {
+        id: item.id,
+        name: item.name,
+        roomId: item.room_id ?? "",
+        roomName: parentRoomName,
+        fileId: item.file_id,
+        fileName: parentPropertyName,
+      },
     });
   };
 
@@ -323,13 +313,31 @@ function ItemCard({
     await Haptics.selectionAsync();
     router.push({
       pathname: "/(tabs)/item/[id]",
-      params: { id: item.id, name: item.name, evidence: "add" },
+      params: {
+        id: item.id,
+        name: item.name,
+        evidence: "add",
+        roomId: item.room_id ?? "",
+        roomName: parentRoomName,
+        fileId: item.file_id,
+        fileName: parentPropertyName,
+      },
     });
   };
 
   const goToReplacementPricing = async () => {
     await Haptics.selectionAsync();
-    router.push(`/(tabs)/replacement-pricing/${item.id}` as Href);
+    router.push({
+      pathname: "/(tabs)/replacement-pricing/[id]",
+      params: {
+        id: item.id,
+        origin: "room",
+        roomId: item.room_id ?? "",
+        roomName: parentRoomName,
+        fileId: item.file_id,
+        fileName: parentPropertyName,
+      },
+    } as Href);
   };
 
   const openReplacementListing = async () => {
@@ -338,17 +346,48 @@ function ItemCard({
     await WebBrowser.openBrowserAsync(item.web_listing_url);
   };
 
+  const openBarcodeScanner = async () => {
+    await Haptics.selectionAsync();
+    setBarcodeScanOpen(true);
+  };
+
+  const applyBarcodeMatch = async (values: BarcodeApplyValues) => {
+    const updates: Partial<InventoryItem> = {
+      barcode: values.barcode,
+      barcode_verified: true,
+      ...(values.name ? { name: values.name } : {}),
+      ...(values.brandMaker ? { brand_maker: values.brandMaker } : {}),
+      ...(values.modelSeries ? { model_series: values.modelSeries } : {}),
+      ...(values.description ? { description: values.description } : {}),
+    };
+
+    const { error: updateError } = await supabase
+      .from("inventory_items")
+      .update(updates)
+      .eq("id", item.id);
+    if (updateError) throw updateError;
+
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ["item", item.id] }),
+      queryClient.invalidateQueries({ queryKey: ["items", item.room_id] }),
+      queryClient.invalidateQueries({ queryKey: ["all-items"] }),
+      queryClient.invalidateQueries({ queryKey: ["property-items", item.file_id] }),
+    ]);
+    showToast("Barcode details applied");
+  };
+
   return (
-    <View
-      style={[
-        styles.card,
-        {
-          backgroundColor: colors.card,
-          borderRadius: colors.radius,
-          borderColor: isNew ? colors.primary : colors.border,
-        },
-      ]}
-    >
+    <>
+      <View
+        style={[
+          styles.card,
+          {
+            backgroundColor: colors.card,
+            borderRadius: colors.radius,
+            borderColor: isNew ? colors.primary : colors.border,
+          },
+        ]}
+      >
       {/* ── Summary row ── */}
       <View style={styles.cardSummary}>
         {/* Thumbnail */}
@@ -367,67 +406,30 @@ function ItemCard({
 
         {/* Text block */}
         <View style={styles.cardBody}>
-          {/* Name (left) + Price (right) — same row */}
-          <View style={styles.nameRow}>
+          {/* Narrow cards stack price beneath the name so both remain readable. */}
+          <View style={[styles.nameRow, useStackedSummary ? styles.nameRowStacked : null]}>
             <View style={styles.nameBlock}>
               {isNew ? (
                 <View style={[styles.newBadge, { backgroundColor: colors.primary }]}>
                   <Text style={[styles.newBadgeText, { color: colors.primaryForeground }]}>NEW</Text>
                 </View>
               ) : null}
-              {editingTarget === "name" ? (
-                <View ref={activeEditorRef} style={styles.compactNameEdit}>
-                  <TextInput
-                    autoFocus
-                    accessibilityLabel="Item name"
-                    value={nameDraft}
-                    onChangeText={setNameDraft}
-                    editable={!savingCard}
-                    onSubmitEditing={() => void saveNameEdit()}
-                    onBlur={handleNameBlur}
-                    style={[
-                      styles.compactNameInput,
-                      { color: colors.foreground, backgroundColor: colors.card, borderColor: colors.primary },
-                    ]}
-                  />
-                  <Pressable
-                    accessibilityLabel="Save item name"
-                    onPress={() => void saveNameEdit()}
-                    onPressIn={() => {
-                      nameActionPressRef.current = true;
-                    }}
-                    onPressOut={finishNameActionPress}
-                    disabled={savingCard}
-                    hitSlop={5}
-                  >
-                    {savingCard ? (
-                      <ActivityIndicator size="small" color={colors.primary} />
-                    ) : (
-                      <Feather name="check" size={15} color={colors.primary} />
-                    )}
-                  </Pressable>
-                  <Pressable
-                    accessibilityLabel="Cancel item name edit"
-                    onPress={cancelInlineEdit}
-                    onPressIn={() => {
-                      nameActionPressRef.current = true;
-                    }}
-                    onPressOut={finishNameActionPress}
-                    disabled={savingCard}
-                    hitSlop={5}
-                  >
-                    <Feather name="x" size={15} color={colors.mutedForeground} />
-                  </Pressable>
-                </View>
-              ) : (
-                <Pressable accessibilityLabel="Edit item name" onPress={beginNameEdit} hitSlop={5}>
-                  <Text style={[styles.cardName, { color: colors.foreground }]} numberOfLines={2}>
-                    {item.name}
-                  </Text>
-                </Pressable>
-              )}
+              <Pressable accessibilityLabel="Edit item name" onPress={beginNameEdit} hitSlop={5}>
+                <Text
+                  style={[styles.cardName, { color: colors.foreground }]}
+                  numberOfLines={useStackedSummary ? 3 : 2}
+                >
+                  {item.name}
+                </Text>
+              </Pressable>
             </View>
-            <View style={[styles.priceBlock, editingTarget === "valuation" ? styles.priceBlockEditing : null]}>
+            <View
+              style={[
+                styles.priceBlock,
+                useStackedSummary ? styles.priceBlockStacked : null,
+                editingTarget === "valuation" ? styles.priceBlockEditing : null,
+              ]}
+            >
               {editingTarget === "valuation" ? (
                 <View ref={activeEditorRef} style={styles.compactValuationEdit}>
                   <View style={styles.compactQuantityRow}>
@@ -555,19 +557,33 @@ function ItemCard({
 
       {/* ── Actions ── */}
       <View style={styles.actions}>
-        {/* Primary: Find replacement price */}
-        <Pressable
-          onPress={goToReplacementPricing}
-          style={({ pressed }) => [
-            styles.findPriceBtn,
-            { borderColor: TEAL, opacity: pressed ? 0.75 : 1 },
-          ]}
-        >
-          <Feather name="search" size={13} color={TEAL} />
-          <Text style={[styles.findPriceTxt, { color: TEAL }]}>
-            Find replacement price
-          </Text>
-        </Pressable>
+        {hasReplacementListing ? (
+          <Pressable
+            onPress={goToReplacementPricing}
+            style={({ pressed }) => [
+              styles.updatePriceBtn,
+              {
+                borderColor: colors.border,
+                backgroundColor: colors.secondary,
+                opacity: pressed ? 0.72 : 1,
+              },
+            ]}
+          >
+            <Feather name="refresh-cw" size={12} color={TEAL} />
+            <Text style={[styles.updatePriceTxt, { color: TEAL }]}>Update price</Text>
+          </Pressable>
+        ) : (
+          <Pressable
+            onPress={goToReplacementPricing}
+            style={({ pressed }) => [
+              styles.findPriceBtn,
+              { borderColor: TEAL, opacity: pressed ? 0.75 : 1 },
+            ]}
+          >
+            <Feather name="search" size={13} color={TEAL} />
+            <Text style={[styles.findPriceTxt, { color: TEAL }]}>Find replacement price</Text>
+          </Pressable>
+        )}
 
         {/* Compact secondary actions; quick edits live in the summary above. */}
         <View style={styles.secondaryRow}>
@@ -609,17 +625,136 @@ function ItemCard({
               color={colors.mutedForeground}
             />
           </Pressable>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={
+              item.barcode_verified
+                ? "View verified barcode"
+                : item.barcode
+                  ? "View saved barcode"
+                  : "Scan barcode"
+            }
+            onPress={() => void openBarcodeScanner()}
+            style={({ pressed }) => [
+              styles.barcodeIconBtn,
+              {
+                borderColor: colors.border,
+                backgroundColor: colors.secondary,
+                opacity: pressed ? 0.72 : 1,
+              },
+            ]}
+          >
+            <View style={styles.barcodeIconWrap}>
+              <MaterialCommunityIcons
+                name={item.barcode ? "barcode" : "barcode-scan"}
+                size={19}
+                color={item.barcode_verified ? colors.primary : colors.mutedForeground}
+              />
+              {item.barcode_verified ? (
+                <View style={[styles.barcodeVerifiedBadge, { backgroundColor: colors.primary }]}>
+                  <Feather name="check" size={7} color={colors.primaryForeground} />
+                </View>
+              ) : item.barcode ? (
+                <View style={[styles.barcodeSavedDot, { backgroundColor: colors.primary }]} />
+              ) : null}
+            </View>
+          </Pressable>
+        </View>
         </View>
       </View>
-    </View>
+      <Modal
+        visible={editingTarget === "name"}
+        transparent
+        animationType="fade"
+        onRequestClose={cancelInlineEdit}
+      >
+        <KeyboardAvoidingView
+          style={styles.nameModalKeyboard}
+          behavior={Platform.OS === "ios" ? "padding" : undefined}
+        >
+          <Pressable style={styles.nameModalBackdrop} onPress={cancelInlineEdit}>
+            <Pressable
+              accessibilityRole="none"
+              onPress={(event) => event.stopPropagation()}
+              style={[
+                styles.nameModalCard,
+                {
+                  backgroundColor: colors.card,
+                  borderColor: colors.border,
+                  borderRadius: colors.radius + 4,
+                },
+              ]}
+            >
+              <Text style={[styles.nameModalTitle, { color: colors.foreground }]}>Edit item name</Text>
+              <TextInput
+                autoFocus
+                accessibilityLabel="Item name"
+                value={nameDraft}
+                onChangeText={setNameDraft}
+                editable={!savingCard}
+                multiline
+                textAlignVertical="top"
+                style={[
+                  styles.nameModalInput,
+                  {
+                    color: colors.foreground,
+                    backgroundColor: colors.background,
+                    borderColor: colors.primary,
+                  },
+                ]}
+              />
+              <View style={styles.nameModalActions}>
+                <Pressable
+                  accessibilityRole="button"
+                  onPress={cancelInlineEdit}
+                  disabled={savingCard}
+                  style={({ pressed }) => [
+                    styles.nameModalButton,
+                    { borderColor: colors.border, opacity: pressed ? 0.7 : 1 },
+                  ]}
+                >
+                  <Text style={[styles.nameModalButtonText, { color: colors.foreground }]}>Cancel</Text>
+                </Pressable>
+                <Pressable
+                  accessibilityRole="button"
+                  onPress={() => void saveNameEdit()}
+                  disabled={savingCard}
+                  style={({ pressed }) => [
+                    styles.nameModalButton,
+                    {
+                      backgroundColor: colors.primary,
+                      borderColor: colors.primary,
+                      opacity: savingCard || pressed ? 0.72 : 1,
+                    },
+                  ]}
+                >
+                  {savingCard ? (
+                    <ActivityIndicator size="small" color={colors.primaryForeground} />
+                  ) : (
+                    <Text style={[styles.nameModalButtonText, { color: colors.primaryForeground }]}>Save</Text>
+                  )}
+                </Pressable>
+              </View>
+            </Pressable>
+          </Pressable>
+        </KeyboardAvoidingView>
+      </Modal>
+      <BarcodeScanFlow
+        visible={barcodeScanOpen}
+        item={item}
+        onClose={() => setBarcodeScanOpen(false)}
+        onApply={applyBarcodeMatch}
+      />
+    </>
   );
 }
 
 export default function ItemsScreen() {
-  const { id, name, fileId } = useLocalSearchParams<{
+  const { id, name, fileId, fileName } = useLocalSearchParams<{
     id: string;
     name: string;
     fileId?: string;
+    fileName?: string;
   }>();
   const { session } = useAuth();
   const colors = useColors();
@@ -682,6 +817,23 @@ export default function ItemsScreen() {
     enabled: !!session && !!id,
   });
 
+  const resolvedFileId = fileId ?? room?.file_id;
+  const { data: parentProperty } = useQuery({
+    queryKey: ["property-context", resolvedFileId, session?.user.id],
+    queryFn: async () => {
+      const { data, error: queryError } = await supabase
+        .from("inventory_files")
+        .select("id, name")
+        .eq("id", resolvedFileId!)
+        .single();
+      if (queryError) throw queryError;
+      return data as { id: string; name: string };
+    },
+    enabled: Boolean(session && resolvedFileId && !fileName),
+  });
+  const resolvedPropertyName = fileName ?? parentProperty?.name ?? "Property";
+  const resolvedRoomName = room?.name ?? name ?? "Room";
+
   const roomItemIds = React.useMemo(() => (items ?? []).map((item) => item.id), [items]);
   const roomItemIdsKey = React.useMemo(
     () => [...roomItemIds].sort().join(","),
@@ -731,7 +883,12 @@ export default function ItemsScreen() {
     await Haptics.selectionAsync();
     router.push({
       pathname: "/(tabs)/scan",
-      params: { roomId: id, roomName: name, fileId: fileId ?? "" },
+      params: {
+        roomId: id,
+        roomName: resolvedRoomName,
+        fileId: resolvedFileId ?? "",
+        fileName: resolvedPropertyName,
+      },
     });
   };
 
@@ -739,26 +896,36 @@ export default function ItemsScreen() {
     await Haptics.selectionAsync();
     router.push({
       pathname: "/(tabs)/add-item",
-      params: { roomId: id, roomName: name, fileId: fileId ?? "" },
+      params: {
+        roomId: id,
+        roomName: resolvedRoomName,
+        fileId: resolvedFileId ?? "",
+        fileName: resolvedPropertyName,
+      },
     });
   };
 
   const handlePickRoomCover = async () => {
     if (coverUploading) return;
-    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (status !== "granted") {
-      Alert.alert(
-        "Permission needed",
-        "Allow access to your photos to set a room cover image."
-      );
-      return;
+    if (Platform.OS !== "web") {
+      const { status } = await ImagePicker.requestCameraPermissionsAsync();
+      if (status !== "granted") {
+        Alert.alert(
+          "Permission needed",
+          "Allow camera access to take a room cover photo."
+        );
+        return;
+      }
     }
-    const result = await ImagePicker.launchImageLibraryAsync({
+    const pickerOptions: ImagePicker.ImagePickerOptions = {
       mediaTypes: ["images"],
       quality: 0.85,
       allowsEditing: true,
       aspect: [16, 9],
-    });
+    };
+    const result = Platform.OS === "web"
+      ? await ImagePicker.launchImageLibraryAsync(pickerOptions)
+      : await ImagePicker.launchCameraAsync(pickerOptions);
     if (result.canceled || !result.assets[0]) return;
     if (!session?.user.id) return;
     setCoverUploading(true);
@@ -826,8 +993,8 @@ export default function ItemsScreen() {
         </Animated.View>
       ) : (
         <View style={styles.coverPlaceholder}>
-          <Feather
-            name={roomIconName(room?.room_type ?? null)}
+          <MaterialCommunityIcons
+            name={getRoomPlaceholderIcon(room?.room_type, room?.name ?? name)}
             size={72}
             color={colors.primary}
             style={{ opacity: 0.55 }}
@@ -853,7 +1020,20 @@ export default function ItemsScreen() {
     <>
       <Stack.Screen
         options={{
-          title: name ?? "Items",
+          title: resolvedRoomName,
+          headerTitleAlign: "center",
+          headerBackVisible: false,
+          headerLeft: () => (
+            <ContextBackButton
+              label={resolvedPropertyName}
+              onPress={() =>
+                router.replace({
+                  pathname: "/(tabs)/property/[id]",
+                  params: { id: resolvedFileId ?? "", name: resolvedPropertyName },
+                })
+              }
+            />
+          ),
           headerRight: () => (
             <View style={{ flexDirection: "row", gap: 4, alignItems: "center" }}>
               <Pressable onPress={handleScanRoom} style={{ padding: 4 }} hitSlop={8}>
@@ -882,6 +1062,8 @@ export default function ItemsScreen() {
             renderItem={({ item }) => (
               <ItemCard
                 item={item}
+                parentRoomName={resolvedRoomName}
+                parentPropertyName={resolvedPropertyName}
                 colors={colors}
                 evidenceCount={evidenceCounts[item.id] ?? 0}
                 isNew={isRecentItem(item.id) && recentTick >= 0}
@@ -896,10 +1078,11 @@ export default function ItemsScreen() {
               />
             )}
             ListHeaderComponent={renderRoomCover}
+            ListFooterComponent={<View style={{ height: insets.bottom + STICKY_ACTION_CLEARANCE }} />}
             contentContainerStyle={[
               styles.list,
               {
-                paddingBottom: insets.bottom + 160,
+                paddingBottom: 12,
                 ...(Platform.OS === "web" ? { paddingTop: 0 } : {}),
               },
             ]}
@@ -926,7 +1109,11 @@ export default function ItemsScreen() {
           <View
             style={[
               styles.fabRow,
-              { bottom: insets.bottom + 20 },
+              {
+                backgroundColor: colors.card,
+                borderTopColor: colors.border,
+                paddingBottom: insets.bottom + 12,
+              },
             ]}
           >
             <Pressable
@@ -1030,18 +1217,8 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     gap: 10,
   },
+  nameRowStacked: { flexDirection: "column", alignItems: "stretch", gap: 4 },
   nameBlock: { flex: 1, minWidth: 0, gap: 4 },
-  compactNameEdit: { flexDirection: "row", alignItems: "center", gap: 6 },
-  compactNameInput: {
-    flex: 1,
-    minWidth: 72,
-    height: 36,
-    borderWidth: 1,
-    borderRadius: 8,
-    paddingHorizontal: 8,
-    fontSize: 13,
-    fontFamily: "Inter_500Medium",
-  },
   cardName: {
     fontSize: 15,
     fontFamily: "Inter_600SemiBold",
@@ -1051,6 +1228,7 @@ const styles = StyleSheet.create({
   newBadge: { borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2, marginTop: 1 },
   newBadgeText: { fontSize: 9, fontFamily: "Inter_700Bold", letterSpacing: 0.5 },
   priceBlock: { alignItems: "stretch", gap: 3, width: 124, flexShrink: 0 },
+  priceBlockStacked: { width: "100%", alignItems: "flex-end" },
   priceBlockEditing: { width: 184 },
   compactValuation: { alignItems: "flex-end", gap: 2, paddingTop: 1 },
   compactValuationEdit: { alignItems: "stretch", gap: 6 },
@@ -1120,7 +1298,89 @@ const styles = StyleSheet.create({
     paddingVertical: 9,
   },
   findPriceTxt: { fontSize: 13, fontFamily: "Inter_600SemiBold" },
+  updatePriceBtn: {
+    alignSelf: "flex-end",
+    minHeight: 32,
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingHorizontal: 11,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+  },
+  updatePriceTxt: { fontSize: 11, fontFamily: "Inter_600SemiBold" },
   secondaryRow: { flexDirection: "row", gap: 8 },
+  barcodeIconBtn: {
+    width: 38,
+    minHeight: 34,
+    borderWidth: 1,
+    borderRadius: 8,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  barcodeIconWrap: { position: "relative", alignItems: "center", justifyContent: "center" },
+  barcodeVerifiedBadge: {
+    position: "absolute",
+    right: -5,
+    bottom: -4,
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  barcodeSavedDot: {
+    position: "absolute",
+    right: -3,
+    bottom: -2,
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+  },
+  nameModalKeyboard: { flex: 1 },
+  nameModalBackdrop: {
+    flex: 1,
+    paddingHorizontal: 20,
+    justifyContent: "center",
+    backgroundColor: "rgba(15, 23, 42, 0.46)",
+  },
+  nameModalCard: {
+    width: "100%",
+    maxWidth: 440,
+    alignSelf: "center",
+    borderWidth: 1,
+    padding: 16,
+    gap: 12,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.18,
+    shadowRadius: 18,
+    elevation: 12,
+  },
+  nameModalTitle: { fontSize: 16, fontFamily: "Inter_600SemiBold" },
+  nameModalInput: {
+    minHeight: 92,
+    maxHeight: 150,
+    borderWidth: 1.5,
+    borderRadius: 9,
+    paddingHorizontal: 11,
+    paddingVertical: 10,
+    fontSize: 15,
+    lineHeight: 21,
+    fontFamily: "Inter_400Regular",
+  },
+  nameModalActions: { flexDirection: "row", justifyContent: "flex-end", gap: 9 },
+  nameModalButton: {
+    minWidth: 92,
+    minHeight: 42,
+    borderWidth: 1,
+    borderRadius: 9,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 14,
+  },
+  nameModalButtonText: { fontSize: 13, fontFamily: "Inter_600SemiBold" },
   secondaryBtn: {
     flexDirection: "row",
     alignItems: "center",
@@ -1134,10 +1394,19 @@ const styles = StyleSheet.create({
   secondaryTxt: { fontSize: 12, fontFamily: "Inter_500Medium" },
   fabRow: {
     position: "absolute",
-    left: 16,
-    right: 16,
+    bottom: 0,
+    left: 0,
+    right: 0,
     flexDirection: "row",
     gap: 10,
+    paddingHorizontal: 16,
+    paddingTop: 10,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    shadowColor: "#0F172A",
+    shadowOffset: { width: 0, height: -3 },
+    shadowOpacity: 0.08,
+    shadowRadius: 8,
+    elevation: 8,
   },
   fabBtn: {
     flexDirection: "row",

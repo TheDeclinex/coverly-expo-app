@@ -52,6 +52,21 @@ const TYPE_COLOR: Record<EvidenceType, string> = {
   other: "#64748B",
 };
 
+const EVIDENCE_DISPLAY_LABEL: Record<EvidenceType, string> = {
+  photo: "Supporting photo",
+  receipt: "Receipt photo",
+  warranty: "Warranty document",
+  manual: "Product manual",
+  valuation: "Valuation note",
+  other: "Evidence file",
+};
+
+function evidenceFileType(filename: string): string {
+  const extension = filename.split(".").pop()?.toUpperCase();
+  if (!extension || extension === filename.toUpperCase()) return "FILE";
+  return extension === "JPEG" ? "JPG" : extension;
+}
+
 export function ItemEvidenceSection({
   itemId,
   fileId,
@@ -268,11 +283,13 @@ export function ItemEvidenceSection({
                 </View>
                 <View style={{ flex: 1, minWidth: 0 }}>
                   <View style={styles.nameRow}>
-                    <Text style={[styles.filename, { color: colors.foreground }]} numberOfLines={1}>{item.filename}</Text>
-                    <Text style={[styles.typeLabel, { color: TYPE_COLOR[item.evidence_type] }]}>{EVIDENCE_TYPE_LABEL[item.evidence_type]}</Text>
+                    <Text style={[styles.filename, { color: colors.foreground }]} numberOfLines={1}>
+                      {EVIDENCE_DISPLAY_LABEL[item.evidence_type]}
+                    </Text>
                   </View>
-                  <Text style={[styles.dateText, { color: colors.mutedForeground }]}>
+                  <Text style={[styles.dateText, { color: colors.mutedForeground }]} numberOfLines={1}>
                     {new Date(item.document_date ?? item.upload_date).toLocaleDateString("en-NZ")}
+                    {` · ${evidenceFileType(item.filename)} · ${item.filename}`}
                   </Text>
                   {item.caption ? <Text style={[styles.caption, { color: colors.mutedForeground }]} numberOfLines={2}>{item.caption}</Text> : null}
                 </View>

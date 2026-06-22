@@ -1,4 +1,4 @@
-import { Feather } from "@expo/vector-icons";
+import { Feather, MaterialCommunityIcons } from "@expo/vector-icons";
 import { Image } from "expo-image";
 import * as Haptics from "expo-haptics";
 import * as ImagePicker from "expo-image-picker";
@@ -7,6 +7,7 @@ import { Stack, router, useLocalSearchParams } from "expo-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
+  AccessibilityInfo,
   Animated,
   ActivityIndicator,
   Alert,
@@ -29,8 +30,10 @@ import Svg, { Circle, Defs, G, Line, Mask, Path, Polyline, Rect } from "react-na
 import { EmptyState } from "@/components/EmptyState";
 import { ErrorState } from "@/components/ErrorState";
 import { LoadingState } from "@/components/LoadingState";
+import { ContextBackButton } from "@/components/ContextBackButton";
 import { useToast } from "@/components/Toast";
 import { getCategoryColor, getCategoryLegendEntry } from "@/constants/categoryColors";
+import { getRoomPlaceholderIcon } from "@/constants/roomVisuals";
 import { useAuth } from "@/context/AuthContext";
 import { useColors } from "@/hooks/useColors";
 import { useSignedUrl, useSignedUrls } from "@/hooks/useSignedUrls";
@@ -39,11 +42,13 @@ import {
   calcPropertyStats,
   type RoomStat,
 } from "@/lib/dashboard-stats";
+import { getCoverageColor, getCoverageStatusLabel } from "@/lib/coverage";
 import {
   formatCurrency,
   getItemTotalValue,
   hasPhoto,
   hasValue,
+  needsReview,
 } from "@/lib/inventory-mappers";
 import { formatUploadFailure, uploadCoverPhoto } from "@/lib/photo-upload";
 import { supabase } from "@/lib/supabase";
@@ -55,33 +60,6 @@ const BRAND_DANGER = "#B91C1C";
 const BRAND_BORDER = "#E2E8F0";
 const BRAND_DARK = "#0B6F66";
 const BRAND_DARK_DEEP = "#0A5C55";
-
-function coverageColor(percent: number): string {
-  if (percent >= 100) return "#EF4444";
-  if (percent >= 75) return "#F97316";
-  return "#22C55E";
-}
-
-const ROOM_ICONS: Record<string, string> = {
-  kitchen: "coffee",
-  bedroom: "moon",
-  bathroom: "droplet",
-  living_room: "tv",
-  lounge: "tv",
-  dining: "scissors",
-  office: "monitor",
-  garage: "truck",
-  garden: "sun",
-  utility: "tool",
-  hallway: "navigation",
-  loft: "archive",
-};
-
-function roomIcon(roomType: string | null): string {
-  if (!roomType) return "square";
-  const key = roomType.toLowerCase().replace(/\s+/g, "_");
-  return ROOM_ICONS[key] ?? "square";
-}
 
 // ─── Sparkline ────────────────────────────────────────────────────────────────
 
@@ -165,10 +143,28 @@ function CompactSummary({
   colors: ReturnType<typeof import("@/hooks/useColors").useColors>;
   onEditCover: () => void;
 }) {
+  const [displayValue, setDisplayValue] = useState(0);
   const coverColor =
     stats.coveragePercent != null
-      ? coverageColor(stats.coveragePercent)
+      ? getCoverageColor(stats.coveragePercent)
       : colors.mutedForeground;
+
+  useEffect(() => {
+    const animationValue = new Animated.Value(0);
+    const listener = animationValue.addListener(({ value }) => setDisplayValue(Math.round(value)));
+    const animation = Animated.timing(animationValue, {
+      toValue: stats.totalValue,
+      duration: 750,
+      delay: 100,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: false,
+    });
+    animation.start();
+    return () => {
+      animation.stop();
+      animationValue.removeListener(listener);
+    };
+  }, [stats.totalValue]);
 
   return (
     <View
@@ -188,7 +184,7 @@ function CompactSummary({
             numberOfLines={1}
             adjustsFontSizeToFit
           >
-            {formatCurrency(stats.totalValue || null)}
+            {formatCurrency(displayValue)}
           </Text>
           <Text
             style={[styles.summarySmallLabel, { color: colors.mutedForeground }]}
@@ -311,9 +307,11 @@ function segmentPath(
 function CategoryDonut({
   data,
   size = 110,
+  enableHaptics = false,
 }: {
   data: { key: string; name: string; value: number }[];
   size?: number;
+  enableHaptics?: boolean;
 }) {
   // Category composition always totals 100%; it is not cover/documentation progress.
   // Insurance-cover progress is intentionally rendered in a separate component.
@@ -339,8 +337,23 @@ function CategoryDonut({
       useNativeDriver: false,
     });
     animation.start();
-    return () => animation.stop();
-  }, [categoryTotal, growth]);
+
+    const hapticTimers =
+      enableHaptics && Platform.OS !== "web"
+        ? Array.from({ length: 8 }, (_, index) => {
+            const progress = index / 7;
+            const delay = 100 + Math.round(progress * progress * 650);
+            return setTimeout(() => {
+              void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => undefined);
+            }, delay);
+          })
+        : [];
+
+    return () => {
+      animation.stop();
+      hapticTimers.forEach(clearTimeout);
+    };
+  }, [categoryTotal, enableHaptics, growth]);
 
   if (categoryTotal <= 0 || data.length === 0) {
     return (
@@ -435,35 +448,6 @@ function InsightCard({
   const insets = useSafeAreaInsets();
   const sparkPoints = useMemo(() => buildSparklinePoints(items, sparkPeriod), [items, sparkPeriod]);
 
-  // Animated counting total + haptic feedback (fast → slow deceleration)
-  const [displayVal, setDisplayVal] = useState(0);
-  useEffect(() => {
-    const anim = new Animated.Value(0);
-    const id = anim.addListener(({ value }) => setDisplayVal(Math.round(value)));
-    Animated.timing(anim, {
-      toValue: totalValue,
-      duration: 700,
-      useNativeDriver: false,
-      easing: Easing.out(Easing.cubic),
-    }).start();
-
-    // Schedule 8 haptic pulses with quadratically increasing gaps (fast start → slow end)
-    const PULSES = 8;
-    const DURATION = 680; // slightly under animation duration
-    const timeouts = Array.from({ length: PULSES }, (_, i) => {
-      const delay = Math.round(((i / (PULSES - 1)) ** 2) * DURATION);
-      return setTimeout(
-        () => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light),
-        delay,
-      );
-    });
-
-    return () => {
-      anim.removeListener(id);
-      timeouts.forEach(clearTimeout);
-    };
-  }, [totalValue]);
-
   // Build category breakdown sorted by value desc
   const categoryData = useMemo(() => {
     const map = new Map<string, number>();
@@ -508,14 +492,9 @@ function InsightCard({
       style={[styles.insightCard, { borderRadius: colors.radius + 2 }]}
     >
       {/* ── Total header ──────────────────────────────── */}
-      <Text style={styles.insightLabel}>You've documented so far</Text>
-      <Text style={styles.insightValue} numberOfLines={1} adjustsFontSizeToFit>
-        {totalValue > 0 ? formatCurrency(displayVal || 0) : formatCurrency(null)}
-      </Text>
+      <Text style={styles.insightLabel}>Inventory breakdown</Text>
       <Text style={styles.insightTagline}>
-        {totalValue > 0
-          ? "Keep going to make sure everything is covered"
-          : "Start scanning to build your record"}
+        See where your documented value is concentrated.
       </Text>
 
       {/* ── What's documented ────────────────────────── */}
@@ -547,7 +526,7 @@ function InsightCard({
             style={({ pressed }) => pressed ? { opacity: 0.75 } : null}
           >
             {/* Complete category composition; insurance-cover progress is separate. */}
-            <CategoryDonut data={donutData} size={110} />
+            <CategoryDonut data={donutData} size={110} enableHaptics />
           </Pressable>
 
           {/* Legend */}
@@ -739,7 +718,7 @@ function RadialCoverage({
   const cy = size / 2;
   const circumference = 2 * Math.PI * r;
   const filled = (Math.min(animPct, 100) / 100) * circumference;
-  const stroke = coverageColor(percent); // derive colour from actual percent, not animated
+  const stroke = getCoverageColor(percent); // derive colour from actual percent, not animated
 
   return (
     <View
@@ -805,15 +784,8 @@ function CoverageBar({
   colors: ReturnType<typeof import("@/hooks/useColors").useColors>;
 }) {
   const clamped = Math.min(percent, 100);
-  const fill = coverageColor(percent);
-  const label =
-    percent >= 100
-      ? "Recorded cover value reached — review with your insurer"
-      : percent >= 90
-        ? "Approaching recorded cover value"
-        : percent >= 70
-          ? "Moderate usage of recorded cover"
-          : `${Math.round(percent)}% of recorded cover value`;
+  const fill = getCoverageColor(percent);
+  const label = getCoverageStatusLabel(percent);
 
   return (
     <View style={{ gap: 6 }}>
@@ -1185,13 +1157,6 @@ function RoomBarsSection({
 
 // ─── Room card ────────────────────────────────────────────────────────────────
 
-// Module-level Set — tracks rooms whose completion celebration has already fired
-// this session.  This ensures the celebration plays even when the user navigates
-// back to the property screen after the ring was already closed (in which case
-// the component mounts with completionPct already = 1, so the old prevPctRef
-// approach — which started at the current value — never triggered).
-const celebratedRooms = new Set<string>();
-
 const RING_SIZE = 88;
 // Rounded-rect ring that hugs the square thumbnail
 const RING_RECT_INSET = 4;                              // path centre 4 px from container edge
@@ -1210,6 +1175,7 @@ const RING_PATH =
 
 function RoomCard({
   item,
+  propertyName,
   itemCount,
   totalValue,
   categoryValues,
@@ -1218,6 +1184,7 @@ function RoomCard({
   resolvedCoverUrl,
 }: {
   item: InventoryRoom;
+  propertyName: string;
   itemCount: number;
   totalValue: number;
   categoryValues: RoomStat["categoryValues"];
@@ -1230,108 +1197,51 @@ function RoomCard({
     await Haptics.selectionAsync();
     router.push({
       pathname: "/(tabs)/room/[id]",
-      params: { id: item.id, name: item.name, fileId: item.file_id },
+      params: { id: item.id, name: item.name, fileId: item.file_id, fileName: propertyName },
     });
   };
 
   const categoryTotal = categoryValues.reduce((sum, category) => sum + category.value, 0);
   const completionPct = itemCount > 0 ? Math.min(completedCount / itemCount, 1) : 0;
   const ringOffset = RING_CIRC * (1 - completionPct);
-
-  // Ring completion celebration:
-  //   - bounce-scales the thumbnail+ring
-  //   - fires success haptic
-  //   - shows a brief "Room complete 🎉" toast pill
-  //
-  // Uses the module-level celebratedRooms Set so the celebration fires at most
-  // once per room per session — critically, it fires even when the user navigates
-  // back to the property screen AFTER the ring closed (mounting with completionPct
-  // already = 1, which the old prevPctRef approach missed entirely).
-  const celebAnim = useRef(new Animated.Value(0)).current;
-  const toastAnim = useRef(new Animated.Value(0)).current;
-  const celebScale = celebAnim.interpolate({ inputRange: [0, 1], outputRange: [1, 1.22] });
-  const toastOpacity = toastAnim.interpolate({ inputRange: [0, 1], outputRange: [0, 1] });
-  const toastTranslate = toastAnim.interpolate({ inputRange: [0, 1], outputRange: [6, 0] });
+  const ringProgress = useRef(new Animated.Value(0)).current;
+  const [renderedRingProgress, setRenderedRingProgress] = useState(0);
+  const [categoryLegendVisible, setCategoryLegendVisible] = useState(false);
+  const completionLabel =
+    completionPct >= 1 ? "Complete" : `${Math.round(completionPct * 100)}% complete`;
+  const renderedRingOffset = RING_CIRC * (1 - completionPct * renderedRingProgress);
 
   useEffect(() => {
-    if (completionPct >= 1 && !celebratedRooms.has(item.id)) {
-      celebratedRooms.add(item.id);
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    let cancelled = false;
+    let animation: Animated.CompositeAnimation | null = null;
+    const listenerId = ringProgress.addListener(({ value }) => {
+      setRenderedRingProgress(value);
+    });
 
-      // Ring bounce
-      Animated.sequence([
-        Animated.timing(celebAnim, {
+    void AccessibilityInfo.isReduceMotionEnabled().then((reduceMotion) => {
+      if (cancelled) return;
+      setRenderedRingProgress(reduceMotion ? 1 : 0);
+      ringProgress.setValue(reduceMotion ? 1 : 0);
+      if (!reduceMotion && completionPct > 0) {
+        animation = Animated.timing(ringProgress, {
           toValue: 1,
-          duration: 260,
-          useNativeDriver: true,
-          easing: Easing.out(Easing.back(2.5)),
-        }),
-        Animated.timing(celebAnim, {
-          toValue: 0,
-          duration: 380,
-          useNativeDriver: true,
-          easing: Easing.in(Easing.cubic),
-        }),
-      ]).start();
-
-      // Toast: slide up + fade in, hold 1.8 s, then fade out
-      Animated.sequence([
-        Animated.timing(toastAnim, {
-          toValue: 1,
-          duration: 260,
-          useNativeDriver: true,
+          duration: 750,
           easing: Easing.out(Easing.cubic),
-        }),
-        Animated.delay(1800),
-        Animated.timing(toastAnim, {
-          toValue: 0,
-          duration: 320,
-          useNativeDriver: true,
-          easing: Easing.in(Easing.cubic),
-        }),
-      ]).start();
-    }
-  }, [completionPct, item.id]);
+          useNativeDriver: false,
+        });
+        animation.start();
+      }
+    });
+
+    return () => {
+      cancelled = true;
+      animation?.stop();
+      ringProgress.removeListener(listenerId);
+    };
+  }, [completionPct, ringProgress]);
 
   return (
     <View>
-      {/* "Room complete 🎉" toast — slides up from the card, fades in/out */}
-      <Animated.View
-        pointerEvents="none"
-        style={{
-          position: "absolute",
-          top: -36,
-          alignSelf: "center",
-          zIndex: 10,
-          opacity: toastOpacity,
-          transform: [{ translateY: toastTranslate }],
-          backgroundColor: "#1C6B5A",
-          paddingHorizontal: 16,
-          paddingVertical: 7,
-          borderRadius: 20,
-          flexDirection: "row",
-          alignItems: "center",
-          gap: 6,
-          shadowColor: "#000",
-          shadowOffset: { width: 0, height: 2 },
-          shadowOpacity: 0.18,
-          shadowRadius: 6,
-          elevation: 6,
-        }}
-      >
-        <Text style={{ fontSize: 15 }}>🎉</Text>
-        <Text
-          style={{
-            color: "#fff",
-            fontSize: 13,
-            fontFamily: "Inter_600SemiBold",
-            letterSpacing: 0.2,
-          }}
-        >
-          Room complete!
-        </Text>
-      </Animated.View>
-
       <Pressable
         onPress={handlePress}
         style={({ pressed }) => [
@@ -1345,8 +1255,7 @@ function RoomCard({
         ]}
       >
       <View style={styles.cardLeft}>
-        {/* Completion ring — animated scale on full completion */}
-        <Animated.View style={[styles.roomThumbWrap, { transform: [{ scale: celebScale }] }]}>
+        <View style={styles.roomThumbWrap}>
           <Svg
             width={RING_SIZE}
             height={RING_SIZE}
@@ -1371,7 +1280,7 @@ function RoomCard({
                 strokeWidth={completionPct >= 1 ? 3 : 2.5}
                 strokeLinecap="round"
                 strokeDasharray={`${RING_CIRC} ${RING_CIRC}`}
-                strokeDashoffset={ringOffset}
+                strokeDashoffset={renderedRingOffset}
               />
             )}
           </Svg>
@@ -1388,8 +1297,8 @@ function RoomCard({
                 { backgroundColor: colors.muted },
               ]}
             >
-              <Feather
-                name={roomIcon(item.room_type) as any}
+              <MaterialCommunityIcons
+                name={getRoomPlaceholderIcon(item.room_type, item.name)}
                 size={20}
                 color={colors.primary}
                 style={{ opacity: 0.6 }}
@@ -1407,7 +1316,7 @@ function RoomCard({
               <Feather name="check" size={9} color="#FFFFFF" />
             </View>
           )}
-        </Animated.View>
+        </View>
       </View>
       <View style={styles.cardBody}>
         <View style={styles.cardRow}>
@@ -1420,14 +1329,40 @@ function RoomCard({
           <Feather name="chevron-right" size={16} color={colors.mutedForeground} />
         </View>
         <View style={styles.cardMeta}>
-          <Text style={[styles.metaText, { color: colors.mutedForeground }]}>
-            {itemCount} {itemCount === 1 ? "item" : "items"}
-          </Text>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 6, flexShrink: 1 }}>
+            <Text style={[styles.metaText, { color: colors.mutedForeground }]}>
+              {itemCount} {itemCount === 1 ? "item" : "items"}
+            </Text>
+            <View style={{ width: 3, height: 3, borderRadius: 2, backgroundColor: colors.border }} />
+            <Text
+              style={[
+                styles.metaText,
+                { color: completionPct >= 1 && itemCount > 0 ? colors.success : colors.mutedForeground },
+              ]}
+            >
+              {completionLabel}
+            </Text>
+          </View>
           <Text style={[styles.metaValue, { color: colors.primary }]}>
             {formatCurrency(totalValue || null)}
           </Text>
         </View>
-        <View style={{ flexDirection: "row", alignItems: "center", marginTop: 6 }}>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={`View category breakdown for ${item.name}`}
+          disabled={categoryTotal <= 0}
+          hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }}
+          onPress={(event) => {
+            event.stopPropagation();
+            setCategoryLegendVisible(true);
+          }}
+          style={({ pressed }) => ({
+            flexDirection: "row",
+            alignItems: "center",
+            marginTop: 6,
+            opacity: pressed ? 0.65 : 1,
+          })}
+        >
           <View
             style={{
               flex: 1,
@@ -1453,9 +1388,55 @@ function RoomCard({
                 ))
               : null}
           </View>
-        </View>
+        </Pressable>
       </View>
     </Pressable>
+      <Modal
+        visible={categoryLegendVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setCategoryLegendVisible(false)}
+      >
+        <View style={styles.roomLegendRoot}>
+          <Pressable
+            style={StyleSheet.absoluteFillObject}
+            accessibilityLabel="Close category legend"
+            onPress={() => setCategoryLegendVisible(false)}
+          />
+          <View style={[styles.roomLegendCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
+            <View style={styles.roomLegendHeader}>
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.roomLegendTitle, { color: colors.foreground }]}>{item.name}</Text>
+                <Text style={[styles.roomLegendSubtitle, { color: colors.mutedForeground }]}>Value by category</Text>
+              </View>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Close"
+                onPress={() => setCategoryLegendVisible(false)}
+                hitSlop={10}
+              >
+                <Feather name="x" size={18} color={colors.mutedForeground} />
+              </Pressable>
+            </View>
+            <View style={{ gap: 9 }}>
+              {categoryValues.map((category) => (
+                <View key={category.key} style={styles.roomLegendRow}>
+                  <View style={[styles.roomLegendDot, { backgroundColor: getCategoryColor(category.key) }]} />
+                  <Text style={[styles.roomLegendName, { color: colors.foreground }]} numberOfLines={1}>
+                    {category.label}
+                  </Text>
+                  <Text style={[styles.roomLegendPercent, { color: colors.mutedForeground }]}>
+                    {Math.round((category.value / categoryTotal) * 100)}%
+                  </Text>
+                  <Text style={[styles.roomLegendValue, { color: colors.foreground }]}>
+                    {formatCurrency(category.value)}
+                  </Text>
+                </View>
+              ))}
+            </View>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -1762,6 +1743,7 @@ export default function PropertyDetailScreen() {
   const queryClient = useQueryClient();
   const { showToast } = useToast();
   const [coverModalVisible, setCoverModalVisible] = useState(false);
+  const [reviewItemsVisible, setReviewItemsVisible] = useState(false);
   const [coverPhotoUploading, setCoverPhotoUploading] = useState(false);
 
   // Add-room sheet state
@@ -1869,18 +1851,43 @@ export default function PropertyDetailScreen() {
     return calcPropertyStats(property, rooms, items);
   }, [property, rooms, items]);
 
-  // Per-room completion: items that have a photo are considered "documented".
-  // Value is NOT required — the ring should reach 100% once everything is
-  // photographed, which is the primary insurance-readiness signal.
+  // Room rings use the same readiness rule as the property summary: an item is
+  // ready once it has both a supporting photo and a value.
   const completionMap = useMemo(() => {
     const map = new Map<string, number>();
     for (const item of items ?? []) {
-      if (item.room_id && hasPhoto(item)) {
+      if (item.room_id && !needsReview(item)) {
         map.set(item.room_id, (map.get(item.room_id) ?? 0) + 1);
       }
     }
     return map;
   }, [items]);
+
+  const reviewGroups = useMemo(() => {
+    const roomById = new Map((rooms ?? []).map((room) => [room.id, room]));
+    const grouped = new Map<
+      string,
+      { room: InventoryRoom | null; roomName: string; items: InventoryItem[] }
+    >();
+
+    for (const item of items ?? []) {
+      if (!needsReview(item)) continue;
+      const room = item.room_id ? roomById.get(item.room_id) ?? null : null;
+      const key = room?.id ?? "unassigned";
+      const existing = grouped.get(key);
+      if (existing) {
+        existing.items.push(item);
+      } else {
+        grouped.set(key, {
+          room,
+          roomName: room?.name ?? "Unassigned",
+          items: [item],
+        });
+      }
+    }
+
+    return Array.from(grouped.values());
+  }, [items, rooms]);
 
   const isLoading = roomsLoading || itemsLoading;
 
@@ -1955,26 +1962,27 @@ export default function PropertyDetailScreen() {
 
   const handlePickPropertyCover = async () => {
     if (coverPhotoUploading) return;
-    // Browsers require the file picker to open directly from the user's click.
-    // Awaiting a permission request first consumes that user activation and can
-    // cause the picker to be silently blocked. Native platforms still need the
-    // explicit media-library permission flow.
+    // Native cover capture opens the camera directly. Web retains the file
+    // picker because browser camera support varies by device and permissions.
     if (Platform.OS !== "web") {
-      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      const { status } = await ImagePicker.requestCameraPermissionsAsync();
       if (status !== "granted") {
         Alert.alert(
           "Permission needed",
-          "Allow access to your photos to set a property cover image."
+          "Allow camera access to take a property cover photo."
         );
         return;
       }
     }
-    const result = await ImagePicker.launchImageLibraryAsync({
+    const pickerOptions: ImagePicker.ImagePickerOptions = {
       mediaTypes: ["images"],
       quality: 0.85,
       allowsEditing: true,
       aspect: [16, 9],
-    });
+    };
+    const result = Platform.OS === "web"
+      ? await ImagePicker.launchImageLibraryAsync(pickerOptions)
+      : await ImagePicker.launchCameraAsync(pickerOptions);
     if (result.canceled || !result.assets[0]) return;
     if (!session?.user.id) return;
     const selectedUri = result.assets[0].uri;
@@ -2131,7 +2139,7 @@ export default function PropertyDetailScreen() {
                     fontFamily: "Inter_400Regular",
                   }}
                 >
-                  Tap to choose from your library
+                  {Platform.OS === "web" ? "Tap to choose a cover photo" : "Tap to take a cover photo"}
                 </Text>
               </View>
             </Pressable>
@@ -2184,7 +2192,7 @@ export default function PropertyDetailScreen() {
             onPress={() =>
               router.push({
                 pathname: "/(tabs)/scan",
-                params: { fileId: id, fileName: name },
+                params: { fileId: id, fileName: property?.name ?? name },
               })
             }
             style={({ pressed }) => [
@@ -2206,7 +2214,7 @@ export default function PropertyDetailScreen() {
             onPress={() =>
               router.push({
                 pathname: "/(tabs)/add-item",
-                params: { fileId: id, fileName: name },
+                params: { fileId: id, fileName: property?.name ?? name },
               })
             }
             style={({ pressed }) => [
@@ -2222,9 +2230,7 @@ export default function PropertyDetailScreen() {
             ]}
           >
             <Feather name="plus" size={16} color={colors.foreground} />
-            <Text style={[styles.actionBtnText, { color: colors.foreground }]}>
-              Add manually
-            </Text>
+            <Text numberOfLines={1} style={[styles.actionBtnText, { color: colors.foreground }]}>Add manually</Text>
           </Pressable>
         </View>
 
@@ -2419,7 +2425,7 @@ export default function PropertyDetailScreen() {
           <RoomBarsSection roomStats={stats.roomStats} colors={colors} />
         )}
 
-        {/* Claim readiness */}
+        {/* Inventory readiness */}
         {stats.itemCount > 0 && (
           <View
             style={[
@@ -2434,7 +2440,7 @@ export default function PropertyDetailScreen() {
             <Text
               style={[styles.sectionLabel, { color: colors.mutedForeground, marginBottom: 10 }]}
             >
-              HOW COMPLETE IS YOUR RECORD?
+              INVENTORY COMPLETENESS
             </Text>
             <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 14 }}>
               <View style={styles.claimStat}>
@@ -2465,12 +2471,30 @@ export default function PropertyDetailScreen() {
                   {Math.round(stats.valuePercent)}% valued
                 </Text>
               </View>
-              {stats.itemsNeedingReview > 0 && (
-                <View style={styles.claimStat}>
+              {stats.itemsNeedingReview > 0 ? (
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={`Review ${stats.itemsNeedingReview} items needing attention`}
+                  onPress={() => setReviewItemsVisible(true)}
+                  style={({ pressed }) => [
+                    styles.reviewAction,
+                    {
+                      borderColor: colors.warning,
+                      backgroundColor: colors.warning + "12",
+                      opacity: pressed ? 0.72 : 1,
+                    },
+                  ]}
+                >
                   <Feather name="alert-circle" size={14} color={colors.warning} />
-                  <Text style={[styles.claimText, { color: colors.mutedForeground }]}>
+                  <Text style={[styles.claimText, { color: colors.foreground, fontFamily: "Inter_600SemiBold" }]}>
                     {stats.itemsNeedingReview} need review
                   </Text>
+                  <Feather name="chevron-right" size={14} color={colors.warning} />
+                </Pressable>
+              ) : (
+                <View style={styles.claimStat}>
+                  <Feather name="check-circle" size={14} color={colors.success} />
+                  <Text style={[styles.claimText, { color: colors.mutedForeground }]}>Nothing to review</Text>
                 </View>
               )}
             </View>
@@ -2535,7 +2559,12 @@ export default function PropertyDetailScreen() {
     <>
       <Stack.Screen
         options={{
-          title: name ?? "Property",
+          title: property?.name ?? name ?? "Property",
+          headerTitleAlign: "center",
+          headerBackVisible: false,
+          headerLeft: () => (
+            <ContextBackButton label="Home" onPress={() => router.replace("/(tabs)")} />
+          ),
           headerStyle: { backgroundColor: colors.card },
           headerShadowVisible: true,
           headerTitleStyle: {
@@ -2581,6 +2610,7 @@ export default function PropertyDetailScreen() {
             <View style={{ paddingHorizontal: 16, marginBottom: 10 }}>
               <RoomCard
                 item={rs.room}
+                propertyName={property?.name ?? name ?? "Property"}
                 itemCount={rs.itemCount}
                 totalValue={rs.totalValue}
                 categoryValues={rs.categoryValues}
@@ -2614,6 +2644,97 @@ export default function PropertyDetailScreen() {
           }
         />
       )}
+      <Modal
+        visible={reviewItemsVisible}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setReviewItemsVisible(false)}
+      >
+        <View style={styles.reviewModalRoot}>
+          <Pressable
+            accessibilityLabel="Close items needing review"
+            style={styles.reviewModalBackdrop}
+            onPress={() => setReviewItemsVisible(false)}
+          />
+          <View
+            style={[
+              styles.reviewModalSheet,
+              {
+                backgroundColor: colors.card,
+                borderColor: colors.border,
+                paddingBottom: insets.bottom + 16,
+              },
+            ]}
+          >
+            <View style={[styles.reviewModalHandle, { backgroundColor: colors.border }]} />
+            <View style={styles.reviewModalHeader}>
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.reviewModalTitle, { color: colors.foreground }]}>Items needing review</Text>
+                <Text style={[styles.reviewModalSubtitle, { color: colors.mutedForeground }]}>Add the missing photo or value to make each item ready.</Text>
+              </View>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Close"
+                onPress={() => setReviewItemsVisible(false)}
+                hitSlop={10}
+                style={[styles.reviewModalClose, { backgroundColor: colors.secondary }]}
+              >
+                <Feather name="x" size={18} color={colors.foreground} />
+              </Pressable>
+            </View>
+
+            <ScrollView showsVerticalScrollIndicator={false} style={{ maxHeight: 440 }}>
+              {reviewGroups.map((group) => (
+                <View key={group.room?.id ?? "unassigned"} style={styles.reviewRoomGroup}>
+                  <Text style={[styles.reviewRoomName, { color: colors.mutedForeground }]}>{group.roomName}</Text>
+                  {group.items.map((reviewItem) => {
+                    const reasons = [
+                      !hasPhoto(reviewItem) ? "Missing photo" : null,
+                      !hasValue(reviewItem) ? "Missing value" : null,
+                    ].filter((reason): reason is string => Boolean(reason));
+                    return (
+                      <Pressable
+                        key={reviewItem.id}
+                        accessibilityRole="button"
+                        accessibilityLabel={`Open ${reviewItem.name}. ${reasons.join(", ")}`}
+                        onPress={() => {
+                          setReviewItemsVisible(false);
+                          router.push({
+                            pathname: "/(tabs)/item/[id]",
+                            params: {
+                              id: reviewItem.id,
+                              name: reviewItem.name,
+                              fileId: id,
+                              fileName: property?.name ?? name ?? "Property",
+                              ...(group.room
+                                ? { roomId: group.room.id, roomName: group.room.name }
+                                : {}),
+                            },
+                          });
+                        }}
+                        style={({ pressed }) => [
+                          styles.reviewItemRow,
+                          { borderColor: colors.border, opacity: pressed ? 0.7 : 1 },
+                        ]}
+                      >
+                        <View style={{ flex: 1, gap: 4 }}>
+                          <Text style={[styles.reviewItemName, { color: colors.foreground }]} numberOfLines={2}>
+                            {reviewItem.name}
+                          </Text>
+                          <Text style={[styles.reviewItemReasons, { color: colors.warning }]}>
+                            {reasons.join(" · ")}
+                          </Text>
+                        </View>
+                        <Feather name="chevron-right" size={17} color={colors.mutedForeground} />
+                      </Pressable>
+                    );
+                  })}
+                </View>
+              ))}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
       <CoverAmountModal
         visible={coverModalVisible}
         current={property?.contents_sum_insured ?? null}
@@ -2707,6 +2828,7 @@ export default function PropertyDetailScreen() {
                       key={opt.value}
                       onPress={() => setAddRoomType(active ? null : opt.value)}
                       style={{
+                        flexShrink: 0,
                         paddingHorizontal: 14,
                         paddingVertical: 7,
                         borderRadius: 20,
@@ -2792,9 +2914,9 @@ const styles = StyleSheet.create({
     overflow: "hidden",
   },
   insightLabel: {
-    fontSize: 12,
-    fontFamily: "Inter_400Regular",
-    color: "rgba(255,255,255,0.75)",
+    fontSize: 17,
+    fontFamily: "Inter_700Bold",
+    color: "#FFFFFF",
   },
   insightValue: {
     fontSize: 30,
@@ -2959,7 +3081,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     gap: 6,
-    paddingHorizontal: 16,
+    paddingHorizontal: 10,
     paddingVertical: 12,
   },
   actionBtnText: {
@@ -3027,6 +3149,67 @@ const styles = StyleSheet.create({
   },
   metaText: { fontSize: 12, fontFamily: "Inter_400Regular" },
   metaValue: { fontSize: 13, fontFamily: "Inter_600SemiBold" },
+  roomLegendRoot: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 24,
+    backgroundColor: "rgba(15, 23, 42, 0.42)",
+  },
+  roomLegendCard: {
+    width: "100%",
+    maxWidth: 330,
+    borderWidth: 1,
+    borderRadius: 16,
+    padding: 16,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.16,
+    shadowRadius: 18,
+    elevation: 8,
+  },
+  roomLegendHeader: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 12,
+    marginBottom: 14,
+  },
+  roomLegendTitle: {
+    fontSize: 16,
+    fontFamily: "Inter_700Bold",
+  },
+  roomLegendSubtitle: {
+    fontSize: 12,
+    fontFamily: "Inter_400Regular",
+    marginTop: 2,
+  },
+  roomLegendRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  roomLegendDot: {
+    width: 9,
+    height: 9,
+    borderRadius: 5,
+  },
+  roomLegendName: {
+    flex: 1,
+    fontSize: 13,
+    fontFamily: "Inter_500Medium",
+  },
+  roomLegendPercent: {
+    width: 38,
+    textAlign: "right",
+    fontSize: 12,
+    fontFamily: "Inter_400Regular",
+  },
+  roomLegendValue: {
+    width: 76,
+    textAlign: "right",
+    fontSize: 12,
+    fontFamily: "Inter_600SemiBold",
+  },
 
   // Footer cards
   footerCard: {
@@ -3069,8 +3252,93 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: 4,
   },
+  reviewAction: {
+    minHeight: 32,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    borderWidth: 1,
+    borderRadius: 16,
+    paddingHorizontal: 9,
+    paddingVertical: 5,
+  },
   claimText: {
     fontSize: 12,
     fontFamily: "Inter_400Regular",
+  },
+  reviewModalRoot: {
+    flex: 1,
+    justifyContent: "flex-end",
+  },
+  reviewModalBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "rgba(15, 23, 42, 0.48)",
+  },
+  reviewModalSheet: {
+    maxHeight: "78%",
+    borderTopWidth: 1,
+    borderTopLeftRadius: 22,
+    borderTopRightRadius: 22,
+    paddingHorizontal: 18,
+    paddingTop: 10,
+  },
+  reviewModalHandle: {
+    width: 38,
+    height: 4,
+    borderRadius: 2,
+    alignSelf: "center",
+    marginBottom: 14,
+  },
+  reviewModalHeader: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 12,
+    marginBottom: 14,
+  },
+  reviewModalTitle: {
+    fontSize: 18,
+    fontFamily: "Inter_700Bold",
+  },
+  reviewModalSubtitle: {
+    fontSize: 12,
+    lineHeight: 17,
+    fontFamily: "Inter_400Regular",
+    marginTop: 3,
+  },
+  reviewModalClose: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  reviewRoomGroup: {
+    gap: 7,
+    marginBottom: 16,
+  },
+  reviewRoomName: {
+    fontSize: 11,
+    fontFamily: "Inter_600SemiBold",
+    letterSpacing: 0.7,
+    textTransform: "uppercase",
+  },
+  reviewItemRow: {
+    minHeight: 58,
+    borderWidth: 1,
+    borderRadius: 11,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
+  reviewItemName: {
+    fontSize: 14,
+    lineHeight: 19,
+    fontFamily: "Inter_600SemiBold",
+  },
+  reviewItemReasons: {
+    fontSize: 11,
+    fontFamily: "Inter_500Medium",
   },
 });
