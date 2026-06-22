@@ -28,7 +28,21 @@
         }
       ],
       "expo-font",
-      "expo-web-browser"
+      "expo-web-browser",
+      [
+        "expo-image-picker",
+        {
+          "cameraPermission": "Allow Coverly to take property, room, item and evidence photos.",
+          "photosPermission": "Allow Coverly to choose property, room, item and evidence photos.",
+          "microphonePermission": false
+        }
+      ],
+      [
+        "expo-audio",
+        {
+          "microphonePermission": "Allow Coverly to use your microphone to add item details by voice."
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true,

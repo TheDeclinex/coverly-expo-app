@@ -58,6 +58,8 @@ export interface InventoryItem {
   notes: string | null;
   brand_maker: string | null;
   model_series: string | null;
+  barcode?: string | null;
+  barcode_verified?: boolean | null;
   condition_label: string | null;
   purchase_source: string | null;
   original_purchase_price: number | null;
