@@ -95,9 +95,10 @@ BEGIN
     reminder_notifications_enabled, product_updates_enabled
   ) VALUES (
     v_user_id, v_email, v_full_name, v_country_code,
-    p_reminder_notifications_enabled, p_product_updates_enabled
+    coalesce(p_reminder_notifications_enabled, false),
+    coalesce(p_product_updates_enabled, false)
   )
-  ON CONFLICT (id) DO UPDATE SET
+  ON CONFLICT ON CONSTRAINT user_profiles_pkey DO UPDATE SET
     full_name = excluded.full_name,
     country_code = excluded.country_code,
     reminder_notifications_enabled = excluded.reminder_notifications_enabled,
