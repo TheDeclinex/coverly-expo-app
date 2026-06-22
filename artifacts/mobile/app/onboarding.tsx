@@ -348,15 +348,8 @@ export default function OnboardingScreen() {
               <Feather name="tag" size={22} color="#D97706" />
             </View>
             <View style={{ flex: 1, gap: 3 }}>
-              <View style={{ flexDirection: "row", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                <Text style={[styles.featureLabel, { color: colors.foreground }]}>Replacement pricing</Text>
-                <View style={styles.comingSoon}>
-                  <Text style={styles.comingSoonText}>COMING SOON</Text>
-                </View>
-              </View>
-              <Text style={[styles.featureDesc, { color: colors.mutedForeground }]}>
-                Estimate replacement values as your inventory grows.
-              </Text>
+              <Text style={[styles.featureLabel, { color: colors.foreground }]}>Replacement pricing</Text>
+              <Text style={[styles.featureDesc, { color: colors.mutedForeground }]}>Find comparable NZ listings and keep your item values current.</Text>
             </View>
           </Animated.View>
         </View>
@@ -416,7 +409,7 @@ export default function OnboardingScreen() {
 
             <View style={{ gap: 8 }}>
               <Text style={[styles.fieldLabel, { color: colors.mutedForeground }]}>PROPERTY TYPE</Text>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingRight: 4 }}>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingHorizontal: 2, paddingRight: 12 }}>
                 {PROPERTY_TYPES.map((pt) => {
                   const sel = propertyType === pt.value;
                   return (

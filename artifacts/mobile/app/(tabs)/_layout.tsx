@@ -36,7 +36,11 @@ export default function AppLayout() {
           },
           contentStyle: { backgroundColor: colors.background },
         }}
-      />
+      >
+        <Stack.Screen name="account" options={{ title: "Account" }} />
+        <Stack.Screen name="profile-settings" options={{ title: "Profile & Preferences" }} />
+        <Stack.Screen name="admin" options={{ title: "Admin" }} />
+      </Stack>
     </>
   );
 }
