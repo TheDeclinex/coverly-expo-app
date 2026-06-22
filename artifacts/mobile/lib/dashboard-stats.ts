@@ -6,6 +6,7 @@ import {
   hasValue,
   needsReview,
 } from "./inventory-mappers";
+import { calculateCoverageInsight } from "./coverage";
 
 export interface RoomStat {
   room: InventoryRoom;
@@ -42,10 +43,10 @@ export function calcPropertyStats(
   const roomCount = rooms.length;
 
   const recordedCoverValue = property.contents_sum_insured ?? null;
-  const coveragePercent =
-    recordedCoverValue && recordedCoverValue > 0
-      ? Math.min((totalValue / recordedCoverValue) * 100, 200)
-      : null;
+  const coveragePercent = calculateCoverageInsight(
+    totalValue,
+    recordedCoverValue,
+  ).percent;
 
   const roomStats: RoomStat[] = rooms
     .map((room) => {
