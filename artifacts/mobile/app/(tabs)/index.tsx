@@ -2,10 +2,12 @@ import { Feather } from "@expo/vector-icons";
 import { Image } from "expo-image";
 import * as Haptics from "expo-haptics";
 import { LinearGradient } from "expo-linear-gradient";
-import { Stack, router } from "expo-router";
+import { Stack, router, type Href } from "expo-router";
 import { useQuery } from "@tanstack/react-query";
 import React, { useMemo } from "react";
 import {
+  Animated,
+  Easing,
   FlatList,
   Platform,
   Pressable,
@@ -13,9 +15,11 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  useWindowDimensions,
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import Svg, { Circle } from "react-native-svg";
 
 import { EmptyState } from "@/components/EmptyState";
 import { ErrorState } from "@/components/ErrorState";
@@ -25,14 +29,40 @@ import { propertyTypeLabel } from "@/constants/propertyTypes";
 import { useColors } from "@/hooks/useColors";
 import { useSignedUrl } from "@/hooks/useSignedUrls";
 import { calcPortfolioStats } from "@/lib/dashboard-stats";
+import {
+  calculateCoverageInsight,
+  getCoverageColor,
+  getCoverageStatusLabel,
+} from "@/lib/coverage";
 import { formatCurrency, getItemTotalValue } from "@/lib/inventory-mappers";
 import { supabase } from "@/lib/supabase";
 import type { InventoryFile, InventoryItem } from "@/types";
 
-function coverageColor(percent: number): string {
-  if (percent >= 100) return "#EF4444";
-  if (percent >= 75) return "#F97316";
-  return "#22C55E";
+const HOME_ITEMS_PAGE_SIZE = 1000;
+const countFormatter = new Intl.NumberFormat("en-NZ");
+
+function formatCount(value: number): string {
+  return countFormatter.format(value);
+}
+
+const WARNING_GRADIENT_STOPS = [
+  { at: 0, rgb: [34, 197, 94] },
+  { at: 0.4, rgb: [251, 191, 36] },
+  { at: 0.72, rgb: [249, 115, 22] },
+  { at: 1, rgb: [239, 68, 68] },
+] as const;
+
+function warningGradientColor(position: number): string {
+  const clamped = Math.min(Math.max(position, 0), 1);
+  const upperIndex = WARNING_GRADIENT_STOPS.findIndex((stop) => stop.at >= clamped);
+  if (upperIndex <= 0) return "rgb(34, 197, 94)";
+  const lower = WARNING_GRADIENT_STOPS[upperIndex - 1];
+  const upper = WARNING_GRADIENT_STOPS[upperIndex];
+  const mix = (clamped - lower.at) / (upper.at - lower.at);
+  const rgb = lower.rgb.map((channel, index) =>
+    Math.round(channel + (upper.rgb[index] - channel) * mix),
+  );
+  return `rgb(${rgb[0]}, ${rgb[1]}, ${rgb[2]})`;
 }
 
 function CoverageBar({
@@ -43,15 +73,8 @@ function CoverageBar({
   colors: ReturnType<typeof import("@/hooks/useColors").useColors>;
 }) {
   const clamped = Math.min(percent, 100);
-  const fill = coverageColor(percent);
-  const label =
-    percent >= 100
-      ? "Recorded cover value reached — review with your insurer if needed"
-      : percent >= 90
-        ? "Approaching recorded cover value — review with your insurer if needed"
-        : percent >= 70
-          ? "Moderate usage of recorded cover value"
-          : `${Math.round(percent)}% of recorded cover value`;
+  const fill = getCoverageColor(percent);
+  const label = getCoverageStatusLabel(percent);
 
   return (
     <View style={{ gap: 6 }}>
@@ -116,6 +139,97 @@ function CoverageBar({
   );
 }
 
+function MiniCoverageRing({
+  percent,
+  toneColor,
+  trackColor,
+}: {
+  percent: number | null;
+  toneColor: string;
+  trackColor: string;
+}) {
+  const size = 72;
+  const strokeWidth = 7;
+  const radius = (size - strokeWidth) / 2;
+  const circumference = 2 * Math.PI * radius;
+  const warningArcLength = circumference * 0.25;
+  const warningSegmentCount = 48;
+  const warningSegmentLength = warningArcLength / warningSegmentCount;
+  const [animatedPercent, setAnimatedPercent] = React.useState(0);
+
+  React.useEffect(() => {
+    if (percent == null) {
+      setAnimatedPercent(0);
+      return;
+    }
+    const animation = new Animated.Value(0);
+    const listener = animation.addListener(({ value }) => setAnimatedPercent(value));
+    Animated.timing(animation, {
+      toValue: percent,
+      duration: 750,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: false,
+    }).start();
+    return () => animation.removeListener(listener);
+  }, [percent]);
+
+  const filled = (Math.min(Math.max(animatedPercent, 0), 100) / 100) * circumference;
+  const greenLength = Math.min(filled, circumference * 0.75);
+  const warningLength = Math.max(filled - circumference * 0.75, 0);
+
+  return (
+    <View style={styles.miniRing}>
+      <Svg width={size} height={size} style={StyleSheet.absoluteFill}>
+        <Circle cx={size / 2} cy={size / 2} r={radius} stroke={trackColor} strokeWidth={strokeWidth} fill="none" />
+        {percent != null && greenLength > 0 ? (
+          <Circle
+            cx={size / 2}
+            cy={size / 2}
+            r={radius}
+            stroke="#22C55E"
+            strokeWidth={strokeWidth}
+            fill="none"
+            strokeDasharray={`${greenLength} ${circumference}`}
+            strokeLinecap="round"
+            transform={`rotate(-90 ${size / 2} ${size / 2})`}
+          />
+        ) : null}
+        {percent != null && warningLength > 0
+          ? Array.from({ length: warningSegmentCount }, (_, index) => {
+              const localStart = index * warningSegmentLength;
+              const visibleLength = Math.min(
+                Math.max(warningLength - localStart, 0),
+                warningSegmentLength + 0.35,
+              );
+              if (visibleLength <= 0) return null;
+              return (
+                <Circle
+                  key={index}
+                  cx={size / 2}
+                  cy={size / 2}
+                  r={radius}
+                  stroke={warningGradientColor(index / (warningSegmentCount - 1))}
+                  strokeWidth={strokeWidth}
+                  fill="none"
+                  strokeDasharray={`${visibleLength} ${circumference}`}
+                  strokeDashoffset={-(circumference * 0.75 + localStart)}
+                  strokeLinecap="butt"
+                  transform={`rotate(-90 ${size / 2} ${size / 2})`}
+                />
+              );
+            })
+          : null}
+      </Svg>
+      <Text style={[styles.miniRingValue, { color: percent == null ? trackColor : toneColor }]}>
+        {percent == null ? "—" : `${Math.round(Math.min(percent, 999))}%`}
+      </Text>
+      <Text style={[styles.miniRingLabel, { color: toneColor }]}>
+        {percent == null ? "not set" : "of cover"}
+      </Text>
+    </View>
+  );
+}
+
 function PropertyCard({
   item,
   items,
@@ -125,10 +239,16 @@ function PropertyCard({
   items: InventoryItem[];
   colors: ReturnType<typeof import("@/hooks/useColors").useColors>;
 }) {
+  const { width: windowWidth } = useWindowDimensions();
+  const stackCoverage = windowWidth < 430;
   const propertyItems = items.filter((i) => i.file_id === item.id);
   const totalValue = propertyItems.reduce(
     (s, i) => s + getItemTotalValue(i),
     0
+  );
+  const coverage = calculateCoverageInsight(
+    totalValue,
+    item.contents_sum_insured,
   );
 
   const handlePress = async () => {
@@ -190,39 +310,65 @@ function PropertyCard({
             {propertyTypeLabel(item.property_type)}
           </Text>
         )}
-        <View style={styles.cardStats}>
-          <View style={styles.cardStat}>
-            <Text style={[styles.statValue, { color: colors.foreground }]}>
-              {formatCurrency(totalValue || null)}
-            </Text>
-            <Text
-              style={[styles.statLabel, { color: colors.mutedForeground }]}
-            >
-              Inventory value
-            </Text>
-          </View>
-          <View style={styles.cardStat}>
-            <Text style={[styles.statValue, { color: colors.foreground }]}>
-              {propertyItems.length}
-            </Text>
-            <Text
-              style={[styles.statLabel, { color: colors.mutedForeground }]}
-            >
-              Items
-            </Text>
-          </View>
-          {item.contents_sum_insured != null && (
+        <View style={[styles.cardInsightLayout, stackCoverage && styles.cardInsightLayoutStacked]}>
+          <View style={styles.cardStats}>
             <View style={styles.cardStat}>
               <Text style={[styles.statValue, { color: colors.foreground }]}>
-                {formatCurrency(item.contents_sum_insured)}
+                {formatCurrency(totalValue || null)}
               </Text>
               <Text
                 style={[styles.statLabel, { color: colors.mutedForeground }]}
               >
-                Recorded cover
+                Inventory value
               </Text>
             </View>
-          )}
+            <View style={styles.cardStat}>
+              <Text style={[styles.statValue, { color: colors.foreground }]}>
+                {formatCount(propertyItems.length)}
+              </Text>
+              <Text style={[styles.statLabel, { color: colors.mutedForeground }]}>Items</Text>
+            </View>
+            <View style={styles.cardStat}>
+              <Text style={[styles.statValue, { color: colors.foreground }]}>
+                {coverage.hasCover ? formatCurrency(item.contents_sum_insured) : "Not set"}
+              </Text>
+              <Text style={[styles.statLabel, { color: colors.mutedForeground }]}>Contents cover</Text>
+            </View>
+          </View>
+          <View
+            style={[
+              styles.miniCoverageSummary,
+              stackCoverage && styles.miniCoverageSummaryStacked,
+              { borderColor: colors.border },
+            ]}
+          >
+            <MiniCoverageRing
+              percent={coverage.percent}
+              toneColor={coverage.color ?? colors.mutedForeground}
+              trackColor={colors.border}
+            />
+            <View style={[styles.miniCoverageCopy, stackCoverage && styles.miniCoverageCopyStacked]}>
+              <Text
+                style={[
+                  styles.miniCoverageAmount,
+                  {
+                    color: coverage.overAmount > 0
+                      ? coverage.color ?? colors.destructive
+                      : colors.foreground,
+                  },
+                ]}
+              >
+                {!coverage.hasCover
+                  ? "Cover not set"
+                  : coverage.overAmount > 0
+                    ? `${formatCurrency(coverage.overAmount)} over`
+                    : `${formatCurrency(coverage.remainingAmount)} left`}
+              </Text>
+              <Text style={[styles.miniCoverageHint, { color: colors.mutedForeground }]}>
+                Contents value vs cover
+              </Text>
+            </View>
+          </View>
         </View>
       </View>
     </Pressable>
@@ -230,7 +376,7 @@ function PropertyCard({
 }
 
 export default function HomeScreen() {
-  const { session, signOut } = useAuth();
+  const { session } = useAuth();
   const colors = useColors();
   const insets = useSafeAreaInsets();
 
@@ -253,19 +399,64 @@ export default function HomeScreen() {
     enabled: !!session,
   });
 
-  const { data: allItems, isLoading: itemsLoading } = useQuery({
-    queryKey: ["all-items", session?.user.id],
+  const {
+    data: allItems,
+    isLoading: itemsLoading,
+    error: itemsError,
+    refetch: refetchItems,
+    isRefetching: itemsRefetching,
+  } = useQuery({
+    queryKey: ["all-items", "home-valuation", session?.user.id],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from("inventory_items")
-        .select("id, file_id, room_id, name, estimated_price, unit_estimated_price, quantity, image_url, photo_url");
-      if (error) throw error;
-      return (data ?? []) as InventoryItem[];
+      const rows: InventoryItem[] = [];
+      let from = 0;
+
+      // Home needs each item's unit value and quantity to calculate portfolio
+      // value. Fetch only those lightweight fields, in stable pages, so the
+      // dashboard is not silently truncated by PostgREST's 1,000-row limit.
+      while (true) {
+        const { data, error } = await supabase
+          .from("inventory_items")
+          .select("id, file_id, room_id, estimated_price, unit_estimated_price, quantity")
+          .order("id", { ascending: true })
+          .range(from, from + HOME_ITEMS_PAGE_SIZE - 1);
+        if (error) throw error;
+
+        const page = (data ?? []) as InventoryItem[];
+        rows.push(...page);
+        if (page.length < HOME_ITEMS_PAGE_SIZE) break;
+        from += HOME_ITEMS_PAGE_SIZE;
+      }
+
+      return rows;
     },
     enabled: !!session,
   });
 
-  const { data: allRooms } = useQuery({
+  const {
+    data: exactItemCount,
+    isLoading: itemCountLoading,
+    error: itemCountError,
+    refetch: refetchItemCount,
+    isRefetching: itemCountRefetching,
+  } = useQuery({
+    queryKey: ["all-items", "exact-count", session?.user.id],
+    queryFn: async () => {
+      const { count, error } = await supabase
+        .from("inventory_items")
+        .select("id", { count: "exact", head: true });
+      if (error) throw error;
+      if (count === null) throw new Error("Supabase did not return an exact item count.");
+      return count;
+    },
+    enabled: !!session,
+  });
+
+  const {
+    data: allRooms,
+    refetch: refetchRooms,
+    isRefetching: roomsRefetching,
+  } = useQuery({
     queryKey: ["all-rooms-count", session?.user.id],
     queryFn: async () => {
       const { data, error } = await supabase
@@ -279,16 +470,26 @@ export default function HomeScreen() {
   });
 
   const portfolio = useMemo(() => {
-    if (!properties || !allItems) return null;
-    return calcPortfolioStats(properties, allItems);
-  }, [properties, allItems]);
+    if (!properties || !allItems || exactItemCount === undefined) return null;
+    return {
+      ...calcPortfolioStats(properties, allItems),
+      totalItems: exactItemCount,
+    };
+  }, [properties, allItems, exactItemCount]);
 
-  const handleSignOut = async () => {
-    await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
-    await signOut();
+  const isLoading = propsLoading || itemsLoading || itemCountLoading;
+  const homeError = propsError ?? itemsError ?? itemCountError;
+  const homeRefetching =
+    isRefetching || itemsRefetching || itemCountRefetching || roomsRefetching;
+
+  const refetchHome = async () => {
+    await Promise.all([
+      refetchProps(),
+      refetchItems(),
+      refetchItemCount(),
+      refetchRooms(),
+    ]);
   };
-
-  const isLoading = propsLoading || itemsLoading;
 
   const navigateWithProperty = (
     dest: "/(tabs)/add-item" | "/(tabs)/scan"
@@ -341,7 +542,7 @@ export default function HomeScreen() {
             <View style={[styles.statDivider, { backgroundColor: colors.border }]} />
             <View style={styles.statCell}>
               <Text style={[styles.bigValue, { color: colors.foreground }]}>
-                {portfolio.totalItems}
+                {formatCount(portfolio.totalItems)}
               </Text>
               <Text style={[styles.bigLabel, { color: colors.mutedForeground }]}>
                 Total items
@@ -350,7 +551,7 @@ export default function HomeScreen() {
             <View style={[styles.statDivider, { backgroundColor: colors.border }]} />
             <View style={styles.statCell}>
               <Text style={[styles.bigValue, { color: colors.foreground }]}>
-                {portfolio.propertyCount}
+                {formatCount(portfolio.propertyCount)}
               </Text>
               <Text style={[styles.bigLabel, { color: colors.mutedForeground }]}>
                 Properties
@@ -442,7 +643,7 @@ export default function HomeScreen() {
                 backgroundColor: colors.primary,
                 borderRadius: colors.radius,
                 opacity: pressed ? 0.85 : 1,
-                flex: 2,
+                flex: 1.3,
               },
             ]}
           >
@@ -466,9 +667,7 @@ export default function HomeScreen() {
             ]}
           >
             <Feather name="plus-circle" size={18} color={colors.foreground} />
-            <Text style={[styles.quickActionText, { color: colors.foreground }]}>
-              Add manually
-            </Text>
+            <Text numberOfLines={1} style={[styles.quickActionText, { color: colors.foreground }]}>Add manually</Text>
           </Pressable>
         </View>
 
@@ -483,18 +682,47 @@ export default function HomeScreen() {
     <>
       <Stack.Screen
         options={{
-          title: "Coverly",
+          headerBackVisible: false,
+          headerLeft: () => null,
+          headerTitle: () => (
+            <View style={styles.brandTitle}>
+              <Text style={[styles.brandName, { color: colors.foreground }]}>Coverly</Text>
+              <Text style={[styles.brandTagline, { color: colors.mutedForeground }]}>Know what you own</Text>
+            </View>
+          ),
           headerRight: () => (
-            <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
+            <View style={styles.headerActions}>
               <Pressable
                 onPress={() => router.push("/(tabs)/add-property")}
-                style={{ padding: 4 }}
                 hitSlop={8}
+                accessibilityRole="button"
+                accessibilityLabel="Add property"
+                style={({ pressed }) => [
+                  styles.addPropertyAction,
+                  {
+                    backgroundColor: colors.secondary,
+                    borderColor: colors.border,
+                    opacity: pressed ? 0.7 : 1,
+                  },
+                ]}
               >
-                <Feather name="plus" size={22} color={colors.primary} />
+                <Feather name="plus" size={16} color={colors.primary} />
+                <Text style={[styles.addPropertyText, { color: colors.primary }]}>Property</Text>
               </Pressable>
-              <Pressable onPress={handleSignOut} style={{ padding: 4 }} hitSlop={8}>
-                <Feather name="log-out" size={20} color={colors.mutedForeground} />
+              <Pressable
+                onPress={() => router.push("/account" as Href)}
+                hitSlop={8}
+                accessibilityRole="button"
+                accessibilityLabel="Open account"
+                style={({ pressed }) => [
+                  styles.accountAction,
+                  {
+                    backgroundColor: colors.secondary,
+                    opacity: pressed ? 0.7 : 1,
+                  },
+                ]}
+              >
+                <Feather name="user" size={18} color={colors.mutedForeground} />
               </Pressable>
             </View>
           ),
@@ -502,11 +730,11 @@ export default function HomeScreen() {
       />
       {isLoading ? (
         <LoadingState />
-      ) : propsError ? (
+      ) : homeError ? (
         <ErrorState
-          message="Failed to load properties"
-          detail={(propsError as Error).message}
-          onRetry={refetchProps}
+          message="Failed to load your home inventory"
+          detail={(homeError as Error).message}
+          onRetry={() => void refetchHome()}
         />
       ) : (
         <FlatList
@@ -528,8 +756,8 @@ export default function HomeScreen() {
           }}
           refreshControl={
             <RefreshControl
-              refreshing={isRefetching}
-              onRefresh={refetchProps}
+              refreshing={homeRefetching}
+              onRefresh={() => void refetchHome()}
               tintColor={colors.primary}
             />
           }
@@ -549,6 +777,27 @@ export default function HomeScreen() {
 }
 
 const styles = StyleSheet.create({
+  brandTitle: { gap: 0 },
+  brandName: { fontSize: 17, fontFamily: "Inter_700Bold", lineHeight: 20 },
+  brandTagline: { fontSize: 10, fontFamily: "Inter_400Regular", lineHeight: 13 },
+  headerActions: { flexDirection: "row", alignItems: "center", gap: 7 },
+  addPropertyAction: {
+    minHeight: 34,
+    borderWidth: 1,
+    borderRadius: 17,
+    paddingHorizontal: 10,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+  },
+  addPropertyText: { fontSize: 12, fontFamily: "Inter_600SemiBold" },
+  accountAction: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: "center",
+    justifyContent: "center",
+  },
   statsCard: {
     borderWidth: 1,
     padding: 16,
@@ -592,8 +841,8 @@ const styles = StyleSheet.create({
   quickAction: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 8,
-    paddingHorizontal: 16,
+    gap: 6,
+    paddingHorizontal: 10,
     paddingVertical: 11,
   },
   quickActionText: {
@@ -634,13 +883,62 @@ const styles = StyleSheet.create({
     fontFamily: "Inter_400Regular",
   },
   cardStats: {
+    flex: 1,
     flexDirection: "row",
-    gap: 16,
-    marginTop: 6,
+    alignItems: "flex-start",
+    gap: 13,
   },
   cardStat: {
+    flexShrink: 1,
     gap: 1,
   },
+  cardInsightLayout: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    marginTop: 8,
+  },
+  cardInsightLayoutStacked: {
+    flexDirection: "column",
+    alignItems: "stretch",
+  },
+  miniCoverageSummary: {
+    width: 118,
+    minHeight: 104,
+    borderLeftWidth: StyleSheet.hairlineWidth,
+    paddingLeft: 12,
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 5,
+  },
+  miniCoverageSummaryStacked: {
+    width: "100%",
+    minHeight: 80,
+    borderLeftWidth: 0,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    marginTop: 8,
+    paddingLeft: 0,
+    paddingTop: 10,
+    flexDirection: "row",
+    justifyContent: "flex-start",
+    gap: 12,
+  },
+  miniRing: {
+    width: 72,
+    height: 72,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  miniRingValue: { fontSize: 13, fontFamily: "Inter_700Bold", lineHeight: 16 },
+  miniRingLabel: { fontSize: 8, fontFamily: "Inter_400Regular", lineHeight: 10 },
+  miniCoverageCopy: {
+    width: 108,
+    alignItems: "center",
+    gap: 1,
+  },
+  miniCoverageCopyStacked: { width: "auto", flex: 1, alignItems: "flex-start" },
+  miniCoverageAmount: { fontSize: 11, fontFamily: "Inter_600SemiBold", textAlign: "center" },
+  miniCoverageHint: { fontSize: 9, fontFamily: "Inter_400Regular", textAlign: "center" },
   statValue: {
     fontSize: 15,
     fontFamily: "Inter_600SemiBold",
