@@ -16,6 +16,7 @@ import { SafeAreaProvider } from "react-native-safe-area-context";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { ToastProvider } from "@/components/Toast";
 import { AuthProvider, useAuth } from "@/context/AuthContext";
+import { EntitlementsProvider } from "@/context/EntitlementsContext";
 
 SplashScreen.preventAutoHideAsync();
 
@@ -47,6 +48,7 @@ function RootLayoutNav() {
       <Stack.Screen name="login" options={{ headerShown: false }} />
       <Stack.Screen name="onboarding" options={{ headerShown: false }} />
       <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+      <Stack.Screen name="upgrade" options={{ headerShown: true, presentation: "modal" }} />
     </Stack>
   );
 }
@@ -57,13 +59,13 @@ export default function RootLayout() {
       <SafeAreaProvider>
         <ErrorBoundary>
           <QueryClientProvider client={queryClient}>
-            <GestureHandlerRootView style={{ flex: 1 }}>
+            <EntitlementsProvider><GestureHandlerRootView style={{ flex: 1 }}>
               <KeyboardProvider>
                 <ToastProvider>
                   <RootLayoutNav />
                 </ToastProvider>
               </KeyboardProvider>
-            </GestureHandlerRootView>
+            </GestureHandlerRootView></EntitlementsProvider>
           </QueryClientProvider>
         </ErrorBoundary>
       </SafeAreaProvider>

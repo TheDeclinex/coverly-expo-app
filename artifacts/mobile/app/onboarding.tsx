@@ -27,8 +27,10 @@ import Animated, {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { useAuth } from "@/context/AuthContext";
+import { useEntitlements } from "@/context/EntitlementsContext";
 import { PROPERTY_TYPES } from "@/constants/propertyTypes";
 import { useColors } from "@/hooks/useColors";
+import { createProperty } from "@/lib/property-service";
 import { supabase } from "@/lib/supabase";
 
 // ─── Design tokens ─────────────────────────────────────────────────────────────
@@ -38,14 +40,6 @@ const BTN_TOP    = "#0F8F83";
 const BTN_BOT    = "#0B7468";
 const TEAL_TOP   = "#0D7A6F";
 const TEAL_BOT   = "#064E46";
-
-function generateId(): string {
-  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
-    const r = (Math.random() * 16) | 0;
-    const v = c === "x" ? r : (r & 0x3) | 0x8;
-    return v.toString(16);
-  });
-}
 
 // ─── Dot grid — matches login aesthetic ───────────────────────────────────────
 function DotGrid() {
@@ -100,6 +94,7 @@ function ProgressDots({
 // ─── Main screen ───────────────────────────────────────────────────────────────
 export default function OnboardingScreen() {
   const { session, markOnboardingComplete, hasSeenOnboarding } = useAuth();
+  const { enforce } = useEntitlements();
   const colors = useColors();
   const insets = useSafeAreaInsets();
 
@@ -198,6 +193,8 @@ export default function OnboardingScreen() {
   };
 
   const handleCreateProperty = async () => {
+    const { count } = await supabase.from("inventory_files").select("id", { count: "exact", head: true });
+    if (!enforce("property", count ?? 0)) return;
     if (!session.user || creating) return;
     const trimmedName = propertyName.trim();
     if (!trimmedName) return;
@@ -206,49 +203,20 @@ export default function OnboardingScreen() {
     setCreateError(null);
 
     try {
-      const { data: maxRow } = await supabase
-        .from("inventory_files")
-        .select("file_number")
-        .order("file_number", { ascending: false })
-        .limit(1)
-        .maybeSingle();
-      const nextFileNumber =
-        ((maxRow as { file_number?: number } | null)?.file_number ?? 0) + 1;
+      const n = parseFloat(coverAmount);
+      const row = await createProperty({
+        name: trimmedName,
+        propertyType,
+        contentsSumInsured: isFinite(n) && n > 0 ? n : null,
+      });
 
-      const newId = generateId();
-      const now   = new Date().toISOString();
-
-      const { data, error: dbError } = await supabase
-        .from("inventory_files")
-        .insert({
-          id: newId,
-          user_id: session.user.id,
-          file_number: nextFileNumber,
-          name: trimmedName,
-          status: "active",
-          property_type: propertyType ?? null,
-          created_by_email: session.user.email ?? null,
-          created_date: now,
-          last_modified: now,
-          contents_sum_insured: (() => {
-            const n = parseFloat(coverAmount);
-            return isFinite(n) && n > 0 ? n : null;
-          })(),
-        })
-        .select()
-        .single();
-
-      if (dbError) {
-        await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-        setCreateError(dbError.message);
-        return;
-      }
-
-      const row = data as { id: string; name: string };
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       setNewPropertyId(row.id);
       setNewPropertyName(row.name);
       setStep(3);
+    } catch (err) {
+      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      setCreateError(err instanceof Error ? err.message : "Could not create property. Please try again.");
     } finally {
       setCreating(false);
     }

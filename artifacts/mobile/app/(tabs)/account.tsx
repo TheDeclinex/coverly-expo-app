@@ -9,9 +9,9 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { AccountRow, AccountSection } from "@/components/AccountMenu";
 import { useAuth } from "@/context/AuthContext";
+import { useEntitlements } from "@/context/EntitlementsContext";
 import { useAccountProfile } from "@/hooks/useAccountProfile";
 import { useColors } from "@/hooks/useColors";
-import { billingAvailability } from "@/lib/billing";
 
 const privacyUrl = process.env.EXPO_PUBLIC_PRIVACY_URL;
 const termsUrl = process.env.EXPO_PUBLIC_TERMS_URL;
@@ -21,6 +21,7 @@ export default function AccountScreen() {
   const insets = useSafeAreaInsets();
   const { session, signOut } = useAuth();
   const { profile, isAdmin, isLoading, isError } = useAccountProfile();
+  const { subscriptionStatus, subscriptionPeriodEnd, purchaseLoading, restorePurchases, gatesEnabled } = useEntitlements();
 
   const email = profile?.email ?? session?.user.email ?? "Email unavailable";
   const displayName = profile?.fullName ?? null;
@@ -55,6 +56,11 @@ export default function AccountScreen() {
         },
       },
     ]);
+  };
+
+  const restore = async () => {
+    const result = await restorePurchases();
+    Alert.alert(result.ok ? "Purchases restored" : "Restore complete", result.message);
   };
 
   return (
@@ -95,10 +101,10 @@ export default function AccountScreen() {
 
         <AccountSection title="Plan & billing">
           <AccountRow icon="credit-card" title="Current plan" value={planLabel} />
-          <AccountRow icon="arrow-up-circle" title="Upgrade Coverly" subtitle="Native subscriptions are being prepared" value={billingAvailability.statusLabel} />
-          <AccountRow icon="settings" title="Manage subscription" subtitle="Apple and Google subscription management" value="Not available yet" />
-          <AccountRow icon="refresh-cw" title="Restore purchases" value="Not available yet" />
-          <AccountRow icon="list" title="Plan limits & entitlements" subtitle="Entitlement details will appear when native billing is ready" value="Coming soon" last />
+          <AccountRow icon="arrow-up-circle" title="Upgrade Coverly" subtitle="View Apple or Google subscription options" onPress={() => router.push("/upgrade" as Href)} />
+          <AccountRow icon="settings" title="Subscription status" subtitle={subscriptionPeriodEnd ? `Renews or expires ${new Date(subscriptionPeriodEnd).toLocaleDateString("en-NZ")}` : "Manage subscriptions in your Apple or Google account"} value={subscriptionStatus ?? (profile?.plan === "Free" ? "Free" : "Active")} />
+          <AccountRow icon="refresh-cw" title="Restore purchases" value={purchaseLoading ? "Restoring…" : undefined} disabled={purchaseLoading} onPress={() => void restore()} />
+          <AccountRow icon="list" title="Plan access" subtitle={profile?.plan === "Free" ? "One property; premium actions show an upgrade prompt" : "AI features included · Fair use applies"} value={gatesEnabled ? "Enforced" : "Test mode"} last />
         </AccountSection>
 
         <AccountSection title="Claim packs">

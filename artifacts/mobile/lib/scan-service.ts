@@ -16,7 +16,7 @@
  *   3. After deployment, SCAN_EDGE_FUNCTION_NAME below is already set correctly.
  */
 
-import { supabase } from "@/lib/supabase";
+import { anonKey, debugSupabaseUrl, supabase } from "@/lib/supabase";
 import type { ScanDetectedItem, ScanInput, ScanResult } from "@/types/scan";
 
 /**
@@ -24,6 +24,19 @@ import type { ScanDetectedItem, ScanInput, ScanResult } from "@/types/scan";
  * Set to null to show the "not configured" state without throwing.
  */
 const SCAN_EDGE_FUNCTION_NAME: string | null = "scan-room-photo";
+const EXPECTED_SCAN_PROJECT_REF = "jqijavrugjidqzbbgpag";
+const SCAN_INVOKE_TIMEOUT_MS = 90_000;
+
+interface ScanFunctionResponse {
+  success?: boolean;
+  items?: unknown[];
+  errorCode?: string;
+  message?: string;
+  edgeFunctionVersion?: string;
+  diagnostics?: {
+    edgeFunctionVersion?: string;
+  };
+}
 
 /**
  * Maximum images allowed per multi-photo scan batch.
@@ -57,6 +70,31 @@ function confidenceToLabel(n: number): string {
   return "low";
 }
 
+function scanLog(message: string, details?: Record<string, unknown>) {
+  if (details) {
+    console.info(`[Scan] ${message}`, details);
+  } else {
+    console.info(`[Scan] ${message}`);
+  }
+}
+
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      console.error("[Scan] timeout fired", {
+        label,
+        timeoutMs,
+      });
+      reject(new Error(`${label} timed out after ${Math.round(timeoutMs / 1000)} seconds.`));
+    }, timeoutMs);
+  });
+
+  return Promise.race([promise, timeout]).finally(() => {
+    if (timer) clearTimeout(timer);
+  });
+}
+
 /**
  * Run an AI-assisted inventory scan via the scan-room-photo Edge Function.
  *
@@ -83,6 +121,13 @@ export async function runAiScan(input: ScanInput): Promise<ScanResult> {
   }
 
   try {
+    scanLog("payload construction started", {
+      mode: input.mode,
+      imageCount: input.images.length,
+      fileId: input.fileId,
+      roomId: input.roomId,
+    });
+
     const productionPayload = {
       mode: toProductionMode(input.mode),
       images: input.images.map((img, i) => ({
@@ -97,18 +142,109 @@ export async function runAiScan(input: ScanInput): Promise<ScanResult> {
       },
     };
 
-    const { data, error } = await supabase.functions.invoke(
-      SCAN_EDGE_FUNCTION_NAME,
-      { body: productionPayload }
-    );
+    const supabaseHost = new URL(debugSupabaseUrl).host;
+    const usesExpectedProject = supabaseHost.startsWith(`${EXPECTED_SCAN_PROJECT_REF}.`);
+    scanLog("payload construction completed", {
+      productionMode: productionPayload.mode,
+      imageCount: productionPayload.images.length,
+      approxBase64Chars: productionPayload.images.reduce((sum, img) => sum + img.imageBase64.length, 0),
+      supabaseHost,
+      expectedProjectRef: EXPECTED_SCAN_PROJECT_REF,
+      usesExpectedProject,
+    });
 
-    if (error) {
+    if (!usesExpectedProject) {
+      console.warn("[Scan] Supabase project ref mismatch", {
+        expectedProjectRef: EXPECTED_SCAN_PROJECT_REF,
+        supabaseHost,
+      });
+    }
+
+    const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
+    const accessToken = sessionData.session?.access_token;
+    scanLog("auth session checked", {
+      hasAccessToken: !!accessToken,
+      hasSessionError: !!sessionError,
+    });
+    if (sessionError || !accessToken) {
+      console.error("[Scan] function invoke failed", {
+        message: sessionError?.message ?? "Missing Supabase session token",
+      });
       return {
         status: "error",
         items: [],
-        errorMessage: error.message,
+        errorMessage: "You must be signed in to scan items.",
       };
     }
+
+    const functionUrl = `${debugSupabaseUrl.replace(/\/$/, "")}/functions/v1/${SCAN_EDGE_FUNCTION_NAME}`;
+    const requestBody = JSON.stringify(productionPayload);
+    scanLog("function invoke started", {
+      functionName: SCAN_EDGE_FUNCTION_NAME,
+      functionUrl,
+      requestBodyChars: requestBody.length,
+      timeoutMs: SCAN_INVOKE_TIMEOUT_MS,
+    });
+
+    const response = await withTimeout(
+      fetch(functionUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          apikey: anonKey,
+          Authorization: `Bearer ${accessToken}`,
+        },
+        body: requestBody,
+      }),
+      SCAN_INVOKE_TIMEOUT_MS,
+      "scan-room-photo invoke"
+    );
+
+    scanLog("HTTP status received", {
+      status: response.status,
+      ok: response.ok,
+    });
+
+    const responseText = await response.text();
+    scanLog("response body received", {
+      status: response.status,
+      bodyChars: responseText.length,
+      bodyPreview: responseText.slice(0, 240),
+    });
+    let data: ScanFunctionResponse | null = null;
+    try {
+      data = responseText ? JSON.parse(responseText) as ScanFunctionResponse : null;
+    } catch {
+      console.error("[Scan] function invoke failed", {
+        status: response.status,
+        responsePreview: responseText.slice(0, 500),
+      });
+      return {
+        status: "error",
+        items: [],
+        errorMessage: `Scan failed with an invalid response (${response.status}).`,
+      };
+    }
+
+    if (!response.ok) {
+      console.error("[Scan] function invoke failed", {
+        status: response.status,
+        errorCode: data?.errorCode,
+        message: data?.message,
+      });
+      return {
+        status: "error",
+        items: [],
+        errorMessage: data?.message ?? data?.errorCode ?? `Scan failed (${response.status}).`,
+      };
+    }
+
+    scanLog("function invoke returned", {
+      success: data?.success,
+      itemCount: Array.isArray(data?.items) ? data.items.length : 0,
+      errorCode: data?.errorCode,
+      edgeFunctionVersion: data?.edgeFunctionVersion ?? data?.diagnostics?.edgeFunctionVersion,
+    });
 
     // Production function returns { success: bool, items?, errorCode?, message? }
     if (data?.success === false) {
@@ -178,6 +314,7 @@ export async function runAiScan(input: ScanInput): Promise<ScanResult> {
 
     return { status: "success", items };
   } catch (err) {
+    console.error("[Scan] function invoke failed", err);
     return {
       status: "error",
       items: [],

@@ -27,6 +27,7 @@ import { EmptyState } from "@/components/EmptyState";
 import { ExpandableImage } from "@/components/ExpandableImage";
 import { useToast } from "@/components/Toast";
 import { useAuth } from "@/context/AuthContext";
+import { useEntitlements } from "@/context/EntitlementsContext";
 import { useColors } from "@/hooks/useColors";
 import { buildItemInsertPayload } from "@/lib/item-insert-helpers";
 import { formatCurrency } from "@/lib/inventory-mappers";
@@ -102,6 +103,14 @@ interface PartialFailure {
   error: string;
 }
 
+function scanLog(message: string, details?: Record<string, unknown>) {
+  if (details) {
+    console.info(`[Scan] ${message}`, details);
+  } else {
+    console.info(`[Scan] ${message}`);
+  }
+}
+
 export default function ScanScreen() {
   const {
     fileId: paramFileId,
@@ -115,6 +124,7 @@ export default function ScanScreen() {
     roomName?: string;
   }>();
   const { session } = useAuth();
+  const { enforce } = useEntitlements();
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const queryClient = useQueryClient();
@@ -180,12 +190,19 @@ export default function ScanScreen() {
       Alert.alert("Permission needed", "Allow photo library access to continue.");
       return;
     }
+    scanLog("image processing started", { source: "library", mode: selectedMode });
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
       allowsMultipleSelection: isMulti,
       selectionLimit: isMulti ? MAX_MULTI_PHOTO_IMAGES : 1,
       quality: 0.8,
       base64: true,
+    });
+    scanLog("image processing completed", {
+      source: "library",
+      canceled: result.canceled,
+      assetCount: result.canceled ? 0 : result.assets.length,
+      hasBase64: !result.canceled && result.assets.some((asset) => !!asset.base64),
     });
     if (!result.canceled) {
       const picked: ScanEncodedImage[] = result.assets
@@ -195,6 +212,15 @@ export default function ScanScreen() {
           base64: a.base64!,
           mimeType: a.mimeType ?? "image/jpeg",
         }));
+      scanLog("photo captured", {
+        source: "library",
+        imageCount: picked.length,
+        approxBase64Chars: picked.reduce((sum, image) => sum + image.base64.length, 0),
+      });
+      if (picked.length === 0) {
+        setScanError("Could not prepare the selected photo for scanning. Please try another image.");
+        return;
+      }
       if (isMulti) {
         setImages((current) => [...current, ...picked].slice(0, MAX_MULTI_PHOTO_IMAGES));
         if (picked.length > 0) setMultiPhotoPromptVisible(true);
@@ -218,9 +244,16 @@ export default function ScanScreen() {
         return;
       }
     }
+    scanLog("image processing started", { source: "camera", mode, autoStart });
     const result = await ImagePicker.launchCameraAsync({
       quality: 0.8,
       base64: true,
+    });
+    scanLog("image processing completed", {
+      source: "camera",
+      canceled: result.canceled,
+      assetCount: result.canceled ? 0 : result.assets.length,
+      hasBase64: !result.canceled && !!result.assets[0]?.base64,
     });
     if (!result.canceled && result.assets[0]?.base64) {
       const a = result.assets[0];
@@ -230,6 +263,12 @@ export default function ScanScreen() {
         mimeType: a.mimeType ?? "image/jpeg",
       };
       const capturedImages = [capturedImage];
+      scanLog("photo captured", {
+        source: "camera",
+        imageCount: capturedImages.length,
+        approxBase64Chars: capturedImage.base64.length,
+        autoStart,
+      });
       if (mode === "multi_photo_room") {
         setImages((current) => [...current, capturedImage].slice(0, MAX_MULTI_PHOTO_IMAGES));
         setMultiPhotoPromptVisible(true);
@@ -239,6 +278,8 @@ export default function ScanScreen() {
       if (autoStart) {
         await handleStartScan(mode, capturedImages);
       }
+    } else if (!result.canceled) {
+      setScanError("Could not prepare the captured photo for scanning. Please try again.");
     }
   };
 
@@ -312,6 +353,7 @@ export default function ScanScreen() {
     if (!mode) { setScanError("Select a scan type above."); return; }
     if (!selectedFileId) { setScanError("Select a property."); return; }
     if (scanImages.length === 0) { setScanError("Add at least one photo."); return; }
+    if (!enforce("ai_scan")) return;
 
     // Resolve room: use existing selection, or create a new room from the typed name.
     let resolvedRoomId = selectedRoomId;
@@ -351,7 +393,15 @@ export default function ScanScreen() {
 
     setScanStatus("scanning");
 
-    const result = await runAiScan(input);
+    let result;
+    try {
+      result = await runAiScan(input);
+    } catch (error) {
+      console.error("[Scan] unexpected scan failure", error);
+      setScanStatus("error");
+      setScanError(error instanceof Error ? error.message : "Scan failed. Please try again.");
+      return;
+    }
 
     if (result.status === "not_configured") {
       setScanStatus("idle");

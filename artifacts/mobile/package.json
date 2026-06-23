@@ -63,6 +63,7 @@
   "dependencies": {
     "@supabase/supabase-js": "^2.107.0",
     "expo-audio": "~1.1.1",
+    "react-native-purchases": "^9.0.0",
     "react-native-url-polyfill": "^3.0.0"
   }
 }

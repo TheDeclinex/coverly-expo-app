@@ -21,6 +21,7 @@ import { LoadingState } from "@/components/LoadingState";
 import { ReplacementListingCard } from "@/components/ReplacementListingCard";
 import { useToast } from "@/components/Toast";
 import { useAuth } from "@/context/AuthContext";
+import { useEntitlements } from "@/context/EntitlementsContext";
 import { useColors } from "@/hooks/useColors";
 import {
   buildReplacementSearchQuery,
@@ -60,6 +61,7 @@ export default function ReplacementPricingScreen() {
     fileName?: string;
   }>();
   const { session } = useAuth();
+  const { enforce } = useEntitlements();
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const queryClient = useQueryClient();
@@ -100,6 +102,7 @@ export default function ReplacementPricingScreen() {
 
   const runSearch = React.useCallback(async (query: string) => {
     if (!item || !query.trim()) return;
+    if (!enforce("replacement_pricing")) return;
     setSearching(true);
     setSearchError(null);
     setFilter("all");
@@ -123,7 +126,7 @@ export default function ReplacementPricingScreen() {
     } finally {
       setSearching(false);
     }
-  }, [item]);
+  }, [item, enforce]);
 
   const handleSearch = () => {
     void runSearch(searchQuery);

@@ -11,6 +11,8 @@ export interface AccountProfile {
   fullName: string | null;
   appRole: string | null;
   plan: AccountPlan | null;
+  subscriptionStatus: string | null;
+  subscriptionPeriodEnd: string | null;
 }
 
 type ProfileRpcRow = {
@@ -21,6 +23,8 @@ type ProfileRpcRow = {
   plan?: string | null;
   subscription_plan?: string | null;
   effective_plan?: string | null;
+  subscription_status?: string | null;
+  subscription_period_end?: string | null;
   // Legacy UI Bakery profiles used `tier`; accept it without changing schema.
   tier?: string | null;
 };
@@ -88,12 +92,17 @@ export function useAccountProfile() {
           fullName: null,
           appRole: null,
           plan: "Free",
+          subscriptionStatus: null,
+          subscriptionPeriodEnd: null,
         };
       }
 
-      const rawPlan = [row.effective_plan, row.subscription_plan, row.plan, row.tier].find(
-        (value): value is string => typeof value === "string" && value.trim().length > 0
-      );
+      // Production returns effective_plan="admin" for administrators. That is
+      // an access role, not a purchasable plan, so continue to the subscription
+      // and base-plan fields until a recognized billing plan is found.
+      const resolvedPlan = [row.effective_plan, row.subscription_plan, row.plan, row.tier]
+        .map(normalisePlan)
+        .find((value): value is AccountPlan => value !== null);
 
       return {
         id: row.id ?? session?.user.id ?? null,
@@ -103,7 +112,9 @@ export function useAccountProfile() {
         // app_role is deliberately not considered when resolving billing plan.
         // A loaded profile with no paid entitlement is truthfully on Free.
         // An unknown non-empty plan remains indeterminate rather than being guessed.
-        plan: rawPlan ? normalisePlan(rawPlan) : "Free",
+        plan: resolvedPlan ?? "Free",
+        subscriptionStatus: row.subscription_status ?? null,
+        subscriptionPeriodEnd: row.subscription_period_end ?? null,
       };
     },
     enabled: !!session,

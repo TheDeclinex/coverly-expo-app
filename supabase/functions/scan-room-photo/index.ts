@@ -10,10 +10,11 @@
  */
 
 import { serve } from 'https://deno.land/std@0.177.0/http/server.ts';
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.3';
 
 // Version marker — bump this whenever the edge function is redeployed so the
 // client can confirm it is running the expected version via diagnostics.
-const EDGE_FUNCTION_VERSION = 'v24.2.2-scan-quality';
+const EDGE_FUNCTION_VERSION = 'v24.2.4-runtime-logs';
 
 const CORS_HEADERS = {
   'Access-Control-Allow-Origin': '*',
@@ -23,6 +24,9 @@ const CORS_HEADERS = {
 
 const OPENAI_URL = 'https://api.openai.com/v1/chat/completions';
 const DEFAULT_MODEL = 'gpt-4o';
+const SUPABASE_URL = Deno.env.get('SUPABASE_URL') ?? '';
+const SUPABASE_ANON_KEY = Deno.env.get('SUPABASE_ANON_KEY') ?? '';
+const OPENAI_TIMEOUT_MS = 45_000;
 // 8000 tokens — enough for busy scenes, 5-6 photo batches, video frames, full descriptions
 const MAX_TOKENS = 8000;
 
@@ -117,6 +121,46 @@ function jsonResponse(body: unknown, status = 200): Response {
     status,
     headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
   });
+}
+
+function scanLog(stage: string, details?: Record<string, unknown>) {
+  console.log(JSON.stringify({
+    source: 'scan-room-photo',
+    edgeFunctionVersion: EDGE_FUNCTION_VERSION,
+    stage,
+    ...details,
+  }));
+}
+
+function scanError(stage: string, details?: Record<string, unknown>) {
+  console.error(JSON.stringify({
+    source: 'scan-room-photo',
+    edgeFunctionVersion: EDGE_FUNCTION_VERSION,
+    stage,
+    ...details,
+  }));
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+async function fetchWithTimeout(
+  url: string,
+  init: RequestInit,
+  timeoutMs: number,
+): Promise<Response> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => {
+    scanError('openai_timeout_fired', { timeoutMs });
+    controller.abort();
+  }, timeoutMs);
+
+  try {
+    return await fetch(url, { ...init, signal: controller.signal });
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 function extractJson(content: string): unknown[] {
@@ -363,28 +407,77 @@ function resolveSeenInPhotos(i: RawItem, sourcePhotoIndex: number | undefined): 
 
 // ── Main handler ──────────────────────────────────────────────────────────────
 serve(async (req: Request) => {
+  scanLog('request_received');
   if (req.method === 'OPTIONS') {
+    scanLog('method_checked', { method: req.method });
+    scanLog('response_returned', { status: 200, corsPreflight: true });
     return new Response('ok', { headers: CORS_HEADERS });
   }
+  scanLog('method_checked', { method: req.method });
   if (req.method !== 'POST') {
+    scanLog('response_returned', { status: 405, errorCode: 'METHOD_NOT_ALLOWED' });
     return jsonResponse({ success: false, errorCode: 'METHOD_NOT_ALLOWED', message: 'POST only', edgeFunctionVersion: EDGE_FUNCTION_VERSION }, 405);
+  }
+
+  const authHeader = req.headers.get('Authorization') ?? '';
+  scanLog('auth_header_checked', { hasAuthHeader: authHeader.startsWith('Bearer ') });
+  if (!authHeader.startsWith('Bearer ')) {
+    scanLog('response_returned', { status: 401, errorCode: 'UNAUTHORIZED' });
+    return jsonResponse({ success: false, errorCode: 'UNAUTHORIZED', message: 'Missing authentication token', edgeFunctionVersion: EDGE_FUNCTION_VERSION }, 401);
+  }
+  const accessToken = authHeader.replace(/^Bearer\s+/i, '').trim();
+  scanLog('auth_token_extracted', { hasAccessToken: accessToken.length > 0 });
+  if (!accessToken) {
+    scanLog('response_returned', { status: 401, errorCode: 'UNAUTHORIZED' });
+    return jsonResponse({ success: false, errorCode: 'UNAUTHORIZED', message: 'Missing authentication token', edgeFunctionVersion: EDGE_FUNCTION_VERSION }, 401);
+  }
+
+  try {
+    scanLog('auth_verification_started');
+    const authClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+      global: { headers: { Authorization: authHeader } },
+      auth: { persistSession: false, autoRefreshToken: false },
+    });
+    const { data, error } = await authClient.auth.getUser(accessToken);
+    if (error || !data.user) {
+      scanError('auth_verification_failed', { message: error?.message ?? 'Missing user' });
+      scanLog('response_returned', { status: 401, errorCode: 'UNAUTHORIZED' });
+      return jsonResponse({ success: false, errorCode: 'UNAUTHORIZED', message: 'Invalid or expired session', edgeFunctionVersion: EDGE_FUNCTION_VERSION }, 401);
+    }
+    scanLog('auth_verification_completed', { hasUser: true });
+  } catch (error) {
+    scanError('auth_verification_failed', { message: errorMessage(error) });
+    scanLog('response_returned', { status: 401, errorCode: 'UNAUTHORIZED' });
+    return jsonResponse({ success: false, errorCode: 'UNAUTHORIZED', message: 'Authentication check failed', edgeFunctionVersion: EDGE_FUNCTION_VERSION }, 401);
   }
 
   const openAiKey = Deno.env.get('OPENAI_API_KEY');
   if (!openAiKey) {
+    scanLog('response_returned', { status: 500, errorCode: 'MISSING_API_KEY' });
     return jsonResponse({ success: false, errorCode: 'MISSING_API_KEY', message: 'OPENAI_API_KEY secret not configured', edgeFunctionVersion: EDGE_FUNCTION_VERSION }, 500);
   }
 
   let scanReq: ScanRequest;
   try {
+    scanLog('body_parse_started');
     scanReq = await req.json() as ScanRequest;
-  } catch {
+    scanLog('body_parse_completed');
+  } catch (error) {
+    scanError('body_parse_failed', { message: errorMessage(error) });
+    scanLog('response_returned', { status: 400, errorCode: 'BAD_REQUEST' });
     return jsonResponse({ success: false, errorCode: 'BAD_REQUEST', message: 'Invalid JSON body', edgeFunctionVersion: EDGE_FUNCTION_VERSION }, 400);
   }
 
   if (!scanReq.images || scanReq.images.length === 0) {
+    scanLog('response_returned', { status: 400, errorCode: 'NO_IMAGES' });
     return jsonResponse({ success: false, errorCode: 'NO_IMAGES', message: 'images array is required and must not be empty', edgeFunctionVersion: EDGE_FUNCTION_VERSION }, 400);
   }
+
+  const approximateBase64Length = scanReq.images.reduce((sum, image) => sum + (image.imageBase64?.length ?? 0), 0);
+  scanLog('image_payload_checked', {
+    imageCount: scanReq.images.length,
+    approximateBase64Length,
+  });
 
   const diagnostics: Record<string, unknown> = {
     edgeFunctionVersion: EDGE_FUNCTION_VERSION,
@@ -402,11 +495,17 @@ serve(async (req: Request) => {
 
   try {
     const openAiBody = buildOpenAiBody(scanReq);
-    const openAiRes = await fetch(OPENAI_URL, {
+    scanLog('openai_call_started', {
+      model: scanReq.model ?? DEFAULT_MODEL,
+      imageCount: scanReq.images.length,
+      timeoutMs: OPENAI_TIMEOUT_MS,
+    });
+    const openAiRes = await fetchWithTimeout(OPENAI_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${openAiKey}` },
       body: JSON.stringify(openAiBody),
-    });
+    }, OPENAI_TIMEOUT_MS);
+    scanLog('openai_call_completed', { status: openAiRes.status, ok: openAiRes.ok });
 
     const openAiJson = await openAiRes.json() as {
       choices?: Array<{ message?: { content?: string }; finish_reason?: string }>;
@@ -415,6 +514,12 @@ serve(async (req: Request) => {
     };
 
     if (openAiJson.error) {
+      scanError('openai_call_failed', {
+        status: openAiRes.status,
+        code: openAiJson.error.code ?? 'OPENAI_ERROR',
+        message: openAiJson.error.message,
+      });
+      scanLog('response_returned', { status: 502, errorCode: openAiJson.error.code ?? 'OPENAI_ERROR' });
       return jsonResponse({
         success: false,
         errorCode: openAiJson.error.code ?? 'OPENAI_ERROR',
@@ -432,6 +537,8 @@ serve(async (req: Request) => {
 
     const content = choice?.message?.content;
     if (!content) {
+      scanError('openai_call_failed', { status: openAiRes.status, code: 'EMPTY_RESPONSE' });
+      scanLog('response_returned', { status: 502, errorCode: 'EMPTY_RESPONSE' });
       return jsonResponse({ success: false, errorCode: 'EMPTY_RESPONSE', message: 'OpenAI returned no content', diagnostics }, 502);
     }
 
@@ -484,9 +591,22 @@ serve(async (req: Request) => {
     diagnostics.quantityItemCount = validItems.filter(i => i.quantity > 1).length;
     diagnostics.totalQuantityCount = validItems.reduce((s, i) => s + i.quantity, 0);
 
+    scanLog('response_returned', { status: 200, success: true, validItemCount: validItems.length });
     return jsonResponse({ success: true, items: validItems, diagnostics });
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
+    scanError('catch_block_error', { message: msg });
+    const isTimeout = e instanceof DOMException && e.name === 'AbortError';
+    if (isTimeout) {
+      scanLog('response_returned', { status: 504, errorCode: 'OPENAI_TIMEOUT' });
+      return jsonResponse({
+        success: false,
+        errorCode: 'OPENAI_TIMEOUT',
+        message: 'AI scan timed out before completion. Please try again.',
+        diagnostics,
+      }, 504);
+    }
+    scanLog('response_returned', { status: 500, errorCode: 'INTERNAL_ERROR' });
     return jsonResponse({ success: false, errorCode: 'INTERNAL_ERROR', message: msg, diagnostics }, 500);
   }
 });
