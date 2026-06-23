@@ -6,6 +6,8 @@ import React, { useMemo, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
+  Animated,
+  Easing,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -48,6 +50,162 @@ function formatEstimate(value: number | null): string {
     currency: "NZD",
     minimumFractionDigits: 2,
   });
+}
+
+function ReplacementSearchLoadingPanel({
+  colors,
+}: {
+  colors: ReturnType<typeof useColors>;
+}) {
+  const pulse = React.useRef(new Animated.Value(0)).current;
+  const scan = React.useRef(new Animated.Value(0)).current;
+
+  React.useEffect(() => {
+    const pulseLoop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulse, {
+          toValue: 1,
+          duration: 1150,
+          easing: Easing.inOut(Easing.quad),
+          useNativeDriver: true,
+        }),
+        Animated.timing(pulse, {
+          toValue: 0,
+          duration: 1150,
+          easing: Easing.inOut(Easing.quad),
+          useNativeDriver: true,
+        }),
+      ]),
+    );
+    const scanLoop = Animated.loop(
+      Animated.timing(scan, {
+        toValue: 1,
+        duration: 1700,
+        easing: Easing.inOut(Easing.cubic),
+        useNativeDriver: true,
+      }),
+    );
+
+    pulseLoop.start();
+    scanLoop.start();
+    return () => {
+      pulseLoop.stop();
+      scanLoop.stop();
+    };
+  }, [pulse, scan]);
+
+  const pulseOpacity = pulse.interpolate({
+    inputRange: [0, 1],
+    outputRange: [0.44, 0.9],
+  });
+  const iconScale = pulse.interpolate({
+    inputRange: [0, 1],
+    outputRange: [1, 1.08],
+  });
+  const scanTranslate = scan.interpolate({
+    inputRange: [0, 1],
+    outputRange: [-90, 310],
+  });
+
+  return (
+    <Animated.View
+      accessibilityRole="progressbar"
+      accessibilityLabel="Searching replacement prices"
+      style={[
+        styles.loadingPanel,
+        {
+          backgroundColor: colors.card,
+          borderColor: colors.border,
+          borderRadius: colors.radius,
+          opacity: pulse.interpolate({
+            inputRange: [0, 1],
+            outputRange: [0.96, 1],
+          }),
+        },
+      ]}
+    >
+      <View style={styles.loadingHeader}>
+        <Animated.View
+          style={[
+            styles.loadingIconWrap,
+            {
+              backgroundColor: colors.secondary,
+              transform: [{ scale: iconScale }],
+            },
+          ]}
+        >
+          <Feather name="search" size={22} color={colors.primary} />
+          <Animated.View
+            style={[
+              styles.loadingDot,
+              {
+                backgroundColor: colors.primary,
+                opacity: pulseOpacity,
+              },
+            ]}
+          />
+        </Animated.View>
+        <View style={styles.loadingCopy}>
+          <Text style={[styles.loadingTitle, { color: colors.foreground }]}>
+            Searching replacement prices
+          </Text>
+          <Text style={[styles.loadingSubtitle, { color: colors.mutedForeground }]}>
+            Checking current listings for this item...
+          </Text>
+        </View>
+      </View>
+
+      <View style={styles.skeletonList}>
+        {[0, 1, 2].map((index) => (
+          <View
+            key={index}
+            style={[
+              styles.skeletonRow,
+              {
+                backgroundColor: colors.muted,
+                borderColor: colors.border,
+                borderRadius: colors.radius,
+              },
+            ]}
+          >
+            <Animated.View style={[styles.skeletonShimmer, { transform: [{ translateX: scanTranslate }] }]} />
+            <Animated.View
+              style={[
+                styles.skeletonImage,
+                {
+                  backgroundColor: colors.border,
+                  opacity: pulseOpacity,
+                },
+              ]}
+            />
+            <View style={styles.skeletonBody}>
+              <Animated.View
+                style={[
+                  styles.skeletonLine,
+                  styles.skeletonTitleLine,
+                  { backgroundColor: colors.border, opacity: pulseOpacity },
+                ]}
+              />
+              <Animated.View
+                style={[
+                  styles.skeletonLine,
+                  styles.skeletonMetaLine,
+                  { backgroundColor: colors.border, opacity: pulseOpacity },
+                ]}
+              />
+              <Animated.View
+                style={[
+                  styles.skeletonLine,
+                  styles.skeletonPriceLine,
+                  { backgroundColor: colors.border, opacity: pulseOpacity },
+                ]}
+              />
+            </View>
+          </View>
+        ))}
+      </View>
+    </Animated.View>
+  );
 }
 
 export default function ReplacementPricingScreen() {
@@ -322,7 +480,7 @@ export default function ReplacementPricingScreen() {
             </Pressable>
           </View>
 
-          {searchError ? (
+          {!searching && searchError ? (
             <View style={[styles.errorBox, { borderColor: colors.destructive }]}>
               <Feather name="alert-circle" size={17} color={colors.destructive} />
               <Text style={[styles.errorText, { color: colors.destructive }]}>
@@ -331,7 +489,9 @@ export default function ReplacementPricingScreen() {
             </View>
           ) : null}
 
-          {results ? (
+          {searching ? (
+            <ReplacementSearchLoadingPanel colors={colors} />
+          ) : results ? (
             <>
               <ScrollView
                 horizontal
@@ -455,6 +615,59 @@ const styles = StyleSheet.create({
   filterText: { fontSize: 12, fontFamily: "Inter_600SemiBold" },
   resultCount: { fontSize: 12, fontFamily: "Inter_400Regular" },
   results: { gap: 12 },
+  loadingPanel: {
+    borderWidth: 1,
+    padding: 16,
+    gap: 16,
+    shadowColor: "#0F172A",
+    shadowOpacity: 0.06,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 2,
+  },
+  loadingHeader: { flexDirection: "row", alignItems: "center", gap: 12 },
+  loadingIconWrap: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  loadingDot: {
+    position: "absolute",
+    right: 11,
+    top: 11,
+    width: 7,
+    height: 7,
+    borderRadius: 4,
+  },
+  loadingCopy: { flex: 1, gap: 3 },
+  loadingTitle: { fontSize: 16, lineHeight: 22, fontFamily: "Inter_700Bold" },
+  loadingSubtitle: { fontSize: 13, lineHeight: 19, fontFamily: "Inter_400Regular" },
+  skeletonList: { gap: 10 },
+  skeletonRow: {
+    minHeight: 86,
+    borderWidth: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    padding: 10,
+    overflow: "hidden",
+  },
+  skeletonShimmer: {
+    position: "absolute",
+    top: -20,
+    bottom: -20,
+    width: 76,
+    backgroundColor: "rgba(255,255,255,0.42)",
+    transform: [{ rotate: "12deg" }],
+  },
+  skeletonImage: { width: 62, height: 62, borderRadius: 8 },
+  skeletonBody: { flex: 1, gap: 9 },
+  skeletonLine: { height: 9, borderRadius: 999 },
+  skeletonTitleLine: { width: "86%" },
+  skeletonMetaLine: { width: "58%" },
+  skeletonPriceLine: { width: "34%", height: 12 },
   empty: { borderRadius: 12, padding: 24, alignItems: "center", gap: 8 },
   emptyTitle: { fontSize: 15, fontFamily: "Inter_600SemiBold", textAlign: "center" },
   emptyText: {

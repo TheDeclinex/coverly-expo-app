@@ -25,6 +25,7 @@ import { EmptyState } from "@/components/EmptyState";
 import { ErrorState } from "@/components/ErrorState";
 import { LoadingState } from "@/components/LoadingState";
 import { useAuth } from "@/context/AuthContext";
+import { useEntitlements } from "@/context/EntitlementsContext";
 import { propertyTypeLabel } from "@/constants/propertyTypes";
 import { useColors } from "@/hooks/useColors";
 import { useSignedUrl } from "@/hooks/useSignedUrls";
@@ -32,13 +33,14 @@ import { calcPortfolioStats } from "@/lib/dashboard-stats";
 import {
   calculateCoverageInsight,
   getCoverageColor,
-  getCoverageStatusLabel,
 } from "@/lib/coverage";
 import { formatCurrency, getItemTotalValue } from "@/lib/inventory-mappers";
 import { supabase } from "@/lib/supabase";
 import type { InventoryFile, InventoryItem } from "@/types";
 
 const HOME_ITEMS_PAGE_SIZE = 1000;
+const HOME_SUMMARY_BACKGROUND = "#F6FBFA";
+const HOME_SUMMARY_BORDER = "#D7E7E4";
 const countFormatter = new Intl.NumberFormat("en-NZ");
 
 function formatCount(value: number): string {
@@ -67,14 +69,17 @@ function warningGradientColor(position: number): string {
 
 function CoverageBar({
   percent,
+  inventoryValue,
+  coverValue,
   colors,
 }: {
   percent: number;
+  inventoryValue: number;
+  coverValue: number;
   colors: ReturnType<typeof import("@/hooks/useColors").useColors>;
 }) {
   const clamped = Math.min(percent, 100);
   const fill = getCoverageColor(percent);
-  const label = getCoverageStatusLabel(percent);
 
   return (
     <View style={{ gap: 6 }}>
@@ -86,7 +91,7 @@ function CoverageBar({
             color: colors.mutedForeground,
           }}
         >
-          Recorded contents value vs cover
+          Inventory value vs cover
         </Text>
         <Text
           style={{
@@ -133,10 +138,31 @@ function CoverageBar({
           color: colors.mutedForeground,
         }}
       >
-        {label}
+        {formatCurrency(inventoryValue || null)} recorded of {formatCurrency(coverValue)} cover
       </Text>
     </View>
   );
+}
+
+function getPropertyCoverCopy(
+  coverage: ReturnType<typeof calculateCoverageInsight>
+) {
+  if (!coverage.hasCover) {
+    return {
+      primary: "Add contents cover",
+      secondary: "Compare this property's inventory value",
+    };
+  }
+  if (coverage.overAmount > 0) {
+    return {
+      primary: `${formatCurrency(coverage.overAmount)} over cover`,
+      secondary: "Review this property's contents cover",
+    };
+  }
+  return {
+    primary: `${formatCurrency(coverage.remainingAmount)} remaining cover`,
+    secondary: "Based on this property's inventory value",
+  };
 }
 
 function MiniCoverageRing({
@@ -250,6 +276,7 @@ function PropertyCard({
     totalValue,
     item.contents_sum_insured,
   );
+  const coverCopy = getPropertyCoverCopy(coverage);
 
   const handlePress = async () => {
     await Haptics.selectionAsync();
@@ -358,17 +385,17 @@ function PropertyCard({
                   },
                 ]}
               >
-                {!coverage.hasCover
-                  ? "Cover not set"
-                  : coverage.overAmount > 0
-                    ? `${formatCurrency(coverage.overAmount)} over`
-                    : `${formatCurrency(coverage.remainingAmount)} left`}
+                {coverCopy.primary}
               </Text>
               <Text style={[styles.miniCoverageHint, { color: colors.mutedForeground }]}>
-                Contents value vs cover
+                {coverCopy.secondary}
               </Text>
             </View>
           </View>
+        </View>
+        <View style={styles.cardActionRow}>
+          <Text style={[styles.cardActionText, { color: colors.primary }]}>Continue inventory</Text>
+          <Feather name="arrow-right" size={13} color={colors.primary} />
         </View>
       </View>
     </Pressable>
@@ -377,6 +404,7 @@ function PropertyCard({
 
 export default function HomeScreen() {
   const { session } = useAuth();
+  const { canCreateProperty, enforce } = useEntitlements();
   const colors = useColors();
   const insets = useSafeAreaInsets();
 
@@ -506,6 +534,13 @@ export default function HomeScreen() {
 
   const handleScanItems = () => navigateWithProperty("/(tabs)/scan");
   const handleAddManually = () => navigateWithProperty("/(tabs)/add-item");
+  const propertyCount = properties?.length ?? 0;
+  const canAddProperty = canCreateProperty(propertyCount);
+
+  const handleAddProperty = () => {
+    if (!enforce("property", propertyCount)) return;
+    router.push("/(tabs)/add-property");
+  };
 
   const renderHeader = () => {
     if (!portfolio || !properties || properties.length === 0) return null;
@@ -524,12 +559,17 @@ export default function HomeScreen() {
         <View
           style={[
             styles.statsCard,
-            { backgroundColor: colors.card, borderColor: colors.border, borderRadius: colors.radius },
+            { backgroundColor: HOME_SUMMARY_BACKGROUND, borderColor: HOME_SUMMARY_BORDER, borderRadius: colors.radius },
           ]}
         >
-          <Text style={[styles.sectionLabel, { color: colors.mutedForeground }]}>
-            YOUR HOME INVENTORY
-          </Text>
+          <View style={styles.summaryTitleRow}>
+            <View style={[styles.summaryTitleIcon, { backgroundColor: colors.secondary }]}>
+              <Feather name="home" size={12} color={colors.primary} />
+            </View>
+            <Text style={[styles.sectionLabel, styles.summarySectionLabel, { color: colors.mutedForeground }]}>
+              YOUR HOME INVENTORY
+            </Text>
+          </View>
           <View style={styles.statsRow}>
             <View style={styles.statCell}>
               <Text style={[styles.bigValue, { color: colors.foreground }]}>
@@ -562,9 +602,16 @@ export default function HomeScreen() {
             <View style={{ marginTop: 12 }}>
               <CoverageBar
                 percent={(portfolio.totalInventoryValue / portfolio.totalRecordedCover) * 100}
+                inventoryValue={portfolio.totalInventoryValue}
+                coverValue={portfolio.totalRecordedCover}
                 colors={colors}
               />
             </View>
+          )}
+          {portfolio.totalRecordedCover <= 0 && (
+            <Text style={[styles.coverFallbackText, { color: colors.mutedForeground }]}>
+              Add contents cover to compare your inventory value
+            </Text>
           )}
         </View>
 
@@ -672,7 +719,7 @@ export default function HomeScreen() {
         </View>
 
         <Text style={[styles.sectionHeading, { color: colors.foreground }]}>
-          My Properties
+          {properties.length === 1 ? "Your Property" : "My Properties"}
         </Text>
       </View>
     );
@@ -693,16 +740,16 @@ export default function HomeScreen() {
           headerRight: () => (
             <View style={styles.headerActions}>
               <Pressable
-                onPress={() => router.push("/(tabs)/add-property")}
+                onPress={handleAddProperty}
                 hitSlop={8}
                 accessibilityRole="button"
-                accessibilityLabel="Add property"
+                accessibilityLabel={canAddProperty ? "Add property" : "Upgrade to add another property"}
                 style={({ pressed }) => [
                   styles.addPropertyAction,
                   {
                     backgroundColor: colors.secondary,
                     borderColor: colors.border,
-                    opacity: pressed ? 0.7 : 1,
+                    opacity: pressed ? 0.7 : canAddProperty ? 1 : 0.78,
                   },
                 ]}
               >
@@ -799,15 +846,31 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   statsCard: {
-    borderWidth: 1,
+    borderWidth: 1.5,
     padding: 16,
     gap: 4,
+  },
+  summaryTitleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 7,
+    marginBottom: 8,
+  },
+  summaryTitleIcon: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    alignItems: "center",
+    justifyContent: "center",
   },
   sectionLabel: {
     fontSize: 11,
     fontFamily: "Inter_600SemiBold",
     letterSpacing: 0.8,
     marginBottom: 8,
+  },
+  summarySectionLabel: {
+    marginBottom: 0,
   },
   sectionHeading: {
     fontSize: 18,
@@ -837,6 +900,12 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontFamily: "Inter_400Regular",
     textAlign: "center",
+  },
+  coverFallbackText: {
+    marginTop: 12,
+    fontSize: 11,
+    lineHeight: 16,
+    fontFamily: "Inter_400Regular",
   },
   quickAction: {
     flexDirection: "row",
@@ -871,6 +940,16 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
+  },
+  cardActionRow: {
+    marginTop: 8,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+  },
+  cardActionText: {
+    fontSize: 12,
+    fontFamily: "Inter_600SemiBold",
   },
   cardName: {
     fontSize: 16,
