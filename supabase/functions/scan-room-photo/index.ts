@@ -14,7 +14,7 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.3';
 
 // Version marker — bump this whenever the edge function is redeployed so the
 // client can confirm it is running the expected version via diagnostics.
-const EDGE_FUNCTION_VERSION = 'v24.2.4-runtime-logs';
+const EDGE_FUNCTION_VERSION = 'v24.2.5-usage-accounting';
 
 const CORS_HEADERS = {
   'Access-Control-Allow-Origin': '*',
@@ -97,6 +97,7 @@ interface ScanRequest {
   images: ScanImage[];
   context?: { propertyId?: string; fileId?: string; roomName?: string };
   model?: string;
+  usageIdempotencyKey?: string;
 }
 
 interface RawItem {
@@ -113,6 +114,23 @@ interface RawItem {
   seenInPhotos?: number[];
   mergeConfidence?: number;
   quantity?: number;
+}
+
+interface UsageReservationResult {
+  reservation_id?: string;
+  feature?: string;
+  operation?: string;
+  status?: string;
+  allowed?: boolean;
+  would_have_blocked?: boolean;
+  entitlement_mode?: string;
+  effective_plan?: string;
+  units?: number;
+  limit_units?: number;
+  used_units?: number;
+  reserved_units?: number;
+  remaining_units?: number | null;
+  expires_at?: string;
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -160,6 +178,96 @@ async function fetchWithTimeout(
     return await fetch(url, { ...init, signal: controller.signal });
   } finally {
     clearTimeout(timeout);
+  }
+}
+
+function operationForMode(mode: ScanRequest['mode']): 'single_photo_scan' | 'multi_photo_scan' | 'video_frame_scan' | null {
+  if (mode === 'single_photo') return 'single_photo_scan';
+  if (mode === 'multi_photo') return 'multi_photo_scan';
+  if (mode === 'video_frames') return 'video_frame_scan';
+  return null;
+}
+
+function normaliseUsageIdempotencyKey(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  if (!trimmed || trimmed.length > 200) return null;
+  return trimmed;
+}
+
+function usageDiagnostics(result: UsageReservationResult | null): Record<string, unknown> | undefined {
+  if (!result) return undefined;
+  return {
+    reservationId: result.reservation_id,
+    feature: result.feature,
+    operation: result.operation,
+    status: result.status,
+    allowed: result.allowed,
+    wouldHaveBlocked: result.would_have_blocked,
+    entitlementMode: result.entitlement_mode,
+    effectivePlan: result.effective_plan,
+    units: result.units,
+    limitUnits: result.limit_units,
+    usedUnits: result.used_units,
+    reservedUnits: result.reserved_units,
+    remainingUnits: result.remaining_units,
+    expiresAt: result.expires_at,
+  };
+}
+
+async function reserveUsage(
+  client: ReturnType<typeof createClient>,
+  operation: string,
+  idempotencyKey: string,
+  metadata: Record<string, unknown>,
+): Promise<UsageReservationResult> {
+  const { data, error } = await client.rpc('reserve_my_feature_usage', {
+    feature: 'ai_scan',
+    operation,
+    idempotency_key: idempotencyKey,
+    metadata,
+  });
+
+  if (error) {
+    throw new Error(`Usage reserve failed: ${error.message}`);
+  }
+
+  return (data ?? {}) as UsageReservationResult;
+}
+
+async function commitUsage(
+  client: ReturnType<typeof createClient>,
+  reservationId: string,
+): Promise<void> {
+  const { error } = await client.rpc('commit_my_feature_usage', {
+    reservation_id: reservationId,
+  });
+
+  if (error) {
+    throw new Error(`Usage commit failed: ${error.message}`);
+  }
+}
+
+async function refundUsage(
+  client: ReturnType<typeof createClient> | null,
+  reservationId: string | null,
+  reason: string,
+): Promise<void> {
+  if (!client || !reservationId) return;
+
+  const { error } = await client.rpc('refund_my_feature_usage', {
+    reservation_id: reservationId,
+    reason,
+  });
+
+  if (error) {
+    scanError('usage_refund_failed', {
+      reservationId,
+      reason,
+      message: error.message,
+    });
+  } else {
+    scanLog('usage_refunded', { reservationId, reason });
   }
 }
 
@@ -432,13 +540,14 @@ serve(async (req: Request) => {
     return jsonResponse({ success: false, errorCode: 'UNAUTHORIZED', message: 'Missing authentication token', edgeFunctionVersion: EDGE_FUNCTION_VERSION }, 401);
   }
 
+  let userClient: ReturnType<typeof createClient> | null = null;
   try {
     scanLog('auth_verification_started');
-    const authClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+    userClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
       global: { headers: { Authorization: authHeader } },
       auth: { persistSession: false, autoRefreshToken: false },
     });
-    const { data, error } = await authClient.auth.getUser(accessToken);
+    const { data, error } = await userClient.auth.getUser(accessToken);
     if (error || !data.user) {
       scanError('auth_verification_failed', { message: error?.message ?? 'Missing user' });
       scanLog('response_returned', { status: 401, errorCode: 'UNAUTHORIZED' });
@@ -473,17 +582,91 @@ serve(async (req: Request) => {
     return jsonResponse({ success: false, errorCode: 'NO_IMAGES', message: 'images array is required and must not be empty', edgeFunctionVersion: EDGE_FUNCTION_VERSION }, 400);
   }
 
+  const operation = operationForMode(scanReq.mode);
+  if (!operation) {
+    scanLog('response_returned', { status: 400, errorCode: 'BAD_SCAN_MODE' });
+    return jsonResponse({ success: false, errorCode: 'BAD_SCAN_MODE', message: 'Unsupported scan mode', edgeFunctionVersion: EDGE_FUNCTION_VERSION }, 400);
+  }
+
+  const usageIdempotencyKey = normaliseUsageIdempotencyKey(scanReq.usageIdempotencyKey);
+  if (!usageIdempotencyKey) {
+    scanLog('response_returned', { status: 400, errorCode: 'MISSING_IDEMPOTENCY_KEY' });
+    return jsonResponse({
+      success: false,
+      errorCode: 'MISSING_IDEMPOTENCY_KEY',
+      message: 'Scan request is missing a usage idempotency key. Please update the app and try again.',
+      edgeFunctionVersion: EDGE_FUNCTION_VERSION,
+    }, 400);
+  }
+
   const approximateBase64Length = scanReq.images.reduce((sum, image) => sum + (image.imageBase64?.length ?? 0), 0);
   scanLog('image_payload_checked', {
     imageCount: scanReq.images.length,
     approximateBase64Length,
   });
 
+  let usageReservation: UsageReservationResult | null = null;
+  let usageReservationId: string | null = null;
+  try {
+    scanLog('usage_reserve_started', {
+      feature: 'ai_scan',
+      operation,
+      imageCount: scanReq.images.length,
+      hasIdempotencyKey: true,
+    });
+    usageReservation = await reserveUsage(userClient!, operation, usageIdempotencyKey, {
+      mode: scanReq.mode,
+      imageCount: scanReq.images.length,
+      context: {
+        fileId: scanReq.context?.fileId ?? null,
+        propertyId: scanReq.context?.propertyId ?? null,
+        roomNamePresent: !!scanReq.context?.roomName,
+      },
+      edgeFunctionVersion: EDGE_FUNCTION_VERSION,
+    });
+    usageReservationId = usageReservation.reservation_id ?? null;
+    scanLog('usage_reserve_completed', {
+      reservationId: usageReservationId,
+      allowed: usageReservation.allowed,
+      status: usageReservation.status,
+      wouldHaveBlocked: usageReservation.would_have_blocked,
+      operation: usageReservation.operation,
+      units: usageReservation.units,
+      remainingUnits: usageReservation.remaining_units,
+    });
+  } catch (error) {
+    scanError('usage_reserve_failed', { message: errorMessage(error), operation });
+    scanLog('response_returned', { status: 500, errorCode: 'USAGE_RESERVE_FAILED' });
+    return jsonResponse({
+      success: false,
+      errorCode: 'USAGE_RESERVE_FAILED',
+      message: 'Could not check AI scan allowance. Please try again.',
+      edgeFunctionVersion: EDGE_FUNCTION_VERSION,
+    }, 500);
+  }
+
+  if (usageReservation.allowed !== true) {
+    scanLog('response_returned', {
+      status: 402,
+      errorCode: 'AI_SCAN_LIMIT_REACHED',
+      operation,
+      wouldHaveBlocked: usageReservation.would_have_blocked,
+    });
+    return jsonResponse({
+      success: false,
+      errorCode: 'AI_SCAN_LIMIT_REACHED',
+      message: 'Your Free monthly AI scan credits have been used. Upgrade to continue scanning.',
+      edgeFunctionVersion: EDGE_FUNCTION_VERSION,
+      usage: usageDiagnostics(usageReservation),
+    }, 402);
+  }
+
   const diagnostics: Record<string, unknown> = {
     edgeFunctionVersion: EDGE_FUNCTION_VERSION,
     model: scanReq.model ?? DEFAULT_MODEL,
     mode: scanReq.mode ?? 'single_photo',
     imageCount: scanReq.images.length,
+    usage: usageDiagnostics(usageReservation),
     maxTokens: MAX_TOKENS,
     rawItemCount: 0,
     validItemCount: 0,
@@ -519,6 +702,7 @@ serve(async (req: Request) => {
         code: openAiJson.error.code ?? 'OPENAI_ERROR',
         message: openAiJson.error.message,
       });
+      await refundUsage(userClient, usageReservationId, openAiJson.error.code ?? 'openai_error');
       scanLog('response_returned', { status: 502, errorCode: openAiJson.error.code ?? 'OPENAI_ERROR' });
       return jsonResponse({
         success: false,
@@ -538,6 +722,7 @@ serve(async (req: Request) => {
     const content = choice?.message?.content;
     if (!content) {
       scanError('openai_call_failed', { status: openAiRes.status, code: 'EMPTY_RESPONSE' });
+      await refundUsage(userClient, usageReservationId, 'empty_openai_response');
       scanLog('response_returned', { status: 502, errorCode: 'EMPTY_RESPONSE' });
       return jsonResponse({ success: false, errorCode: 'EMPTY_RESPONSE', message: 'OpenAI returned no content', diagnostics }, 502);
     }
@@ -591,6 +776,18 @@ serve(async (req: Request) => {
     diagnostics.quantityItemCount = validItems.filter(i => i.quantity > 1).length;
     diagnostics.totalQuantityCount = validItems.reduce((s, i) => s + i.quantity, 0);
 
+    if (validItems.length === 0) {
+      await refundUsage(userClient, usageReservationId, 'no_usable_items');
+      scanLog('response_returned', { status: 200, success: true, validItemCount: 0, usageRefunded: true });
+      return jsonResponse({ success: true, items: validItems, diagnostics });
+    }
+
+    if (usageReservationId) {
+      scanLog('usage_commit_started', { reservationId: usageReservationId, validItemCount: validItems.length });
+      await commitUsage(userClient!, usageReservationId);
+      scanLog('usage_commit_completed', { reservationId: usageReservationId });
+    }
+
     scanLog('response_returned', { status: 200, success: true, validItemCount: validItems.length });
     return jsonResponse({ success: true, items: validItems, diagnostics });
   } catch (e) {
@@ -598,6 +795,7 @@ serve(async (req: Request) => {
     scanError('catch_block_error', { message: msg });
     const isTimeout = e instanceof DOMException && e.name === 'AbortError';
     if (isTimeout) {
+      await refundUsage(userClient, usageReservationId, 'openai_timeout');
       scanLog('response_returned', { status: 504, errorCode: 'OPENAI_TIMEOUT' });
       return jsonResponse({
         success: false,
@@ -606,6 +804,7 @@ serve(async (req: Request) => {
         diagnostics,
       }, 504);
     }
+    await refundUsage(userClient, usageReservationId, 'scan_processing_error');
     scanLog('response_returned', { status: 500, errorCode: 'INTERNAL_ERROR' });
     return jsonResponse({ success: false, errorCode: 'INTERNAL_ERROR', message: msg, diagnostics }, 500);
   }

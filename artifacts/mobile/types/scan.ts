@@ -27,6 +27,8 @@ export interface ScanInput {
   fileId: string;
   roomId: string;
   roomName?: string;
+  /** Stable per-scan key used by backend usage accounting to avoid double-charging retries */
+  usageIdempotencyKey?: string;
   /** Pre-encoded images captured/picked by the user */
   images: ScanEncodedImage[];
   /** Local URI for video (mode: video_room only) */

@@ -103,6 +103,8 @@ interface PartialFailure {
   error: string;
 }
 
+type ScanLaunchStep = "property" | "room" | "type";
+
 function scanLog(message: string, details?: Record<string, unknown>) {
   if (details) {
     console.info(`[Scan] ${message}`, details);
@@ -147,6 +149,7 @@ export default function ScanScreen() {
 
   const flatListRef = useRef<FlatList<ScanDetectedItem>>(null);
   const multiPhotoCameraTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const aiScanEntitlementCheckedRef = useRef(false);
 
   useEffect(() => () => {
     if (multiPhotoCameraTimerRef.current) {
@@ -154,7 +157,7 @@ export default function ScanScreen() {
     }
   }, []);
 
-  const { data: properties } = useQuery({
+  const { data: properties, isLoading: propertiesLoading } = useQuery({
     queryKey: ["properties", session?.user.id],
     queryFn: async () => {
       const { data, error } = await supabase
@@ -167,7 +170,7 @@ export default function ScanScreen() {
     enabled: !!session,
   });
 
-  const { data: rooms } = useQuery({
+  const { data: rooms, isLoading: roomsLoading } = useQuery({
     queryKey: ["rooms", selectedFileId, session?.user.id],
     queryFn: async () => {
       const { data, error } = await supabase
@@ -182,8 +185,70 @@ export default function ScanScreen() {
     enabled: !!session && !!selectedFileId,
   });
 
+  useEffect(() => {
+    if (paramFileId || selectedFileId || !properties || properties.length !== 1) return;
+    setSelectedFileId(properties[0].id);
+  }, [paramFileId, properties, selectedFileId]);
+
+  useEffect(() => {
+    if (paramRoomId || selectedRoomId || !selectedFileId || !rooms || rooms.length !== 1) return;
+    setSelectedRoomId(rooms[0].id);
+  }, [paramRoomId, rooms, selectedFileId, selectedRoomId]);
+
+  const clearCaptureState = () => {
+    if (multiPhotoCameraTimerRef.current) {
+      clearTimeout(multiPhotoCameraTimerRef.current);
+      multiPhotoCameraTimerRef.current = null;
+    }
+    setSelectedMode(null);
+    setImages([]);
+    setScanError(null);
+    setMultiPhotoPromptVisible(false);
+    aiScanEntitlementCheckedRef.current = false;
+  };
+
+  const selectedPropertyName =
+    paramFileName ?? properties?.find((property) => property.id === selectedFileId)?.name ?? "Property";
+  const selectedRoomName =
+    paramRoomName ?? rooms?.find((room) => room.id === selectedRoomId)?.name ?? (newRoomName.trim() || "Room");
+
+  const launchStep: ScanLaunchStep = !selectedFileId
+    ? "property"
+    : !selectedRoomId
+      ? "room"
+      : "type";
+
+  const createRoomBeforeScan = async () => {
+    const trimmedName = newRoomName.trim();
+    if (!selectedFileId) { setScanError("Select a property first."); return; }
+    if (!trimmedName) { setScanError("Enter a room name before scanning."); return; }
+    if (!session?.user.id) { setScanError("You must be signed in to create a room."); return; }
+
+    const roomId = "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
+      const r = (Math.random() * 16) | 0;
+      return (c === "x" ? r : (r & 0x3) | 0x8).toString(16);
+    });
+    const { error: roomErr } = await supabase.from("inventory_rooms").insert({
+      id: roomId,
+      file_id: selectedFileId,
+      user_id: session.user.id,
+      name: trimmedName,
+      sort_order: (rooms?.length ?? 0) + 1,
+    });
+    if (roomErr) { setScanError(`Could not create room: ${roomErr.message}`); return; }
+
+    setSelectedRoomId(roomId);
+    setScanError(null);
+    queryClient.invalidateQueries({ queryKey: ["rooms", selectedFileId] });
+    queryClient.invalidateQueries({ queryKey: ["rooms", selectedFileId, session.user.id] });
+  };
+
   const pickImages = async () => {
     if (!selectedMode) return;
+    if (!selectedFileId || !selectedRoomId) {
+      setScanError("Choose a property and room before adding photos.");
+      return;
+    }
     const isMulti = selectedMode === "multi_photo_room";
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (status !== "granted") {
@@ -225,7 +290,9 @@ export default function ScanScreen() {
         setImages((current) => [...current, ...picked].slice(0, MAX_MULTI_PHOTO_IMAGES));
         if (picked.length > 0) setMultiPhotoPromptVisible(true);
       } else {
-        setImages(picked.slice(0, 1));
+        const singleImage = picked.slice(0, 1);
+        setImages(singleImage);
+        await handleStartScan(selectedMode, singleImage);
       }
     }
   };
@@ -235,6 +302,10 @@ export default function ScanScreen() {
     autoStart = false,
   ) => {
     if (!mode) return;
+    if (!selectedFileId || !selectedRoomId) {
+      setScanError("Choose a property and room before opening the camera.");
+      return;
+    }
     // On web the camera/file prompt must be opened directly from the mode-card
     // click. Awaiting a permission request first causes browsers to block it.
     if (Platform.OS !== "web") {
@@ -298,6 +369,20 @@ export default function ScanScreen() {
     }, Platform.OS === "ios" ? 350 : 150);
   };
 
+  const chooseScanMode = (mode: ScanMode, comingSoon?: boolean) => {
+    if (comingSoon) return;
+    if (!selectedFileId || !selectedRoomId) {
+      setScanError("Choose a property and room before selecting a scan type.");
+      return;
+    }
+    if (!enforce("ai_scan")) return;
+
+    clearCaptureState();
+    aiScanEntitlementCheckedRef.current = true;
+    setSelectedMode(mode);
+    void takePhoto(mode, mode !== "multi_photo_room");
+  };
+
   const getDestRoomName = (resolvedRoomId?: string) => {
     const rid = resolvedRoomId ?? selectedRoomId;
     return paramRoomName ?? rooms?.find((r) => r.id === rid)?.name ?? (newRoomName.trim() || null);
@@ -352,39 +437,17 @@ export default function ScanScreen() {
     const scanImages = imagesOverride ?? images;
     if (!mode) { setScanError("Select a scan type above."); return; }
     if (!selectedFileId) { setScanError("Select a property."); return; }
+    if (!selectedRoomId) { setScanError("Select a room."); return; }
     if (scanImages.length === 0) { setScanError("Add at least one photo."); return; }
-    if (!enforce("ai_scan")) return;
-
-    // Resolve room: use existing selection, or create a new room from the typed name.
-    let resolvedRoomId = selectedRoomId;
-    if (!resolvedRoomId) {
-      const trimmedName = newRoomName.trim();
-      if (!trimmedName) { setScanError("Enter a room name to scan into."); return; }
-      const roomId = "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
-        const r = (Math.random() * 16) | 0;
-        return (c === "x" ? r : (r & 0x3) | 0x8).toString(16);
-      });
-      const { error: roomErr } = await supabase.from("inventory_rooms").insert({
-        id: roomId,
-        file_id: selectedFileId,
-        user_id: session!.user.id,
-        name: trimmedName,
-        sort_order: 1,
-      });
-      if (roomErr) { setScanError(`Could not create room: ${roomErr.message}`); return; }
-      resolvedRoomId = roomId;
-      setSelectedRoomId(roomId);
-      queryClient.invalidateQueries({ queryKey: ["rooms", selectedFileId] });
-      queryClient.invalidateQueries({ queryKey: ["rooms", selectedFileId, session?.user.id] });
-    }
+    if (!aiScanEntitlementCheckedRef.current && !enforce("ai_scan")) return;
 
     setScanError(null);
 
     const input = {
       mode,
       fileId: selectedFileId,
-      roomId: resolvedRoomId,
-      roomName: getDestRoomName(resolvedRoomId) ?? undefined,
+      roomId: selectedRoomId,
+      roomName: getDestRoomName(selectedRoomId) ?? undefined,
       images: scanImages,
     };
 
@@ -619,6 +682,7 @@ export default function ScanScreen() {
     setPartialFailures([]);
     setActivePinIndex(null);
     setActiveSourcePhotoIdx(0);
+    aiScanEntitlementCheckedRef.current = false;
     clearScanPhotoUploadCache();
   };
 
@@ -944,7 +1008,7 @@ export default function ScanScreen() {
   const canScan =
     selectedMode &&
     selectedFileId &&
-    (selectedRoomId || newRoomName.trim()) &&
+    selectedRoomId &&
     (selectedMode === "video_room" || images.length > 0);
 
   // ── Scanning overlay — full screen while AI processes ─────────────────────
@@ -993,23 +1057,169 @@ export default function ScanScreen() {
       <ScrollView
         contentContainerStyle={[styles.scroll, { paddingBottom: insets.bottom + 32 }]}
       >
+        {launchStep === "property" && (
+          <View style={styles.section}>
+            <Text style={[styles.sectionLabel, { color: colors.mutedForeground }]}>PROPERTY</Text>
+            {propertiesLoading ? (
+              <ActivityIndicator color={colors.primary} />
+            ) : (properties ?? []).length === 0 ? (
+              <EmptyState
+                icon="home"
+                title="Create a property first"
+                subtitle="Scans need a property before items can be filed."
+              />
+            ) : (
+              (properties ?? []).map((property) => (
+                <Pressable
+                  key={property.id}
+                  onPress={() => {
+                    clearCaptureState();
+                    setSelectedFileId(property.id);
+                    setSelectedRoomId("");
+                    setNewRoomName("");
+                  }}
+                  style={({ pressed }) => [
+                    styles.selectionRow,
+                    {
+                      backgroundColor: colors.card,
+                      borderColor: colors.border,
+                      borderRadius: colors.radius,
+                      opacity: pressed ? 0.86 : 1,
+                    },
+                  ]}
+                >
+                  <View style={[styles.modeIcon, { backgroundColor: colors.secondary }]}>
+                    <Feather name="home" size={20} color={colors.primary} />
+                  </View>
+                  <Text style={[styles.selectionTitle, { color: colors.foreground }]}>{property.name}</Text>
+                  <Feather name="chevron-right" size={18} color={colors.mutedForeground} />
+                </Pressable>
+              ))
+            )}
+          </View>
+        )}
+
+        {launchStep === "room" && (
+          <View style={styles.section}>
+            <View style={styles.stepHeader}>
+              {!paramFileId && (
+                <Pressable
+                  onPress={() => {
+                    clearCaptureState();
+                    setSelectedFileId("");
+                    setSelectedRoomId("");
+                    setNewRoomName("");
+                  }}
+                  hitSlop={8}
+                  style={styles.stepBackButton}
+                >
+                  <Feather name="chevron-left" size={18} color={colors.primary} />
+                  <Text style={[styles.stepBackText, { color: colors.primary }]}>Property</Text>
+                </Pressable>
+              )}
+              <Text style={[styles.sectionLabel, { color: colors.mutedForeground }]}>
+                ROOM IN {selectedPropertyName.toUpperCase()}
+              </Text>
+            </View>
+
+            {roomsLoading ? (
+              <ActivityIndicator color={colors.primary} />
+            ) : (rooms ?? []).length === 0 ? (
+              <View style={[styles.emptyRoomCard, { backgroundColor: colors.card, borderColor: colors.border, borderRadius: colors.radius }]}>
+                <EmptyState
+                  icon="box"
+                  title="Create a room before scanning"
+                  subtitle="This scan will save items into the room you create."
+                />
+                <TextInput
+                  value={newRoomName}
+                  onChangeText={setNewRoomName}
+                  placeholder="e.g. Living Room, Kitchen"
+                  placeholderTextColor={colors.mutedForeground}
+                  autoCapitalize="words"
+                  style={[
+                    styles.roomInput,
+                    {
+                      borderColor: newRoomName.trim() ? colors.primary : colors.border,
+                      borderRadius: colors.radius,
+                      color: colors.foreground,
+                      backgroundColor: colors.muted,
+                    },
+                  ]}
+                />
+                <Pressable
+                  onPress={() => void createRoomBeforeScan()}
+                  disabled={!newRoomName.trim()}
+                  style={({ pressed }) => [
+                    styles.scanBtn,
+                    {
+                      backgroundColor: !newRoomName.trim() ? colors.muted : colors.primary,
+                      borderRadius: colors.radius,
+                      opacity: pressed ? 0.85 : 1,
+                    },
+                  ]}
+                >
+                  <Feather name="plus" size={18} color={!newRoomName.trim() ? colors.mutedForeground : colors.primaryForeground} />
+                  <Text style={[styles.scanBtnText, { color: !newRoomName.trim() ? colors.mutedForeground : colors.primaryForeground }]}>
+                    Create room
+                  </Text>
+                </Pressable>
+              </View>
+            ) : (
+              (rooms ?? []).map((room) => (
+                <Pressable
+                  key={room.id}
+                  onPress={() => {
+                    clearCaptureState();
+                    setSelectedRoomId(room.id);
+                    setNewRoomName("");
+                  }}
+                  style={({ pressed }) => [
+                    styles.selectionRow,
+                    {
+                      backgroundColor: colors.card,
+                      borderColor: colors.border,
+                      borderRadius: colors.radius,
+                      opacity: pressed ? 0.86 : 1,
+                    },
+                  ]}
+                >
+                  <View style={[styles.modeIcon, { backgroundColor: colors.secondary }]}>
+                    <Feather name="box" size={20} color={colors.primary} />
+                  </View>
+                  <Text style={[styles.selectionTitle, { color: colors.foreground }]}>{room.name}</Text>
+                  <Feather name="chevron-right" size={18} color={colors.mutedForeground} />
+                </Pressable>
+              ))
+            )}
+          </View>
+        )}
+
         {/* Scan mode cards */}
+        {launchStep === "type" && (
         <View style={styles.section}>
-          <Text style={[styles.sectionLabel, { color: colors.mutedForeground }]}>SCAN TYPE</Text>
+          <View style={styles.stepHeader}>
+            {!paramRoomId && (
+              <Pressable
+                onPress={() => {
+                  clearCaptureState();
+                  setSelectedRoomId("");
+                }}
+                hitSlop={8}
+                style={styles.stepBackButton}
+              >
+                <Feather name="chevron-left" size={18} color={colors.primary} />
+                <Text style={[styles.stepBackText, { color: colors.primary }]}>Room</Text>
+              </Pressable>
+            )}
+            <Text style={[styles.sectionLabel, { color: colors.mutedForeground }]}>
+              SCAN TYPE FOR {selectedRoomName.toUpperCase()}
+            </Text>
+          </View>
           {SCAN_MODES.map((m) => (
             <Pressable
               key={m.mode}
-              onPress={() => {
-                if (m.comingSoon) return;
-                if (multiPhotoCameraTimerRef.current) {
-                  clearTimeout(multiPhotoCameraTimerRef.current);
-                  multiPhotoCameraTimerRef.current = null;
-                }
-                setSelectedMode(m.mode);
-                setImages([]);
-                setScanError(null);
-                void takePhoto(m.mode, m.mode !== "multi_photo_room");
-              }}
+              onPress={() => chooseScanMode(m.mode, m.comingSoon)}
               style={({ pressed }) => [
                 styles.modeCard,
                 {
@@ -1070,9 +1280,10 @@ export default function ScanScreen() {
             </Pressable>
           ))}
         </View>
+        )}
 
         {/* Location */}
-        {selectedMode && selectedMode !== "video_room" && (
+        {false && selectedMode && selectedMode !== "video_room" && (
           <View style={styles.section}>
             <Text style={[styles.sectionLabel, { color: colors.mutedForeground }]}>LOCATION</Text>
 
@@ -1203,7 +1414,7 @@ export default function ScanScreen() {
             ) : (
               <View style={{ flexDirection: "row", gap: 10 }}>
                 <Pressable
-                  onPress={() => void takePhoto()}
+                  onPress={() => void takePhoto(selectedMode, selectedMode !== "multi_photo_room")}
                   style={({ pressed }) => [
                     styles.photoBtn,
                     { backgroundColor: colors.card, borderColor: colors.border, borderRadius: colors.radius, opacity: pressed ? 0.8 : 1 },
@@ -1354,6 +1565,19 @@ const styles = StyleSheet.create({
   section: { gap: 12 },
   sectionLabel: { fontSize: 11, fontFamily: "Inter_600SemiBold", letterSpacing: 0.8 },
   fieldLabel: { fontSize: 12, fontFamily: "Inter_500Medium" },
+  stepHeader: { gap: 8 },
+  stepBackButton: { flexDirection: "row", alignItems: "center", alignSelf: "flex-start", gap: 2 },
+  stepBackText: { fontSize: 13, fontFamily: "Inter_600SemiBold" },
+  selectionRow: { borderWidth: 1, padding: 14, flexDirection: "row", alignItems: "center", gap: 12 },
+  selectionTitle: { flex: 1, fontSize: 15, fontFamily: "Inter_600SemiBold" },
+  emptyRoomCard: { borderWidth: 1, padding: 16, gap: 12 },
+  roomInput: {
+    borderWidth: 1.5,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: 14,
+    fontFamily: "Inter_400Regular",
+  },
   modeCard: { borderWidth: 1, padding: 14, flexDirection: "row", alignItems: "flex-start", gap: 12 },
   modeIcon: { width: 40, height: 40, borderRadius: 10, alignItems: "center", justifyContent: "center" },
   modeTitle: { fontSize: 15, fontFamily: "Inter_600SemiBold" },

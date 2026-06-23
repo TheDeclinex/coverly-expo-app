@@ -1,4 +1,5 @@
 import { Feather } from "@expo/vector-icons";
+import { useQuery } from "@tanstack/react-query";
 import Constants from "expo-constants";
 import * as Haptics from "expo-haptics";
 import { Stack, router, type Href } from "expo-router";
@@ -12,6 +13,13 @@ import { useAuth } from "@/context/AuthContext";
 import { useEntitlements } from "@/context/EntitlementsContext";
 import { useAccountProfile } from "@/hooks/useAccountProfile";
 import { useColors } from "@/hooks/useColors";
+import {
+  loadUsageAllowances,
+  type UsageAllowance,
+} from "@/lib/usage-allowances";
+import {
+  usageWarningLevel,
+} from "@/lib/usage-allowances-model";
 
 const privacyUrl = process.env.EXPO_PUBLIC_PRIVACY_URL;
 const termsUrl = process.env.EXPO_PUBLIC_TERMS_URL;
@@ -22,6 +30,13 @@ export default function AccountScreen() {
   const { session, signOut } = useAuth();
   const { profile, isAdmin, isLoading, isError } = useAccountProfile();
   const { subscriptionStatus, subscriptionPeriodEnd, purchaseLoading, restorePurchases, gatesEnabled } = useEntitlements();
+  const usageQuery = useQuery({
+    queryKey: ["usage-allowances", session?.user.id],
+    queryFn: loadUsageAllowances,
+    enabled: !!session,
+    staleTime: 30_000,
+    retry: 1,
+  });
 
   const email = profile?.email ?? session?.user.email ?? "Email unavailable";
   const displayName = profile?.fullName ?? null;
@@ -107,6 +122,14 @@ export default function AccountScreen() {
           <AccountRow icon="list" title="Plan access" subtitle={profile?.plan === "Free" ? "One property; premium actions show an upgrade prompt" : "AI features included · Fair use applies"} value={gatesEnabled ? "Enforced" : "Test mode"} last />
         </AccountSection>
 
+        <UsageAllowanceCard
+          allowances={usageQuery.data ?? []}
+          isLoading={usageQuery.isLoading}
+          isError={usageQuery.isError}
+          isAdmin={isAdmin}
+          onUpgrade={() => router.push("/upgrade" as Href)}
+        />
+
         <AccountSection title="Claim packs">
           <AccountRow
             icon="package"
@@ -149,6 +172,102 @@ export default function AccountScreen() {
   );
 }
 
+function formatResetDate(value: string | null): string {
+  if (!value) return "your next monthly reset";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "your next monthly reset";
+  return date.toLocaleDateString("en-NZ", { day: "numeric", month: "short" });
+}
+
+function featureLabel(feature: UsageAllowance["feature"]): string {
+  return feature === "ai_scan" ? "AI scans" : "Replacement lookups";
+}
+
+function featureDescription(allowance: UsageAllowance): string {
+  if (!allowance.isLimited) return "Included with your plan · Fair use applies";
+  const remaining = allowance.remainingUnits ?? Math.max(0, allowance.limitUnits - allowance.usedUnits - allowance.reservedUnits);
+  return `${allowance.usedUnits} / ${allowance.limitUnits} used this month · ${remaining} remaining`;
+}
+
+function UsageAllowanceCard({
+  allowances,
+  isLoading,
+  isError,
+  isAdmin,
+  onUpgrade,
+}: {
+  allowances: UsageAllowance[];
+  isLoading: boolean;
+  isError: boolean;
+  isAdmin: boolean;
+  onUpgrade: () => void;
+}) {
+  const colors = useColors();
+  const aiScans = allowances.find((row) => row.feature === "ai_scan") ?? null;
+  const replacementPricing = allowances.find((row) => row.feature === "replacement_pricing") ?? null;
+  const resetAt = aiScans?.resetAt ?? replacementPricing?.resetAt ?? null;
+  const isLimited = allowances.some((row) => row.isLimited);
+  const hasEmptyAllowance = allowances.some((row) => usageWarningLevel(row) === "empty");
+  const hasLowAllowance = allowances.some((row) => usageWarningLevel(row) === "low");
+
+  let helper = "Loading your monthly usage…";
+  if (isError) helper = "Usage allowance could not be loaded. Your account access is unchanged.";
+  else if (!isLoading && allowances.length === 0) helper = "Usage allowance is not available yet.";
+  else if (!isLimited || isAdmin) helper = "AI scans and replacement pricing are included with your plan. Fair use applies.";
+  else if (hasEmptyAllowance) helper = "One of your Free monthly allowances is used up. Upgrade to keep using premium AI features.";
+  else if (hasLowAllowance) helper = "You are getting close to one of your Free monthly limits.";
+  else helper = `Free allowances reset on ${formatResetDate(resetAt)}.`;
+
+  return (
+    <View style={[styles.usageCard, { backgroundColor: colors.card, borderColor: colors.border, borderRadius: colors.radius }]}>
+      <View style={styles.usageHeader}>
+        <View style={[styles.usageIcon, { backgroundColor: colors.accent }]}>
+          <Feather name="activity" size={17} color={colors.primary} />
+        </View>
+        <View style={styles.usageHeaderCopy}>
+          <Text style={[styles.usageTitle, { color: colors.foreground }]}>Monthly usage</Text>
+          <Text style={[styles.usageHelper, { color: isError ? colors.warning : colors.mutedForeground }]}>{helper}</Text>
+        </View>
+      </View>
+
+      {isLoading ? (
+        <Text style={[styles.usagePlaceholder, { color: colors.mutedForeground }]}>Checking allowances…</Text>
+      ) : isError || allowances.length === 0 ? null : (
+        <View style={styles.usageRows}>
+          {[aiScans, replacementPricing].filter((row): row is UsageAllowance => row !== null).map((row) => {
+            const warning = usageWarningLevel(row);
+            const tone = warning === "empty" ? colors.destructive : warning === "low" ? colors.warning : colors.foreground;
+            return (
+              <View key={row.feature} style={[styles.usageRow, { borderTopColor: colors.border }]}>
+                <View style={styles.usageRowCopy}>
+                  <Text style={[styles.usageRowTitle, { color: colors.foreground }]}>{featureLabel(row.feature)}</Text>
+                  <Text style={[styles.usageRowSubtitle, { color: tone }]}>{featureDescription(row)}</Text>
+                </View>
+                {row.isLimited ? (
+                  <Text style={[styles.usagePill, { color: tone, backgroundColor: warning === "none" ? colors.secondary : colors.accent }]}>
+                    {row.remainingUnits ?? 0} left
+                  </Text>
+                ) : (
+                  <Text style={[styles.usagePill, { color: colors.primary, backgroundColor: colors.accent }]}>Included</Text>
+                )}
+              </View>
+            );
+          })}
+          {isLimited ? (
+            <Text style={[styles.usageReset, { color: colors.mutedForeground }]}>Resets {formatResetDate(resetAt)}</Text>
+          ) : null}
+        </View>
+      )}
+
+      {isLimited && hasEmptyAllowance ? (
+        <Text onPress={onUpgrade} style={[styles.usageUpgrade, { color: colors.primary }]}>
+          Upgrade Coverly
+        </Text>
+      ) : null}
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
   content: { padding: 16, gap: 14 },
   profileCard: { borderWidth: 1, padding: 16, flexDirection: "row", alignItems: "center", gap: 13 },
@@ -162,4 +281,19 @@ const styles = StyleSheet.create({
   badgeText: { fontSize: 11, fontFamily: "Inter_600SemiBold" },
   version: { fontSize: 11, fontFamily: "Inter_400Regular" },
   profileWarning: { fontSize: 11, fontFamily: "Inter_400Regular" },
+  usageCard: { borderWidth: 1, padding: 16, gap: 13 },
+  usageHeader: { flexDirection: "row", gap: 11, alignItems: "flex-start" },
+  usageIcon: { width: 34, height: 34, borderRadius: 17, alignItems: "center", justifyContent: "center" },
+  usageHeaderCopy: { flex: 1, gap: 3 },
+  usageTitle: { fontSize: 14, fontFamily: "Inter_700Bold" },
+  usageHelper: { fontSize: 12, lineHeight: 17, fontFamily: "Inter_400Regular" },
+  usagePlaceholder: { fontSize: 12, fontFamily: "Inter_400Regular" },
+  usageRows: { gap: 0 },
+  usageRow: { borderTopWidth: StyleSheet.hairlineWidth, paddingVertical: 10, flexDirection: "row", gap: 10, alignItems: "center" },
+  usageRowCopy: { flex: 1, gap: 3 },
+  usageRowTitle: { fontSize: 13, fontFamily: "Inter_600SemiBold" },
+  usageRowSubtitle: { fontSize: 11, lineHeight: 16, fontFamily: "Inter_400Regular" },
+  usagePill: { overflow: "hidden", borderRadius: 999, paddingHorizontal: 9, paddingVertical: 4, fontSize: 11, fontFamily: "Inter_700Bold" },
+  usageReset: { marginTop: 2, fontSize: 11, fontFamily: "Inter_400Regular" },
+  usageUpgrade: { alignSelf: "flex-start", fontSize: 12, fontFamily: "Inter_700Bold" },
 });

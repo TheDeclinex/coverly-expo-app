@@ -95,6 +95,18 @@ function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): 
   });
 }
 
+function createUsageIdempotencyKey(): string {
+  const randomUuid =
+    typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+      ? crypto.randomUUID()
+      : "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
+          const r = (Math.random() * 16) | 0;
+          return (c === "x" ? r : (r & 0x3) | 0x8).toString(16);
+        });
+
+  return `scan:${Date.now()}:${randomUuid}`;
+}
+
 /**
  * Run an AI-assisted inventory scan via the scan-room-photo Edge Function.
  *
@@ -130,6 +142,7 @@ export async function runAiScan(input: ScanInput): Promise<ScanResult> {
 
     const productionPayload = {
       mode: toProductionMode(input.mode),
+      usageIdempotencyKey: input.usageIdempotencyKey ?? createUsageIdempotencyKey(),
       images: input.images.map((img, i) => ({
         id: `photo_${i + 1}`,
         imageBase64: img.base64,
@@ -146,6 +159,7 @@ export async function runAiScan(input: ScanInput): Promise<ScanResult> {
     const usesExpectedProject = supabaseHost.startsWith(`${EXPECTED_SCAN_PROJECT_REF}.`);
     scanLog("payload construction completed", {
       productionMode: productionPayload.mode,
+      hasUsageIdempotencyKey: !!productionPayload.usageIdempotencyKey,
       imageCount: productionPayload.images.length,
       approxBase64Chars: productionPayload.images.reduce((sum, img) => sum + img.imageBase64.length, 0),
       supabaseHost,
