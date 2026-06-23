@@ -23,9 +23,10 @@
 import { serve } from 'https://deno.land/std@0.177.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.3';
 
-const EDGE_VERSION = 'v26.2.1';
+const EDGE_VERSION = 'v26.3.0';
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL') ?? '';
 const SUPABASE_ANON_KEY = Deno.env.get('SUPABASE_ANON_KEY') ?? '';
+const SERPER_TIMEOUT_MS = 15_000;
 
 // ── CORS ─────────────────────────────────────────────────────────────────────
 const CORS_HEADERS = {
@@ -60,6 +61,7 @@ interface PriceSearchRequest {
   searchQuery?: string;
   num?: number;
   itemId?: string;
+  usageIdempotencyKey?: string;
 }
 
 interface PriceSearchResult {
@@ -72,6 +74,125 @@ interface PriceSearchResult {
   thumbnail?: string;
   position: number;
   matchType: 'best_match' | 'close_match' | 'similar_item';
+}
+
+interface UsageReservationResult {
+  reservation_id?: string;
+  feature?: string;
+  operation?: string;
+  status?: string;
+  allowed?: boolean;
+  would_have_blocked?: boolean;
+  entitlement_mode?: string;
+  effective_plan?: string;
+  units?: number;
+  limit_units?: number;
+  used_units?: number;
+  reserved_units?: number;
+  remaining_units?: number | null;
+  expires_at?: string;
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function normaliseUsageIdempotencyKey(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  if (!trimmed || trimmed.length > 200) return null;
+  return trimmed;
+}
+
+function usageDiagnostics(result: UsageReservationResult | null): Record<string, unknown> | undefined {
+  if (!result) return undefined;
+  return {
+    reservationId: result.reservation_id,
+    feature: result.feature,
+    operation: result.operation,
+    status: result.status,
+    allowed: result.allowed,
+    wouldHaveBlocked: result.would_have_blocked,
+    entitlementMode: result.entitlement_mode,
+    effectivePlan: result.effective_plan,
+    units: result.units,
+    limitUnits: result.limit_units,
+    usedUnits: result.used_units,
+    reservedUnits: result.reserved_units,
+    remainingUnits: result.remaining_units,
+    expiresAt: result.expires_at,
+  };
+}
+
+async function reserveUsage(
+  client: ReturnType<typeof createClient>,
+  idempotencyKey: string,
+  metadata: Record<string, unknown>,
+): Promise<UsageReservationResult> {
+  const { data, error } = await client.rpc('reserve_my_feature_usage', {
+    feature: 'replacement_pricing',
+    operation: 'search',
+    idempotency_key: idempotencyKey,
+    metadata,
+  });
+
+  if (error) {
+    throw new Error(`Usage reserve failed: ${error.message}`);
+  }
+
+  return (data ?? {}) as UsageReservationResult;
+}
+
+async function commitUsage(
+  client: ReturnType<typeof createClient>,
+  reservationId: string,
+): Promise<void> {
+  const { error } = await client.rpc('commit_my_feature_usage', {
+    reservation_id: reservationId,
+  });
+
+  if (error) {
+    throw new Error(`Usage commit failed: ${error.message}`);
+  }
+}
+
+async function refundUsage(
+  client: ReturnType<typeof createClient> | null,
+  reservationId: string | null,
+  reason: string,
+): Promise<void> {
+  if (!client || !reservationId) return;
+
+  const { error } = await client.rpc('refund_my_feature_usage', {
+    reservation_id: reservationId,
+    reason,
+  });
+
+  if (error) {
+    console.error(JSON.stringify({
+      source: 'replacement-price-search',
+      edgeVersion: EDGE_VERSION,
+      stage: 'usage_refund_failed',
+      reservationId,
+      reason,
+      message: error.message,
+    }));
+  }
+}
+
+async function fetchWithTimeout(
+  url: string,
+  init: RequestInit,
+  timeoutMs: number,
+): Promise<Response> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    return await fetch(url, { ...init, signal: controller.signal });
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 function buildQuery(req: PriceSearchRequest): string {
@@ -179,11 +300,13 @@ serve(async (req: Request) => {
   const jwt = authHeader.slice(7);
 
   let userId: string | null = null;
+  let userClient: ReturnType<typeof createClient> | null = null;
   try {
-    const client = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+    userClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
       global: { headers: { Authorization: `Bearer ${jwt}` } },
+      auth: { persistSession: false, autoRefreshToken: false },
     });
-    const { data, error } = await client.auth.getUser(jwt);
+    const { data, error } = await userClient.auth.getUser(jwt);
     if (error) {
       authDiag.getUserErrorMessage = error.message;
       return jsonResponse({
@@ -248,6 +371,15 @@ serve(async (req: Request) => {
   const baseQuery = buildQuery({ ...body, itemName });
   const queryUsed = buildRangedQuery(baseQuery, minPrice, maxPrice);
 
+  const usageIdempotencyKey = normaliseUsageIdempotencyKey(body.usageIdempotencyKey);
+  if (!usageIdempotencyKey) {
+    return jsonResponse({
+      success: false,
+      errorCode: 'MISSING_IDEMPOTENCY_KEY',
+      error: 'Replacement price search is missing a usage idempotency key. Please update the app and try again.',
+    }, 400, origin);
+  }
+
   const diagnostics: Record<string, unknown> = {
     edgeVersion: EDGE_VERSION,
     queryUsed,
@@ -262,51 +394,143 @@ serve(async (req: Request) => {
     requestOrigin: origin,
   };
 
+  let usageReservation: UsageReservationResult | null = null;
+  let usageReservationId: string | null = null;
+
   try {
-    const shopRes = await fetch(SERPER_SHOPPING_URL, {
+    usageReservation = await reserveUsage(userClient!, usageIdempotencyKey, {
+      itemId: body.itemId ?? null,
+      country: (body.country ?? 'NZ').toUpperCase(),
+      num,
+      hasSearchQuery: !!searchQueryFallback,
+      hasBrand: !!body.brand,
+      hasBarcode: !!body.barcode,
+      edgeVersion: EDGE_VERSION,
+    });
+    usageReservationId = usageReservation.reservation_id ?? null;
+    diagnostics.usage = usageDiagnostics(usageReservation);
+  } catch (error) {
+    return jsonResponse({
+      success: false,
+      errorCode: 'USAGE_RESERVE_FAILED',
+      error: 'Could not check replacement pricing allowance. Please try again.',
+      diagnostics: {
+        ...diagnostics,
+        usageError: errorMessage(error),
+      },
+    }, 500, origin);
+  }
+
+  if (usageReservation.allowed !== true) {
+    return jsonResponse({
+      success: false,
+      errorCode: 'REPLACEMENT_PRICING_LIMIT_REACHED',
+      error: 'Your Free monthly replacement price lookups have been used. Upgrade to continue searching.',
+      usage: usageDiagnostics(usageReservation),
+      diagnostics,
+    }, 402, origin);
+  }
+
+  try {
+    const shopRes = await fetchWithTimeout(SERPER_SHOPPING_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-API-KEY': serperKey },
       body: JSON.stringify({ q: queryUsed, gl: 'nz', hl: 'en', num }),
-    });
+    }, SERPER_TIMEOUT_MS);
 
     diagnostics.shoppingStatus = shopRes.status;
 
     if (!shopRes.ok) {
       const errText = await shopRes.text();
       diagnostics.shoppingError = errText.slice(0, 200);
+      await refundUsage(userClient, usageReservationId, 'serper_shopping_provider_failure');
       return jsonResponse({
         success: false, errorCode: 'SERPER_ERROR',
         error: `Serper Shopping returned ${shopRes.status}`, diagnostics,
       }, 502, origin);
     }
 
-    const shopData = await shopRes.json();
+    let shopData: unknown;
+    try {
+      shopData = await shopRes.json();
+    } catch (error) {
+      await refundUsage(userClient, usageReservationId, 'serper_shopping_invalid_response');
+      return jsonResponse({
+        success: false,
+        errorCode: 'SERPER_INVALID_RESPONSE',
+        error: `Serper Shopping returned invalid JSON: ${errorMessage(error)}`,
+        diagnostics,
+      }, 502, origin);
+    }
     let results = mapShoppingResults(shopData, itemName, num);
     diagnostics.shoppingResultCount = results.length;
 
     // Organic fallback if no priced results
-    if (results.filter(r => r.price != null).length === 0) {
+    if (results.filter(r => r.price != null && r.price > 0).length === 0) {
       diagnostics.organicFallback = true;
-      const orgRes = await fetch(SERPER_ORGANIC_URL, {
+      const orgRes = await fetchWithTimeout(SERPER_ORGANIC_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-API-KEY': serperKey },
         body: JSON.stringify({ q: queryUsed, gl: 'nz', hl: 'en', num }),
-      });
+      }, SERPER_TIMEOUT_MS);
       diagnostics.organicStatus = orgRes.status;
       if (orgRes.ok) {
-        const orgData = await orgRes.json();
+        let orgData: unknown;
+        try {
+          orgData = await orgRes.json();
+        } catch (error) {
+          await refundUsage(userClient, usageReservationId, 'serper_organic_invalid_response');
+          return jsonResponse({
+            success: false,
+            errorCode: 'SERPER_INVALID_RESPONSE',
+            error: `Serper Organic returned invalid JSON: ${errorMessage(error)}`,
+            diagnostics,
+          }, 502, origin);
+        }
         const organicResults = mapOrganicResults(orgData, itemName, num);
         results = [...results, ...organicResults].slice(0, num);
         diagnostics.organicResultCount = organicResults.length;
+      } else {
+        diagnostics.organicError = (await orgRes.text()).slice(0, 200);
+        await refundUsage(userClient, usageReservationId, 'serper_organic_provider_failure');
+        return jsonResponse({
+          success: false,
+          errorCode: 'SERPER_ERROR',
+          error: `Serper Organic returned ${orgRes.status}`,
+          diagnostics,
+        }, 502, origin);
       }
     }
 
-    const prices = results.map(r => r.price).filter((p): p is number => p != null);
+    const prices = results.map(r => r.price).filter((p): p is number => p != null && p > 0);
     const stats = priceStats(prices);
+
+    if (!prices.length) {
+      await refundUsage(userClient, usageReservationId, 'no_usable_priced_results');
+      diagnostics.usageRefunded = true;
+      return jsonResponse({ success: true, results, queryUsed, ...(stats ?? {}), diagnostics }, 200, origin);
+    }
+
+    if (usageReservationId) {
+      await commitUsage(userClient!, usageReservationId);
+      diagnostics.usageCommitted = true;
+    }
 
     return jsonResponse({ success: true, results, queryUsed, ...(stats ?? {}), diagnostics }, 200, origin);
   } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
+    const msg = errorMessage(e);
+    const isTimeout = e instanceof DOMException && e.name === 'AbortError';
+    if (isTimeout) {
+      await refundUsage(userClient, usageReservationId, 'serper_timeout');
+      return jsonResponse({
+        success: false,
+        errorCode: 'SERPER_TIMEOUT',
+        error: 'Replacement price search timed out. Please try again.',
+        diagnostics,
+      }, 504, origin);
+    }
+
+    await refundUsage(userClient, usageReservationId, 'replacement_price_search_error');
     return jsonResponse({ success: false, errorCode: 'INTERNAL_ERROR', error: msg, diagnostics }, 500, origin);
   }
 });

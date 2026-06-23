@@ -12,6 +12,7 @@ export interface ReplacementPriceSearchRequest {
   searchQuery?: string;
   num?: number;
   itemId?: string;
+  usageIdempotencyKey?: string;
 }
 
 export type ReplacementMatchType =
@@ -91,15 +92,33 @@ export function filterReplacementResults(
   });
 }
 
+function createReplacementPricingUsageKey(): string {
+  const randomUuid =
+    typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+      ? crypto.randomUUID()
+      : "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
+          const r = (Math.random() * 16) | 0;
+          return (c === "x" ? r : (r & 0x3) | 0x8).toString(16);
+        });
+
+  return `replacement-pricing:${Date.now()}:${randomUuid}`;
+}
+
 export async function searchReplacementPrices(
   body: ReplacementPriceSearchRequest,
 ): Promise<ReplacementPriceSearchSuccess> {
+  const requestBody: ReplacementPriceSearchRequest = {
+    ...body,
+    usageIdempotencyKey:
+      body.usageIdempotencyKey ?? createReplacementPricingUsageKey(),
+  };
+
   const { data, error } = await supabase.functions.invoke<ReplacementPriceSearchResponse>(
     "replacement-price-search",
-    { body },
+    { body: requestBody },
   );
 
-  if (error) throw new Error(error.message || "Replacement price search failed");
+  if (error && !data) throw new Error(error.message || "Replacement price search failed");
   if (!data) throw new Error("Replacement price search returned no data");
   if (!data.success) throw new Error(data.error || "Replacement price search failed");
 
