@@ -82,4 +82,7 @@ export interface ScanResult {
   status: "success" | "not_configured" | "error";
   items: ScanDetectedItem[];
   errorMessage?: string;
+  errorCode?: string;
+  httpStatus?: number;
+  responseBody?: unknown;
 }

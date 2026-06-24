@@ -93,12 +93,23 @@ export default function AddPropertyScreen() {
   const [propertyType, setPropertyType] = useState<string | null>(null);
   const [address, setAddress] = useState("");
   const [coverAmount, setCoverAmount] = useState("");
+  const [insurerName, setInsurerName] = useState("");
+  const [policyNumber, setPolicyNumber] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const trimmedName = name.trim();
+  const parsedCoverAmount = parseFloat(coverAmount.replace(/[^0-9.]/g, ""));
+  const hasValidCoverAmount = Number.isFinite(parsedCoverAmount) && parsedCoverAmount > 0;
+  const canCreate = !!trimmedName && hasValidCoverAmount && !saving;
+
   const handleSave = async () => {
-    if (!name.trim()) {
+    if (!trimmedName) {
       setError("Property name is required.");
+      return;
+    }
+    if (!hasValidCoverAmount) {
+      setError("Add your contents cover amount to compare against your inventory value.");
       return;
     }
     if (!session?.user) return;
@@ -116,9 +127,11 @@ export default function AddPropertyScreen() {
     let data;
     try {
       data = await createProperty({
-        name,
+        name: trimmedName,
         propertyType,
-        contentsSumInsured: coverAmount ? parseFloat(coverAmount) : null,
+        contentsSumInsured: parsedCoverAmount,
+        insurerName: insurerName.trim() || null,
+        policyNumber: policyNumber.trim() || null,
       });
     } catch (err) {
       setSaving(false);
@@ -159,7 +172,10 @@ export default function AddPropertyScreen() {
             <FormField label="Property name" required colors={colors}>
               <InputBox
                 value={name}
-                onChangeText={setName}
+                onChangeText={(value) => {
+                  setName(value);
+                  setError(null);
+                }}
                 placeholder="e.g. Main home, Beach house…"
                 colors={colors}
               />
@@ -202,7 +218,7 @@ export default function AddPropertyScreen() {
               <InputBox
                 value={address}
                 onChangeText={setAddress}
-                placeholder="e.g. 12 Oak Street, London"
+                placeholder="e.g. 12 Queen Street, Auckland"
                 colors={colors}
               />
             </FormField>
@@ -211,13 +227,16 @@ export default function AddPropertyScreen() {
           {/* ── Insurance section ── */}
           <View style={styles.section}>
             <Text style={[styles.sectionTitle, { color: colors.mutedForeground }]}>
-              INSURANCE (OPTIONAL)
+              INSURANCE DETAILS
             </Text>
 
-            <FormField label="Recorded contents cover amount" colors={colors}>
+            <FormField label="Contents cover amount" required colors={colors}>
               <InputBox
                 value={coverAmount}
-                onChangeText={setCoverAmount}
+                onChangeText={(value) => {
+                  setCoverAmount(value.replace(/[^0-9.]/g, ""));
+                  setError(null);
+                }}
                 placeholder="e.g. 50000"
                 keyboardType="decimal-pad"
                 colors={colors}
@@ -225,6 +244,24 @@ export default function AddPropertyScreen() {
               <Text style={{ fontSize: 11, fontFamily: "Inter_400Regular", color: colors.mutedForeground }}>
                 Used to track how your inventory value compares to your recorded cover.
               </Text>
+            </FormField>
+
+            <FormField label="Insurer (optional)" colors={colors}>
+              <InputBox
+                value={insurerName}
+                onChangeText={setInsurerName}
+                placeholder="e.g. Tower, AMI, State"
+                colors={colors}
+              />
+            </FormField>
+
+            <FormField label="Policy number (optional)" colors={colors}>
+              <InputBox
+                value={policyNumber}
+                onChangeText={setPolicyNumber}
+                placeholder="Optional policy reference"
+                colors={colors}
+              />
             </FormField>
           </View>
 
@@ -239,13 +276,13 @@ export default function AddPropertyScreen() {
           {/* ── Save ── */}
           <Pressable
             onPress={handleSave}
-            disabled={saving}
+            disabled={!canCreate}
             style={({ pressed }) => [
               styles.saveBtn,
               {
                 backgroundColor: colors.primary,
                 borderRadius: colors.radius,
-                opacity: saving || pressed ? 0.75 : 1,
+                opacity: !canCreate || pressed ? 0.55 : 1,
               },
             ]}
           >

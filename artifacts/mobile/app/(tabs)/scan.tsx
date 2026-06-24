@@ -2,7 +2,7 @@ import { Feather } from "@expo/vector-icons";
 import { Image } from "expo-image";
 import * as Haptics from "expo-haptics";
 import * as ImagePicker from "expo-image-picker";
-import { Stack, router, useLocalSearchParams } from "expo-router";
+import { Stack, router, useLocalSearchParams, type Href } from "expo-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import React, { useEffect, useRef, useState } from "react";
 import {
@@ -25,6 +25,7 @@ import { AiScanningOverlay } from "@/components/AiScanningOverlay";
 import { ContextBackButton } from "@/components/ContextBackButton";
 import { EmptyState } from "@/components/EmptyState";
 import { ExpandableImage } from "@/components/ExpandableImage";
+import { LimitReachedModal } from "@/components/LimitReachedModal";
 import { useToast } from "@/components/Toast";
 import { useAuth } from "@/context/AuthContext";
 import { useEntitlements } from "@/context/EntitlementsContext";
@@ -36,6 +37,7 @@ import {
   runAiScan,
   validateScanInput,
 } from "@/lib/scan-service";
+import { normalizeLimitError, type NormalizedLimitError } from "@/lib/limit-errors";
 import {
   clearScanPhotoUploadCache,
   formatUploadFailure,
@@ -140,6 +142,7 @@ export default function ScanScreen() {
   const [scanStatus, setScanStatus] = useState<ScanStatus>("idle");
   const [detectedItems, setDetectedItems] = useState<ScanDetectedItem[]>([]);
   const [scanError, setScanError] = useState<string | null>(null);
+  const [limitModal, setLimitModal] = useState<NormalizedLimitError | null>(null);
   const [savingIds, setSavingIds] = useState<Set<number>>(new Set());
   const [scanSaveError, setScanSaveError] = useState<string | null>(null);
   const [partialFailures, setPartialFailures] = useState<PartialFailure[]>([]);
@@ -203,6 +206,7 @@ export default function ScanScreen() {
     setSelectedMode(null);
     setImages([]);
     setScanError(null);
+    setLimitModal(null);
     setMultiPhotoPromptVisible(false);
     aiScanEntitlementCheckedRef.current = false;
   };
@@ -468,13 +472,24 @@ export default function ScanScreen() {
 
     if (result.status === "not_configured") {
       setScanStatus("idle");
-      setScanError(result.errorMessage ?? "AI scan is not configured yet. Deploy the scan-room-photo Edge Function.");
+      setScanError("AI scan is not available right now. Please try again later.");
       return;
     }
 
     if (result.status === "error") {
+      const normalizedLimit = normalizeLimitError({
+        status: result.httpStatus,
+        errorCode: result.errorCode,
+        responseBody: result.responseBody,
+      });
+      if (normalizedLimit) {
+        setScanStatus("idle");
+        setScanError(null);
+        setLimitModal(normalizedLimit);
+        return;
+      }
       setScanStatus("error");
-      setScanError(result.errorMessage ?? "Scan failed. Please try again.");
+      setScanError("AI scan failed. No items were saved. Please try again.");
       return;
     }
 
@@ -678,6 +693,7 @@ export default function ScanScreen() {
     setDetectedItems([]);
     setScanStatus("idle");
     setScanError(null);
+    setLimitModal(null);
     setScanSaveError(null);
     setPartialFailures([]);
     setActivePinIndex(null);
@@ -1012,7 +1028,7 @@ export default function ScanScreen() {
     (selectedMode === "video_room" || images.length > 0);
 
   // ── Scanning overlay — full screen while AI processes ─────────────────────
-  if (isScanning) {
+  if (isScanning && !limitModal) {
     return (
       <>
         <Stack.Screen options={{ title: "Scanning…", headerShown: false }} />
@@ -1556,6 +1572,27 @@ export default function ScanScreen() {
           </View>
         </View>
       </Modal>
+      <LimitReachedModal
+        visible={!!limitModal}
+        content={limitModal}
+        onPrimary={() => {
+          setLimitModal(null);
+          router.push({ pathname: "/upgrade", params: { feature: "ai_scan" } } as Href);
+        }}
+        onSecondary={() => {
+          setLimitModal(null);
+          router.push({
+            pathname: "/(tabs)/add-item",
+            params: {
+              fileId: selectedFileId,
+              roomId: selectedRoomId,
+              fileName: selectedPropertyName,
+              roomName: selectedRoomName,
+            },
+          } as Href);
+        }}
+        onDismiss={() => setLimitModal(null)}
+      />
     </>
   );
 }

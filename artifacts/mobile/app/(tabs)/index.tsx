@@ -24,8 +24,10 @@ import Svg, { Circle } from "react-native-svg";
 import { EmptyState } from "@/components/EmptyState";
 import { ErrorState } from "@/components/ErrorState";
 import { LoadingState } from "@/components/LoadingState";
+import { RecommendedActionCard } from "@/components/RecommendedActionCard";
 import { useAuth } from "@/context/AuthContext";
 import { useEntitlements } from "@/context/EntitlementsContext";
+import { ENABLE_RECOMMENDED_ACTIONS } from "@/constants/recommendedActions";
 import { propertyTypeLabel } from "@/constants/propertyTypes";
 import { useColors } from "@/hooks/useColors";
 import { useSignedUrl } from "@/hooks/useSignedUrls";
@@ -542,6 +544,35 @@ export default function HomeScreen() {
     router.push("/(tabs)/add-property");
   };
 
+  const homeRecommendedAction = useMemo(() => {
+    if (!ENABLE_RECOMMENDED_ACTIONS) return null;
+
+    if (!properties || properties.length === 0) {
+      return {
+        body: "Add your first property",
+        detail: "Set up the home, rental, or other place you want to inventory.",
+        primaryLabel: "Add property",
+        onPrimaryPress: handleAddProperty,
+      };
+    }
+
+    const firstProperty = properties[0];
+    if ((allRooms ?? []).length === 0) {
+      return {
+        body: "Add your first room",
+        detail: "Open your property, add a room, then start recording visible items.",
+        primaryLabel: "Open property",
+        onPrimaryPress: () =>
+          router.push({
+            pathname: "/(tabs)/property/[id]",
+            params: { id: firstProperty.id, name: firstProperty.name },
+          }),
+      };
+    }
+
+    return null;
+  }, [allRooms, handleAddProperty, properties]);
+
   const renderHeader = () => {
     if (!portfolio || !properties || properties.length === 0) return null;
     return (
@@ -615,71 +646,7 @@ export default function HomeScreen() {
           )}
         </View>
 
-        {(allRooms ?? []).length === 0 && (allItems ?? []).length === 0 && (
-          <View
-            style={{
-              backgroundColor: colors.secondary,
-              borderRadius: colors.radius,
-              borderWidth: 1,
-              borderColor: colors.border,
-              padding: 16,
-              gap: 12,
-            }}
-          >
-            <View style={{ gap: 4 }}>
-              <Text
-                style={{
-                  fontSize: 11,
-                  fontFamily: "Inter_600SemiBold",
-                  letterSpacing: 0.8,
-                  color: colors.primary,
-                }}
-              >
-                NEXT STEP
-              </Text>
-              <Text
-                style={{
-                  fontSize: 14,
-                  fontFamily: "Inter_400Regular",
-                  color: colors.foreground,
-                  lineHeight: 21,
-                }}
-              >
-                Open your property, add your first room, then scan items to build your inventory record.
-              </Text>
-            </View>
-            <Pressable
-              onPress={() => {
-                const first = properties[0];
-                router.push({
-                  pathname: "/(tabs)/property/[id]",
-                  params: { id: first.id, name: first.name },
-                });
-              }}
-              style={({ pressed }) => ({
-                flexDirection: "row",
-                alignItems: "center",
-                justifyContent: "center",
-                gap: 8,
-                backgroundColor: colors.primary,
-                borderRadius: colors.radius,
-                paddingVertical: 12,
-                opacity: pressed ? 0.85 : 1,
-              })}
-            >
-              <Text
-                style={{
-                  fontSize: 14,
-                  fontFamily: "Inter_600SemiBold",
-                  color: colors.primaryForeground,
-                }}
-              >
-                Continue setup
-              </Text>
-              <Feather name="arrow-right" size={14} color={colors.primaryForeground} />
-            </Pressable>
-          </View>
-        )}
+        {homeRecommendedAction ? <RecommendedActionCard {...homeRecommendedAction} /> : null}
 
         <View style={{ flexDirection: "row", gap: 10 }}>
           <Pressable
@@ -809,7 +776,8 @@ export default function HomeScreen() {
             />
           }
           ListEmptyComponent={
-            <View style={{ paddingHorizontal: 16, paddingTop: 32 }}>
+            <View style={{ paddingHorizontal: 16, paddingTop: 32, gap: 14 }}>
+              {homeRecommendedAction ? <RecommendedActionCard {...homeRecommendedAction} /> : null}
               <EmptyState
                 icon="home"
                 title="No properties yet"

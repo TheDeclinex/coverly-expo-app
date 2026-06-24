@@ -25,6 +25,21 @@ test("maps item name", () => {
   assert.deepEqual(change.patch, { name: "Samsung 65 inch TV" });
 });
 
+test("falls back from spoken item phrase into structured add-item fields", () => {
+  const changes = mapVoiceItemExtraction({
+    transcript: "Samsung 65 inch LCD TV, $2000",
+    extraction: extraction(),
+  });
+  const patch = buildSelectedVoicePatch(changes, new Set(changes.map((change) => change.id)));
+  assert.equal(patch.name, "Samsung 65 inch LCD TV");
+  assert.equal(patch.brand_maker, "Samsung");
+  assert.equal(patch.category, "Electronics");
+  assert.equal(patch.unit_estimated_price, 2000);
+  assert.equal(patch.estimated_price, 2000);
+  assert.equal(patch.original_purchase_price, 2000);
+  assert.equal(patch.notes, undefined);
+});
+
 test("maps valid quantity and rejects invalid quantity", () => {
   assert.deepEqual(mapVoiceItemExtraction({ transcript: "Set quantity to two", extraction: extraction({ quantity: 2 }) })[0].patch, { quantity: 2 });
   assert.equal(mapVoiceItemExtraction({ transcript: "Set quantity", extraction: extraction({ quantity: 1.5 }) }).length, 0);

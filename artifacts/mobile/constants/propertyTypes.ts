@@ -4,6 +4,7 @@ export const PROPERTY_TYPES = [
   { label: "Holiday / beach house", value: "holiday"   },
   { label: "Storage unit",          value: "storage"   },
   { label: "Parent's home",         value: "parents"   },
+  { label: "Business",              value: "business"  },
   { label: "Other",                 value: "other"     },
 ];
 

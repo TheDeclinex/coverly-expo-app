@@ -180,11 +180,11 @@ function formatResetDate(value: string | null): string {
 }
 
 function featureLabel(feature: UsageAllowance["feature"]): string {
-  return feature === "ai_scan" ? "AI scans" : "Replacement lookups";
+  return feature === "ai_scan" ? "AI scans" : "Replacement price searches";
 }
 
-function featureDescription(allowance: UsageAllowance): string {
-  if (!allowance.isLimited) return "Included with your plan · Fair use applies";
+function featureDescription(allowance: UsageAllowance, isLimited: boolean): string {
+  if (!isLimited) return "Included with your plan · Fair use applies";
   const remaining = allowance.remainingUnits ?? Math.max(0, allowance.limitUnits - allowance.usedUnits - allowance.reservedUnits);
   return `${allowance.usedUnits} / ${allowance.limitUnits} used this month · ${remaining} remaining`;
 }
@@ -206,9 +206,9 @@ function UsageAllowanceCard({
   const aiScans = allowances.find((row) => row.feature === "ai_scan") ?? null;
   const replacementPricing = allowances.find((row) => row.feature === "replacement_pricing") ?? null;
   const resetAt = aiScans?.resetAt ?? replacementPricing?.resetAt ?? null;
-  const isLimited = allowances.some((row) => row.isLimited);
-  const hasEmptyAllowance = allowances.some((row) => usageWarningLevel(row) === "empty");
-  const hasLowAllowance = allowances.some((row) => usageWarningLevel(row) === "low");
+  const isLimited = !isAdmin && allowances.some((row) => row.isLimited);
+  const hasEmptyAllowance = !isAdmin && allowances.some((row) => usageWarningLevel(row) === "empty");
+  const hasLowAllowance = !isAdmin && allowances.some((row) => usageWarningLevel(row) === "low");
 
   let helper = "Loading your monthly usage…";
   if (isError) helper = "Usage allowance could not be loaded. Your account access is unchanged.";
@@ -235,15 +235,16 @@ function UsageAllowanceCard({
       ) : isError || allowances.length === 0 ? null : (
         <View style={styles.usageRows}>
           {[aiScans, replacementPricing].filter((row): row is UsageAllowance => row !== null).map((row) => {
-            const warning = usageWarningLevel(row);
+            const rowIsLimited = !isAdmin && row.isLimited;
+            const warning = rowIsLimited ? usageWarningLevel(row) : "none";
             const tone = warning === "empty" ? colors.destructive : warning === "low" ? colors.warning : colors.foreground;
             return (
               <View key={row.feature} style={[styles.usageRow, { borderTopColor: colors.border }]}>
                 <View style={styles.usageRowCopy}>
                   <Text style={[styles.usageRowTitle, { color: colors.foreground }]}>{featureLabel(row.feature)}</Text>
-                  <Text style={[styles.usageRowSubtitle, { color: tone }]}>{featureDescription(row)}</Text>
+                  <Text style={[styles.usageRowSubtitle, { color: tone }]}>{featureDescription(row, rowIsLimited)}</Text>
                 </View>
-                {row.isLimited ? (
+                {rowIsLimited ? (
                   <Text style={[styles.usagePill, { color: tone, backgroundColor: warning === "none" ? colors.secondary : colors.accent }]}>
                     {row.remainingUnits ?? 0} left
                   </Text>

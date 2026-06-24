@@ -19,6 +19,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { ErrorState } from "@/components/ErrorState";
 import { ContextBackButton } from "@/components/ContextBackButton";
+import { LimitReachedModal } from "@/components/LimitReachedModal";
 import { LoadingState } from "@/components/LoadingState";
 import { ReplacementListingCard } from "@/components/ReplacementListingCard";
 import { useToast } from "@/components/Toast";
@@ -29,10 +30,12 @@ import {
   buildReplacementSearchQuery,
   filterReplacementResults,
   getItemUnitEstimate,
+  ReplacementPriceSearchError,
   searchReplacementPrices,
   type ReplacementPriceFilter,
   type ReplacementPriceResult,
 } from "@/lib/replacement-pricing";
+import { normalizeLimitError, type NormalizedLimitError } from "@/lib/limit-errors";
 import { supabase } from "@/lib/supabase";
 import type { InventoryItem } from "@/types";
 
@@ -42,6 +45,21 @@ const FILTERS: Array<{ id: ReplacementPriceFilter; label: string }> = [
   { id: "around", label: "Similar" },
   { id: "premium", label: "Higher" },
 ];
+
+type LoadingTile = {
+  icon: React.ComponentProps<typeof Feather>["name"];
+};
+
+const SEARCH_PROCESS_TILES: LoadingTile[] = [
+  { icon: "search" },
+  { icon: "box" },
+  { icon: "tag" },
+  { icon: "shopping-bag" },
+  { icon: "sliders" },
+  { icon: "check-circle" },
+];
+
+const ACTIVE_TILE_INDEX = 2;
 
 function formatEstimate(value: number | null): string {
   if (value == null) return "No current estimate";
@@ -58,7 +76,11 @@ function ReplacementSearchLoadingPanel({
   colors: ReturnType<typeof useColors>;
 }) {
   const pulse = React.useRef(new Animated.Value(0)).current;
-  const scan = React.useRef(new Animated.Value(0)).current;
+  const carousel = React.useRef(new Animated.Value(0)).current;
+  const carouselTiles = React.useMemo(
+    () => [...SEARCH_PROCESS_TILES, ...SEARCH_PROCESS_TILES],
+    [],
+  );
 
   React.useEffect(() => {
     const pulseLoop = Animated.loop(
@@ -77,34 +99,38 @@ function ReplacementSearchLoadingPanel({
         }),
       ]),
     );
-    const scanLoop = Animated.loop(
-      Animated.timing(scan, {
+    const carouselLoop = Animated.loop(
+      Animated.timing(carousel, {
         toValue: 1,
-        duration: 1700,
-        easing: Easing.inOut(Easing.cubic),
+        duration: 5200,
+        easing: Easing.inOut(Easing.quad),
         useNativeDriver: true,
       }),
     );
 
     pulseLoop.start();
-    scanLoop.start();
+    carouselLoop.start();
     return () => {
       pulseLoop.stop();
-      scanLoop.stop();
+      carouselLoop.stop();
     };
-  }, [pulse, scan]);
+  }, [carousel, pulse]);
 
   const pulseOpacity = pulse.interpolate({
     inputRange: [0, 1],
-    outputRange: [0.44, 0.9],
+    outputRange: [0.58, 0.92],
   });
   const iconScale = pulse.interpolate({
     inputRange: [0, 1],
     outputRange: [1, 1.08],
   });
-  const scanTranslate = scan.interpolate({
+  const carouselTranslate = carousel.interpolate({
     inputRange: [0, 1],
-    outputRange: [-90, 310],
+    outputRange: [-8, -154],
+  });
+  const tileScale = pulse.interpolate({
+    inputRange: [0, 1],
+    outputRange: [0.985, 1],
   });
 
   return (
@@ -150,60 +176,57 @@ function ReplacementSearchLoadingPanel({
             Searching replacement prices
           </Text>
           <Text style={[styles.loadingSubtitle, { color: colors.mutedForeground }]}>
-            Checking current listings for this item...
+            Checking current NZ listings for similar items...
           </Text>
         </View>
       </View>
 
-      <View style={styles.skeletonList}>
-        {[0, 1, 2].map((index) => (
-          <View
-            key={index}
-            style={[
-              styles.skeletonRow,
-              {
-                backgroundColor: colors.muted,
-                borderColor: colors.border,
-                borderRadius: colors.radius,
-              },
-            ]}
-          >
-            <Animated.View style={[styles.skeletonShimmer, { transform: [{ translateX: scanTranslate }] }]} />
+      <View style={styles.loadingCarouselWindow}>
+        <Animated.View
+          style={[
+            styles.loadingCarouselTrack,
+            { transform: [{ translateX: carouselTranslate }] },
+          ]}
+        >
+          {carouselTiles.map((tile, index) => {
+            const isActive = index % SEARCH_PROCESS_TILES.length === ACTIVE_TILE_INDEX;
+            return (
             <Animated.View
+              key={`${tile.icon}-${index}`}
               style={[
-                styles.skeletonImage,
+                styles.loadingTile,
                 {
-                  backgroundColor: colors.border,
-                  opacity: pulseOpacity,
+                  backgroundColor: colors.muted,
+                  borderColor: colors.border,
+                  borderRadius: colors.radius,
+                  opacity: isActive ? 1 : pulseOpacity,
+                  transform: [{ scale: isActive ? tileScale : 1 }],
                 },
               ]}
-            />
-            <View style={styles.skeletonBody}>
-              <Animated.View
+            >
+              <View
                 style={[
-                  styles.skeletonLine,
-                  styles.skeletonTitleLine,
-                  { backgroundColor: colors.border, opacity: pulseOpacity },
+                  styles.loadingTileIcon,
+                  {
+                    backgroundColor: isActive ? colors.primary : colors.secondary,
+                  },
                 ]}
-              />
-              <Animated.View
-                style={[
-                  styles.skeletonLine,
-                  styles.skeletonMetaLine,
-                  { backgroundColor: colors.border, opacity: pulseOpacity },
-                ]}
-              />
-              <Animated.View
-                style={[
-                  styles.skeletonLine,
-                  styles.skeletonPriceLine,
-                  { backgroundColor: colors.border, opacity: pulseOpacity },
-                ]}
-              />
-            </View>
-          </View>
-        ))}
+              >
+                <Feather
+                  name={tile.icon}
+                  size={18}
+                  color={isActive ? colors.primaryForeground : colors.primary}
+                />
+              </View>
+            </Animated.View>
+            );
+          })}
+        </Animated.View>
       </View>
+
+      <Text style={[styles.loadingFooter, { color: colors.mutedForeground }]}>
+        Comparing listings, prices, and retailers...
+      </Text>
     </Animated.View>
   );
 }
@@ -230,6 +253,7 @@ export default function ReplacementPricingScreen() {
   const [filter, setFilter] = useState<ReplacementPriceFilter>("all");
   const [searching, setSearching] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
+  const [limitModal, setLimitModal] = useState<NormalizedLimitError | null>(null);
   const [selectingPosition, setSelectingPosition] = useState<number | null>(null);
   const autoSearchedItemId = React.useRef<string | null>(null);
 
@@ -263,6 +287,7 @@ export default function ReplacementPricingScreen() {
     if (!enforce("replacement_pricing")) return;
     setSearching(true);
     setSearchError(null);
+    setLimitModal(null);
     setFilter("all");
     try {
       const response = await searchReplacementPrices({
@@ -277,10 +302,21 @@ export default function ReplacementPricingScreen() {
       });
       setResults(response.results);
     } catch (searchFailure) {
+      const normalizedLimit = searchFailure instanceof ReplacementPriceSearchError
+        ? normalizeLimitError({
+            status: searchFailure.status,
+            errorCode: searchFailure.errorCode,
+            responseBody: searchFailure.responseBody,
+          })
+        : null;
+
       setResults(null);
-      setSearchError(
-        searchFailure instanceof Error ? searchFailure.message : "Search failed",
-      );
+      if (normalizedLimit) {
+        setLimitModal(normalizedLimit);
+      } else {
+        console.error("[replacement-pricing] Search failed", searchFailure);
+        setSearchError("Replacement price search failed. Your item value is unchanged.");
+      }
     } finally {
       setSearching(false);
     }
@@ -289,6 +325,36 @@ export default function ReplacementPricingScreen() {
   const handleSearch = () => {
     void runSearch(searchQuery);
   };
+
+  const goBackToItem = React.useCallback(() => {
+    if (!item) {
+      setLimitModal(null);
+      return;
+    }
+    if (origin === "room") {
+      router.dismissTo({
+        pathname: "/(tabs)/room/[id]",
+        params: {
+          id: roomId ?? item.room_id ?? "",
+          name: roomName ?? item.room ?? "Room",
+          fileId: fileId ?? item.file_id,
+          fileName: fileName ?? "Property",
+        },
+      } as Href);
+    } else {
+      router.dismissTo({
+        pathname: "/(tabs)/item/[id]",
+        params: {
+          id: item.id,
+          name: item.name,
+          roomId: roomId ?? item.room_id ?? "",
+          roomName: roomName ?? item.room ?? "Room",
+          fileId: fileId ?? item.file_id,
+          fileName: fileName ?? "Property",
+        },
+      } as Href);
+    }
+  }, [fileId, fileName, item, origin, roomId, roomName]);
 
   React.useEffect(() => {
     if (!item || autoSearchedItemId.current === item.id) return;
@@ -568,6 +634,16 @@ export default function ReplacementPricingScreen() {
           ) : null}
         </ScrollView>
       ) : null}
+      <LimitReachedModal
+        visible={!!limitModal}
+        content={limitModal}
+        onPrimary={() => {
+          setLimitModal(null);
+          router.push({ pathname: "/upgrade", params: { feature: "replacement_pricing" } } as Href);
+        }}
+        onSecondary={goBackToItem}
+        onDismiss={() => setLimitModal(null)}
+      />
     </>
   );
 }
@@ -644,30 +720,38 @@ const styles = StyleSheet.create({
   loadingCopy: { flex: 1, gap: 3 },
   loadingTitle: { fontSize: 16, lineHeight: 22, fontFamily: "Inter_700Bold" },
   loadingSubtitle: { fontSize: 13, lineHeight: 19, fontFamily: "Inter_400Regular" },
-  skeletonList: { gap: 10 },
-  skeletonRow: {
-    minHeight: 86,
-    borderWidth: 1,
+  loadingCarouselWindow: {
+    minHeight: 104,
+    overflow: "hidden",
+    justifyContent: "center",
+  },
+  loadingCarouselTrack: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 12,
+    gap: 10,
+    paddingVertical: 4,
+  },
+  loadingTile: {
+    width: 68,
+    minHeight: 68,
+    borderWidth: 1,
     padding: 10,
-    overflow: "hidden",
+    alignItems: "center",
+    justifyContent: "center",
   },
-  skeletonShimmer: {
-    position: "absolute",
-    top: -20,
-    bottom: -20,
-    width: 76,
-    backgroundColor: "rgba(255,255,255,0.42)",
-    transform: [{ rotate: "12deg" }],
+  loadingTileIcon: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    alignItems: "center",
+    justifyContent: "center",
   },
-  skeletonImage: { width: 62, height: 62, borderRadius: 8 },
-  skeletonBody: { flex: 1, gap: 9 },
-  skeletonLine: { height: 9, borderRadius: 999 },
-  skeletonTitleLine: { width: "86%" },
-  skeletonMetaLine: { width: "58%" },
-  skeletonPriceLine: { width: "34%", height: 12 },
+  loadingFooter: {
+    fontSize: 12,
+    lineHeight: 17,
+    fontFamily: "Inter_400Regular",
+    textAlign: "center",
+  },
   empty: { borderRadius: 12, padding: 24, alignItems: "center", gap: 8 },
   emptyTitle: { fontSize: 15, fontFamily: "Inter_600SemiBold", textAlign: "center" },
   emptyText: {

@@ -33,12 +33,19 @@ import { ContextBackButton } from "@/components/ContextBackButton";
 import { ErrorState } from "@/components/ErrorState";
 import { ExpandableImage } from "@/components/ExpandableImage";
 import { LoadingState } from "@/components/LoadingState";
+import { RecommendedActionCard } from "@/components/RecommendedActionCard";
 import { useToast } from "@/components/Toast";
 import { getCategoryColor } from "@/constants/categoryColors";
+import { ENABLE_RECOMMENDED_ACTIONS } from "@/constants/recommendedActions";
 import { getRoomPlaceholderIcon } from "@/constants/roomVisuals";
 import { useAuth } from "@/context/AuthContext";
 import { useColors } from "@/hooks/useColors";
-import { formatCurrencyFull, getItemUnitPrice } from "@/lib/inventory-mappers";
+import {
+  formatCurrencyFull,
+  getItemTotalValue,
+  getItemUnitPrice,
+  hasValue,
+} from "@/lib/inventory-mappers";
 import { useSignedUrl, useSignedUrls } from "@/hooks/useSignedUrls";
 import { isStoragePath } from "@/lib/storage-helpers";
 import { formatUploadFailure, uploadCoverPhoto } from "@/lib/photo-upload";
@@ -49,6 +56,7 @@ import type { InventoryItem, InventoryRoom } from "@/types";
 const COVER_H = 200;
 const TEAL = "#1D9E75";
 const STICKY_ACTION_CLEARANCE = 96;
+const HIGH_VALUE_EVIDENCE_THRESHOLD = 1000;
 
 /** Maps category key → Feather icon name */
 const CATEGORY_ICONS: Record<string, keyof typeof Feather.glyphMap> = {
@@ -86,6 +94,24 @@ function valuationLabel(item: InventoryItem): string | null {
   if (src.includes("ai") || src.includes("scan")) return "AI identified";
   if (item.estimated_price != null || item.unit_estimated_price != null) return "Estimated";
   return null;
+}
+
+function isAiEstimate(item: InventoryItem): boolean {
+  const source = `${item.price_source_type ?? ""} ${item.valuation_basis ?? ""}`.toLowerCase();
+  return source.includes("ai") || source.includes("scan");
+}
+
+function hasUnclearDetails(item: InventoryItem): boolean {
+  const name = item.name.trim().toLowerCase();
+  return (
+    name.length < 3 ||
+    ["item", "unknown", "object", "misc", "miscellaneous"].includes(name)
+  );
+}
+
+function needsRoomReview(item: InventoryItem): boolean {
+  const lowConfidence = item.confidence != null && item.confidence < 0.7;
+  return !hasValue(item) || item.quantity == null || lowConfidence || hasUnclearDetails(item);
 }
 
 function isWebUrl(value: string | null | undefined): value is string {
@@ -839,7 +865,7 @@ export default function ItemsScreen() {
     () => [...roomItemIds].sort().join(","),
     [roomItemIds],
   );
-  const { data: evidenceCounts = {} } = useQuery<Record<string, number>>({
+  const { data: evidenceCounts = {}, isLoading: evidenceCountsLoading } = useQuery<Record<string, number>>({
     queryKey: ["room-evidence-counts", id, session?.user.id, roomItemIdsKey],
     queryFn: async () => {
       if (roomItemIds.length === 0) return {};
@@ -904,6 +930,81 @@ export default function ItemsScreen() {
       },
     });
   };
+
+  const roomRecommendedAction = React.useMemo(() => {
+    if (!ENABLE_RECOMMENDED_ACTIONS || !items) return null;
+
+    const openItem = (item: InventoryItem, extraParams?: Record<string, string>) => {
+      router.push({
+        pathname: "/(tabs)/item/[id]",
+        params: {
+          id: item.id,
+          name: item.name,
+          roomId: id,
+          roomName: resolvedRoomName,
+          fileId: resolvedFileId ?? "",
+          fileName: resolvedPropertyName,
+          ...extraParams,
+        },
+      });
+    };
+
+    if (items.length === 0) {
+      return {
+        body: "Start this room",
+        detail: "Scan visible items or add them manually.",
+        primaryLabel: "Scan items",
+        onPrimaryPress: () => void handleScanRoom(),
+      };
+    }
+
+    const reviewItems = items.filter(needsRoomReview);
+    if (reviewItems.length > 0) {
+      return {
+        body: `${reviewItems.length} item${reviewItems.length === 1 ? "" : "s"} need review`,
+        detail: "Review items that may be missing a value, quantity, or clear details.",
+        primaryLabel: "Show item",
+        onPrimaryPress: () => openItem(reviewItems[0]),
+      };
+    }
+
+    if (!evidenceCountsLoading) {
+      const highValueWithoutEvidence = items.filter(
+        (item) =>
+          getItemTotalValue(item) >= HIGH_VALUE_EVIDENCE_THRESHOLD &&
+          (evidenceCounts[item.id] ?? 0) === 0,
+      );
+      if (highValueWithoutEvidence.length > 0) {
+        return {
+          body: "Add evidence to high-value items",
+          detail: "Receipts or photos can strengthen these records.",
+          primaryLabel: "Review",
+          onPrimaryPress: () => openItem(highValueWithoutEvidence[0], { evidence: "add" }),
+        };
+      }
+    }
+
+    const aiEstimateItems = items.filter(isAiEstimate);
+    if (aiEstimateItems.length > 0) {
+      return {
+        body: "Check replacement values",
+        detail: "Replace AI estimates with current replacement listings where useful.",
+        primaryLabel: "Review",
+        onPrimaryPress: () => openItem(aiEstimateItems[0]),
+      };
+    }
+
+    return null;
+  }, [
+    evidenceCounts,
+    evidenceCountsLoading,
+    handleScanRoom,
+    id,
+    items,
+    resolvedFileId,
+    resolvedPropertyName,
+    resolvedRoomName,
+  ]);
 
   const handlePickRoomCover = async () => {
     if (coverUploading) return;
@@ -972,6 +1073,7 @@ export default function ItemsScreen() {
   };
 
   const renderRoomCover = () => (
+    <>
     <View style={[styles.coverContainer, { backgroundColor: colors.secondary }]}>
       {signedCoverUrl ? (
         /* Parallax image — taller than container so it can shift up */
@@ -1014,6 +1116,12 @@ export default function ItemsScreen() {
         )}
       </Pressable>
     </View>
+    {roomRecommendedAction ? (
+      <View style={styles.recommendedActionWrap}>
+        <RecommendedActionCard {...roomRecommendedAction} />
+      </View>
+    ) : null}
+    </>
   );
 
   return (
@@ -1168,6 +1276,11 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: "center",
     justifyContent: "center",
+  },
+  recommendedActionWrap: {
+    paddingHorizontal: 16,
+    paddingTop: 12,
+    paddingBottom: 4,
   },
   cameraBtn: {
     position: "absolute",

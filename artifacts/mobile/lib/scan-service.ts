@@ -237,6 +237,8 @@ export async function runAiScan(input: ScanInput): Promise<ScanResult> {
         status: "error",
         items: [],
         errorMessage: `Scan failed with an invalid response (${response.status}).`,
+        httpStatus: response.status,
+        responseBody: responseText,
       };
     }
 
@@ -250,6 +252,9 @@ export async function runAiScan(input: ScanInput): Promise<ScanResult> {
         status: "error",
         items: [],
         errorMessage: data?.message ?? data?.errorCode ?? `Scan failed (${response.status}).`,
+        errorCode: data?.errorCode,
+        httpStatus: response.status,
+        responseBody: data,
       };
     }
 
@@ -266,6 +271,8 @@ export async function runAiScan(input: ScanInput): Promise<ScanResult> {
         status: "error",
         items: [],
         errorMessage: data.message ?? data.errorCode ?? "Scan failed",
+        errorCode: data.errorCode,
+        responseBody: data,
       };
     }
 

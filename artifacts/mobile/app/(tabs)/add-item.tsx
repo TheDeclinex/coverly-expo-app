@@ -247,14 +247,20 @@ export default function AddItemScreen() {
 
   const applyVoicePatchToDraft = (patch: VoiceItemPatch) => {
     const has = (key: keyof VoiceItemPatch) => Object.prototype.hasOwnProperty.call(patch, key);
-    if (has("name")) setName(patch.name ?? "");
-    if (has("description")) setDescription(patch.description ?? "");
-    if (has("quantity") && patch.quantity != null) setQuantity(String(patch.quantity));
-    if (has("brand_maker")) setBrandMaker(patch.brand_maker ?? "");
-    if (has("model_series")) setModelSeries(patch.model_series ?? "");
-    if (has("purchase_source")) setPurchaseSource(patch.purchase_source ?? "");
-    if (has("purchase_year_approx")) setPurchaseYearApprox(patch.purchase_year_approx ?? "");
-    if (has("original_purchase_price")) {
+    const canFill = (field: VoiceItemField, currentValue: string) =>
+      voiceTargetField === field || !currentValue.trim();
+    const canFillPrice = (field: VoiceItemField, currentValue: string) =>
+      voiceTargetField === field || parseMoneyDraft(currentValue) == null;
+
+    if (has("name") && canFill("name", name)) setName(patch.name ?? "");
+    if (has("category") && canFill("category", category)) setCategory(patch.category ?? "");
+    if (has("description") && canFill("description", description)) setDescription(patch.description ?? "");
+    if (has("quantity") && patch.quantity != null && canFill("quantity", quantity)) setQuantity(String(patch.quantity));
+    if (has("brand_maker") && canFill("brand_maker", brandMaker)) setBrandMaker(patch.brand_maker ?? "");
+    if (has("model_series") && canFill("model_series", modelSeries)) setModelSeries(patch.model_series ?? "");
+    if (has("purchase_source") && canFill("purchase_source", purchaseSource)) setPurchaseSource(patch.purchase_source ?? "");
+    if (has("purchase_year_approx") && canFill("purchase_year_approx", purchaseYearApprox)) setPurchaseYearApprox(patch.purchase_year_approx ?? "");
+    if (has("original_purchase_price") && canFillPrice("original_purchase_price", originalPurchasePrice)) {
       const originalPrice = patch.original_purchase_price;
       setOriginalPurchasePrice(originalPrice == null ? "" : String(originalPrice));
 
@@ -264,15 +270,16 @@ export default function AddItemScreen() {
       if (
         originalPrice != null &&
         !has("unit_estimated_price") &&
-        !has("estimated_price")
+        !has("estimated_price") &&
+        canFillPrice("replacement_price", estimatedPrice)
       ) {
         setEstimatedPrice(String(originalPrice));
         setVoicePriceSourceType("user_entered");
         setVoiceValuationBasis("manual");
       }
     }
-    if (has("notes")) setNotes(patch.notes ?? "");
-    if (has("unit_estimated_price") || has("estimated_price")) {
+    if (has("notes") && canFill("notes", notes)) setNotes(patch.notes ?? "");
+    if ((has("unit_estimated_price") || has("estimated_price")) && canFillPrice("replacement_price", estimatedPrice)) {
       const price = patch.unit_estimated_price ?? patch.estimated_price;
       setEstimatedPrice(price == null ? "" : String(price));
       setVoicePriceSourceType(patch.price_source_type ?? "user_entered");
@@ -902,6 +909,7 @@ export default function AddItemScreen() {
         targetField={voiceTargetField}
         currentValues={{
           name,
+          category,
           description,
           quantity: Number.parseInt(quantity, 10) || 1,
           estimated_price: parseMoneyDraft(estimatedPrice),

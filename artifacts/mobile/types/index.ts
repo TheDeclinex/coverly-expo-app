@@ -6,6 +6,8 @@ export interface InventoryFile {
   name: string;
   status: string | null;
   contents_sum_insured: number | null;
+  insurer_name?: string | null;
+  policy_number?: string | null;
   created_by_email: string | null;
   property_type: string | null;
   property_cover_image_url: string | null;

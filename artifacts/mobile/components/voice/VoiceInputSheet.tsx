@@ -213,6 +213,12 @@ export function VoiceInputSheet({
                 <Feather name="mic" size={34} color={colors.primary} />
                 <Text style={[styles.stateTitle, { color: colors.foreground }]}>Ready to listen</Text>
                 <Text style={[styles.stateText, { color: colors.mutedForeground }]}>Speak naturally. You will review the transcript and suggested changes next.</Text>
+                <View style={[styles.exampleBox, { backgroundColor: colors.secondary, borderColor: colors.border, borderRadius: colors.radius }]}>
+                  <Text style={[styles.exampleLabel, { color: colors.mutedForeground }]}>EXAMPLE</Text>
+                  <Text style={[styles.exampleText, { color: colors.foreground }]}>
+                    Sony Bravia 3 65 inch bought from Noel Leeming for $1700
+                  </Text>
+                </View>
                 <PrimaryButton label="Start recording" onPress={() => void startRecording()} />
               </View>
             )}
@@ -222,6 +228,12 @@ export function VoiceInputSheet({
                 <View style={[styles.recordingDot, { backgroundColor: colors.destructive }]} />
                 <Text style={[styles.stateTitle, { color: colors.foreground }]}>Listening…</Text>
                 <Text style={[styles.timer, { color: colors.mutedForeground }]}>{voice.durationSeconds}s / {voice.maxDurationSeconds}s</Text>
+                <View style={[styles.exampleBox, { backgroundColor: colors.secondary, borderColor: colors.border, borderRadius: colors.radius }]}>
+                  <Text style={[styles.exampleLabel, { color: colors.mutedForeground }]}>TRY SAYING</Text>
+                  <Text style={[styles.exampleText, { color: colors.foreground }]}>
+                    Sony Bravia 3 65 inch bought from Noel Leeming for $1700
+                  </Text>
+                </View>
                 <PrimaryButton label="Stop and review" icon="square" onPress={() => void stopAndProcess()} />
               </View>
             )}
@@ -298,6 +310,9 @@ const styles = StyleSheet.create({
   centerState: { minHeight: 250, alignItems: "center", justifyContent: "center", gap: 10, paddingHorizontal: 18 },
   stateTitle: { fontSize: 16, fontFamily: "Inter_600SemiBold", textAlign: "center" },
   stateText: { fontSize: 13, lineHeight: 19, fontFamily: "Inter_400Regular", textAlign: "center" },
+  exampleBox: { width: "100%", borderWidth: 1, paddingHorizontal: 12, paddingVertical: 10, gap: 3 },
+  exampleLabel: { fontSize: 10, letterSpacing: 0.7, fontFamily: "Inter_600SemiBold", textAlign: "center" },
+  exampleText: { fontSize: 13, lineHeight: 18, fontFamily: "Inter_500Medium", textAlign: "center" },
   errorText: { fontSize: 12, lineHeight: 18, fontFamily: "Inter_400Regular", textAlign: "center" },
   errorTranscript: { width: "100%", padding: 10, gap: 3 },
   errorTranscriptLabel: { fontSize: 10, letterSpacing: 0.7, fontFamily: "Inter_600SemiBold" },

@@ -31,8 +31,10 @@ import { EmptyState } from "@/components/EmptyState";
 import { ErrorState } from "@/components/ErrorState";
 import { LoadingState } from "@/components/LoadingState";
 import { ContextBackButton } from "@/components/ContextBackButton";
+import { RecommendedActionCard } from "@/components/RecommendedActionCard";
 import { useToast } from "@/components/Toast";
 import { getCategoryColor, getCategoryLegendEntry } from "@/constants/categoryColors";
+import { ENABLE_RECOMMENDED_ACTIONS } from "@/constants/recommendedActions";
 import { getRoomPlaceholderIcon } from "@/constants/roomVisuals";
 import { useAuth } from "@/context/AuthContext";
 import { useColors } from "@/hooks/useColors";
@@ -1720,19 +1722,22 @@ function PropertySkeleton({
 
 // ─── Main screen ──────────────────────────────────────────────────────────────
 
-const ROOM_TYPE_OPTIONS = [
-  { label: "Living Room", value: "living_room" },
-  { label: "Bedroom",     value: "bedroom" },
-  { label: "Kitchen",     value: "kitchen" },
-  { label: "Bathroom",    value: "bathroom" },
-  { label: "Dining Room", value: "dining" },
-  { label: "Office",      value: "office" },
-  { label: "Garage",      value: "garage" },
-  { label: "Hallway",     value: "hallway" },
-  { label: "Utility",     value: "utility" },
-  { label: "Loft",        value: "loft" },
-  { label: "Garden",      value: "garden" },
-  { label: "Other",       value: "other" },
+const QUICK_ROOM_NAMES = [
+  "Living room",
+  "Kitchen",
+  "Master bedroom",
+  "Bedroom 1",
+  "Bedroom 2",
+  "Bathroom",
+  "Ensuite",
+  "Laundry",
+  "Garage",
+  "Hallway",
+  "Office",
+  "Dining room",
+  "Lounge",
+  "Storage",
+  "Shed",
 ];
 
 export default function PropertyDetailScreen() {
@@ -2040,8 +2045,37 @@ export default function PropertyDetailScreen() {
     }
   };
 
+  const propertyRecommendedAction = useMemo(() => {
+    if (!ENABLE_RECOMMENDED_ACTIONS || !stats || !property) return null;
+
+    if (stats.itemsNeedingReview > 0) {
+      return {
+        body: "Review items needing attention",
+        detail: "Some items may need a confirmed value, quantity, or clearer details.",
+        primaryLabel: "Review items",
+        onPrimaryPress: () => setReviewItemsVisible(true),
+      };
+    }
+
+    if (property.contents_sum_insured == null && stats.itemCount >= 3) {
+      return {
+        body: "Add contents cover",
+        detail: "Compare your recorded inventory value against your insurance cover.",
+        primaryLabel: "Add cover",
+        onPrimaryPress: () => setCoverModalVisible(true),
+      };
+    }
+
+    return null;
+  }, [property, stats]);
+
   const renderHeader = () => {
     if (!stats) return null;
+    const firstUseGuidanceVisible =
+      !(localCoverUrl ?? property?.property_cover_image_url) &&
+      (rooms ?? []).length === 0 &&
+      (items ?? []).length === 0;
+
     return (
       <>
         {/* Property cover photo hero */}
@@ -2258,7 +2292,7 @@ export default function PropertyDetailScreen() {
         )}
 
         {/* 3.6 — First-use guidance card: shown until cover photo, room, or item exists */}
-        {!(localCoverUrl ?? property?.property_cover_image_url) && (rooms ?? []).length === 0 && (items ?? []).length === 0 && (
+        {!ENABLE_RECOMMENDED_ACTIONS && firstUseGuidanceVisible && (
           <View
             style={{
               backgroundColor: colors.card,
@@ -2381,6 +2415,10 @@ export default function PropertyDetailScreen() {
         )}
 
         {/* 4 — Rooms heading + add-room button */}
+        {propertyRecommendedAction ? (
+          <RecommendedActionCard {...propertyRecommendedAction} />
+        ) : null}
+
         <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
           <Text style={[styles.sectionHeading, { color: colors.foreground }]}>
             Rooms
@@ -2815,35 +2853,45 @@ export default function PropertyDetailScreen() {
               )}
             </View>
 
-            {/* Room type picker */}
+            {/* Quick room names */}
             <View style={{ gap: 8 }}>
               <Text style={{ fontSize: 12, fontFamily: "Inter_500Medium", color: colors.mutedForeground, letterSpacing: 0.3 }}>
-                ROOM TYPE (optional)
+                COMMON ROOMS
               </Text>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginHorizontal: -20 }} contentContainerStyle={{ paddingHorizontal: 20, gap: 8 }}>
-                {ROOM_TYPE_OPTIONS.map((opt) => {
-                  const active = addRoomType === opt.value;
-                  return (
-                    <Pressable
-                      key={opt.value}
-                      onPress={() => setAddRoomType(active ? null : opt.value)}
+              <View style={styles.quickRoomChips}>
+                {QUICK_ROOM_NAMES.map((roomNameOption) => (
+                  <Pressable
+                    key={roomNameOption}
+                    onPress={() => {
+                      setAddRoomName(roomNameOption);
+                      setAddRoomError(null);
+                    }}
+                    style={({ pressed }) => ({
+                      paddingHorizontal: 12,
+                      paddingVertical: 7,
+                      borderRadius: 20,
+                      borderWidth: 1,
+                      borderColor: addRoomName.trim() === roomNameOption ? BRAND_TEAL : colors.border,
+                      backgroundColor:
+                        addRoomName.trim() === roomNameOption
+                          ? colors.accent
+                          : pressed
+                            ? colors.secondary
+                            : colors.card,
+                    })}
+                  >
+                    <Text
                       style={{
-                        flexShrink: 0,
-                        paddingHorizontal: 14,
-                        paddingVertical: 7,
-                        borderRadius: 20,
-                        borderWidth: 1,
-                        borderColor: active ? BRAND_TEAL : colors.border,
-                        backgroundColor: active ? colors.accent : colors.card,
+                        fontSize: 13,
+                        fontFamily: "Inter_500Medium",
+                        color: addRoomName.trim() === roomNameOption ? colors.primary : colors.foreground,
                       }}
                     >
-                      <Text style={{ fontSize: 13, fontFamily: "Inter_500Medium", color: active ? colors.primary : colors.foreground }}>
-                        {opt.label}
-                      </Text>
-                    </Pressable>
-                  );
-                })}
-              </ScrollView>
+                      {roomNameOption}
+                    </Text>
+                  </Pressable>
+                ))}
+              </View>
             </View>
 
             {/* Create button */}
@@ -3265,6 +3313,11 @@ const styles = StyleSheet.create({
   claimText: {
     fontSize: 12,
     fontFamily: "Inter_400Regular",
+  },
+  quickRoomChips: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
   },
   reviewModalRoot: {
     flex: 1,

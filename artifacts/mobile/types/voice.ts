@@ -1,5 +1,6 @@
 export type VoiceItemField =
   | "name"
+  | "category"
   | "quantity"
   | "brand_maker"
   | "model_series"
@@ -15,6 +16,7 @@ export type VoiceScalar = string | number | null;
 
 export interface VoiceItemValues {
   name?: string | null;
+  category?: string | null;
   quantity?: number | null;
   brand_maker?: string | null;
   model_series?: string | null;
