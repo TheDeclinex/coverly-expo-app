@@ -2,8 +2,14 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  addClaimPackRoom,
   calculateClaimPackSummary,
+  clearClaimPackItemsInRoom,
   createInitialClaimPackSelection,
+  createRoomsOnlyClaimPackSelection,
+  createWholePropertyClaimPackSelection,
+  removeClaimPackRoom,
+  selectAllClaimPackItemsInRoom,
   toggleClaimPackItem,
   toggleClaimPackRoom,
   type ClaimPackItemLike,
@@ -50,6 +56,44 @@ test("defaults all rooms and items into a draft claim-pack selection", () => {
 
   assert.deepEqual([...selection.selectedRoomIds].sort(), ["room-a", "room-b"]);
   assert.deepEqual([...selection.selectedItemIds].sort(), ["item-chair", "item-kettle", "item-tv"]);
+});
+
+test("whole property selection includes every room and item", () => {
+  const selection = createWholePropertyClaimPackSelection(rooms, items);
+
+  assert.deepEqual([...selection.selectedRoomIds].sort(), ["room-a", "room-b"]);
+  assert.deepEqual([...selection.selectedItemIds].sort(), ["item-chair", "item-kettle", "item-tv"]);
+});
+
+test("choose-by-room starts with selected rooms and unchecked items", () => {
+  const selection = createRoomsOnlyClaimPackSelection(["room-a"]);
+
+  assert.deepEqual([...selection.selectedRoomIds], ["room-a"]);
+  assert.deepEqual([...selection.selectedItemIds], []);
+});
+
+test("rooms can be added and removed from a draft", () => {
+  const initial = createRoomsOnlyClaimPackSelection(["room-a"]);
+  const withKitchen = addClaimPackRoom(initial, "room-b");
+  const selectedKitchenItems = selectAllClaimPackItemsInRoom(withKitchen, "room-b", items);
+  const withoutKitchen = removeClaimPackRoom(selectedKitchenItems, "room-b", items);
+
+  assert.equal(withKitchen.selectedRoomIds.has("room-b"), true);
+  assert.equal(selectedKitchenItems.selectedItemIds.has("item-kettle"), true);
+  assert.equal(withoutKitchen.selectedRoomIds.has("room-b"), false);
+  assert.equal(withoutKitchen.selectedItemIds.has("item-kettle"), false);
+});
+
+test("room item select all and clear preserve the selected room", () => {
+  const initial = createRoomsOnlyClaimPackSelection(["room-a"]);
+  const selected = selectAllClaimPackItemsInRoom(initial, "room-a", items);
+  const cleared = clearClaimPackItemsInRoom(selected, "room-a", items);
+
+  assert.equal(selected.selectedItemIds.has("item-tv"), true);
+  assert.equal(selected.selectedItemIds.has("item-chair"), true);
+  assert.equal(cleared.selectedRoomIds.has("room-a"), true);
+  assert.equal(cleared.selectedItemIds.has("item-tv"), false);
+  assert.equal(cleared.selectedItemIds.has("item-chair"), false);
 });
 
 test("room toggle deselects and reselects all items in that room", () => {

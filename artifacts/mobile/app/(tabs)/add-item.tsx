@@ -1,7 +1,7 @@
 import { Feather } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import * as ImagePicker from "expo-image-picker";
-import { Stack, router, useLocalSearchParams } from "expo-router";
+import { Stack, router, type Href, useLocalSearchParams } from "expo-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import React, { useState } from "react";
 import {
@@ -119,11 +119,12 @@ function StyledInput({
 }
 
 export default function AddItemScreen() {
-  const { fileId, roomId, fileName, roomName } = useLocalSearchParams<{
+  const { fileId, roomId, fileName, roomName, returnToClaimPack } = useLocalSearchParams<{
     fileId?: string;
     roomId?: string;
     fileName?: string;
     roomName?: string;
+    returnToClaimPack?: string;
   }>();
   const { session } = useAuth();
   const colors = useColors();
@@ -404,6 +405,23 @@ export default function AddItemScreen() {
     queryClient.invalidateQueries({
       queryKey: ["property-items", selectedFileId],
     });
+    queryClient.invalidateQueries({
+      queryKey: ["claim-pack-items", selectedFileId],
+    });
+    queryClient.invalidateQueries({
+      queryKey: ["claim-pack-evidence-counts", selectedFileId],
+    });
+
+    if (returnToClaimPack === "1") {
+      router.replace({
+        pathname: "/(tabs)/claim-pack/[fileId]",
+        params: {
+          fileId: selectedFileId,
+          focusRoomId: selectedRoomId,
+        },
+      } as Href);
+      return;
+    }
 
     router.replace({
       pathname: "/(tabs)/room/[id]",

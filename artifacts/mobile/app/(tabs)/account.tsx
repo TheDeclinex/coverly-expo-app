@@ -20,6 +20,8 @@ import {
 import {
   usageWarningLevel,
 } from "@/lib/usage-allowances-model";
+import { supabase } from "@/lib/supabase";
+import type { InventoryFile } from "@/types";
 
 const privacyUrl = process.env.EXPO_PUBLIC_PRIVACY_URL;
 const termsUrl = process.env.EXPO_PUBLIC_TERMS_URL;
@@ -33,6 +35,20 @@ export default function AccountScreen() {
   const usageQuery = useQuery({
     queryKey: ["usage-allowances", session?.user.id],
     queryFn: loadUsageAllowances,
+    enabled: !!session,
+    staleTime: 30_000,
+    retry: 1,
+  });
+  const claimPackPropertiesQuery = useQuery({
+    queryKey: ["claim-pack-properties", session?.user.id],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("inventory_files")
+        .select("id, name, last_modified")
+        .order("last_modified", { ascending: false });
+      if (error) throw error;
+      return (data ?? []) as Pick<InventoryFile, "id" | "name" | "last_modified">[];
+    },
     enabled: !!session,
     staleTime: 30_000,
     retry: 1,
@@ -76,6 +92,12 @@ export default function AccountScreen() {
   const restore = async () => {
     const result = await restorePurchases();
     Alert.alert(result.ok ? "Purchases restored" : "Restore complete", result.message);
+  };
+  const openClaimPackPreview = (fileId: string) => {
+    router.push({
+      pathname: "/(tabs)/claim-pack/[fileId]",
+      params: { fileId },
+    } as Href);
   };
 
   return (
@@ -130,15 +152,13 @@ export default function AccountScreen() {
           onUpgrade={() => router.push("/upgrade" as Href)}
         />
 
-        <AccountSection title="Claim packs">
-          <AccountRow
-            icon="package"
-            title="Insurance-ready claim packs"
-            subtitle="Create PDF exports from your rooms, items, photos and supporting evidence."
-            value="Coming soon"
-          />
-          <AccountRow icon="archive" title="Claim pack history" value="Not available yet" last />
-        </AccountSection>
+        <ClaimPacksSection
+          properties={claimPackPropertiesQuery.data ?? []}
+          isLoading={claimPackPropertiesQuery.isLoading}
+          isError={claimPackPropertiesQuery.isError}
+          onRetry={() => void claimPackPropertiesQuery.refetch()}
+          onOpenPreview={openClaimPackPreview}
+        />
 
         <AccountSection title="Referrals">
           <AccountRow
@@ -169,6 +189,79 @@ export default function AccountScreen() {
         </AccountSection>
       </ScrollView>
     </>
+  );
+}
+
+function ClaimPacksSection({
+  properties,
+  isLoading,
+  isError,
+  onRetry,
+  onOpenPreview,
+}: {
+  properties: Pick<InventoryFile, "id" | "name" | "last_modified">[];
+  isLoading: boolean;
+  isError: boolean;
+  onRetry: () => void;
+  onOpenPreview: (fileId: string) => void;
+}) {
+  const count = properties.length;
+  const singleProperty = count === 1 ? properties[0] : null;
+  const explainer =
+    "Prepare selected property contents for an insurance claim. PDF generation is coming next; this opens a preview and selection draft only.";
+
+  return (
+    <AccountSection title="Claim packs">
+      <AccountRow
+        icon="package"
+        title="Claim-pack preview"
+        subtitle={explainer}
+        value="Draft"
+        onPress={singleProperty ? () => onOpenPreview(singleProperty.id) : undefined}
+      />
+      {isLoading ? (
+        <AccountRow icon="loader" title="Loading properties" subtitle="Checking which inventory files can be previewed." value="Loading…" last />
+      ) : isError ? (
+        <AccountRow icon="alert-circle" title="Couldn’t load properties" subtitle="Tap to try again." value="Retry" onPress={onRetry} last />
+      ) : count === 0 ? (
+        <AccountRow
+          icon="home"
+          title="No properties yet"
+          subtitle="Add a property first, then you can preview what its claim pack would include."
+          value="Not ready"
+          last
+        />
+      ) : singleProperty ? (
+        <AccountRow
+          icon="file-text"
+          title={singleProperty.name}
+          subtitle="Open the selection draft for this property."
+          value="Preview"
+          onPress={() => onOpenPreview(singleProperty.id)}
+          last
+        />
+      ) : (
+        <>
+          <AccountRow
+            icon="list"
+            title="Choose a property"
+            subtitle="Select which property contents to preview."
+            value={`${count} properties`}
+          />
+          {properties.map((property, index) => (
+            <AccountRow
+              key={property.id}
+              icon="file-text"
+              title={property.name}
+              subtitle="Open selection draft"
+              value="Preview"
+              onPress={() => onOpenPreview(property.id)}
+              last={index === properties.length - 1}
+            />
+          ))}
+        </>
+      )}
+    </AccountSection>
   );
 }
 

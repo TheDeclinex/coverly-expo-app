@@ -50,10 +50,75 @@ export function createInitialClaimPackSelection(
   rooms: ClaimPackRoomLike[],
   items: ClaimPackItemLike[],
 ): ClaimPackSelection {
+  return createWholePropertyClaimPackSelection(rooms, items);
+}
+
+export function createWholePropertyClaimPackSelection(
+  rooms: ClaimPackRoomLike[],
+  items: ClaimPackItemLike[],
+): ClaimPackSelection {
   return {
     selectedRoomIds: new Set(rooms.map((room) => room.id)),
     selectedItemIds: new Set(items.map((item) => item.id)),
   };
+}
+
+export function createRoomsOnlyClaimPackSelection(roomIds: string[]): ClaimPackSelection {
+  return {
+    selectedRoomIds: new Set(roomIds),
+    selectedItemIds: new Set(),
+  };
+}
+
+export function addClaimPackRoom(
+  selection: ClaimPackSelection,
+  roomId: string,
+): ClaimPackSelection {
+  const selectedRoomIds = new Set(selection.selectedRoomIds);
+  selectedRoomIds.add(roomId);
+  return { selectedRoomIds, selectedItemIds: new Set(selection.selectedItemIds) };
+}
+
+export function removeClaimPackRoom(
+  selection: ClaimPackSelection,
+  roomId: string,
+  items: ClaimPackItemLike[],
+): ClaimPackSelection {
+  const selectedRoomIds = new Set(selection.selectedRoomIds);
+  const selectedItemIds = new Set(selection.selectedItemIds);
+  selectedRoomIds.delete(roomId);
+  for (const item of items) {
+    if (item.room_id === roomId) selectedItemIds.delete(item.id);
+  }
+  return { selectedRoomIds, selectedItemIds };
+}
+
+export function selectAllClaimPackItemsInRoom(
+  selection: ClaimPackSelection,
+  roomId: string,
+  items: ClaimPackItemLike[],
+): ClaimPackSelection {
+  const selectedRoomIds = new Set(selection.selectedRoomIds);
+  const selectedItemIds = new Set(selection.selectedItemIds);
+  selectedRoomIds.add(roomId);
+  for (const item of items) {
+    if (item.room_id === roomId) selectedItemIds.add(item.id);
+  }
+  return { selectedRoomIds, selectedItemIds };
+}
+
+export function clearClaimPackItemsInRoom(
+  selection: ClaimPackSelection,
+  roomId: string,
+  items: ClaimPackItemLike[],
+): ClaimPackSelection {
+  const selectedRoomIds = new Set(selection.selectedRoomIds);
+  const selectedItemIds = new Set(selection.selectedItemIds);
+  for (const item of items) {
+    if (item.room_id === roomId) selectedItemIds.delete(item.id);
+  }
+  selectedRoomIds.add(roomId);
+  return { selectedRoomIds, selectedItemIds };
 }
 
 export function toggleClaimPackRoom(

@@ -2269,35 +2269,6 @@ export default function PropertyDetailScreen() {
         </View>
 
         {/* 3.5 — Scan hint: shown until the first item is documented */}
-        <Pressable
-          onPress={() =>
-            router.push({
-              pathname: "/(tabs)/claim-pack/[fileId]",
-              params: { fileId: id },
-            })
-          }
-          style={({ pressed }) => [
-            styles.claimPackPreviewBtn,
-            {
-              backgroundColor: colors.card,
-              borderColor: colors.border,
-              borderRadius: colors.radius,
-              opacity: pressed ? 0.82 : 1,
-            },
-          ]}
-        >
-          <View style={[styles.claimPackPreviewIcon, { backgroundColor: colors.accent }]}>
-            <Feather name="file-text" size={16} color={colors.primary} />
-          </View>
-          <View style={{ flex: 1 }}>
-            <Text style={[styles.claimPackPreviewTitle, { color: colors.foreground }]}>Preview claim pack contents</Text>
-            <Text style={[styles.claimPackPreviewSubtitle, { color: colors.mutedForeground }]}>
-              Choose rooms and items for a future PDF export
-            </Text>
-          </View>
-          <Feather name="chevron-right" size={18} color={colors.mutedForeground} />
-        </Pressable>
-
         {(items ?? []).length === 0 && (
           <View
             style={{
@@ -3165,32 +3136,6 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontFamily: "Inter_600SemiBold",
   },
-  claimPackPreviewBtn: {
-    borderWidth: 1,
-    minHeight: 58,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 11,
-  },
-  claimPackPreviewIcon: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  claimPackPreviewTitle: {
-    fontSize: 14,
-    fontFamily: "Inter_700Bold",
-  },
-  claimPackPreviewSubtitle: {
-    fontSize: 12,
-    fontFamily: "Inter_400Regular",
-    marginTop: 2,
-  },
-
   // Section heading
   sectionHeading: {
     fontSize: 18,
