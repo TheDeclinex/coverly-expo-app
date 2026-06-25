@@ -1,12 +1,13 @@
 import { Feather } from "@expo/vector-icons";
 import { useQuery } from "@tanstack/react-query";
 import { Stack, router, type Href, useLocalSearchParams } from "expo-router";
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   Pressable,
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -17,14 +18,19 @@ import { LoadingState } from "@/components/LoadingState";
 import { useAuth } from "@/context/AuthContext";
 import { useColors } from "@/hooks/useColors";
 import {
-  addClaimPackRoom,
+  buildClaimPackGeneratePayload,
   calculateClaimPackSummary,
   clearClaimPackItemsInRoom,
+  createClaimPackClientDraftId,
   createRoomsOnlyClaimPackSelection,
   createWholePropertyClaimPackSelection,
+  loadClaimPackDraftSnapshot,
   removeClaimPackRoom,
+  saveClaimPackDraftSnapshot,
+  selectClaimPackItem,
   selectAllClaimPackItemsInRoom,
   toggleClaimPackItem,
+  type ClaimPackScope,
   type ClaimPackSelection,
 } from "@/lib/claim-pack-selection-model";
 import {
@@ -59,7 +65,7 @@ function readinessCopy(summary: ReturnType<typeof calculateClaimPackSummary>) {
     summary.missingValueCount > 0 ? formatCount(summary.missingValueCount, "missing value", "missing values") : null,
     summary.missingPhotoCount > 0 ? formatCount(summary.missingPhotoCount, "missing photo", "missing photos") : null,
     summary.missingEvidenceCount > 0 ? formatCount(summary.missingEvidenceCount, "item without evidence", "items without evidence") : null,
-  ].filter(Boolean);
+  ].filter((chip): chip is string => Boolean(chip));
   return missing.length === 0 ? "Selected items look claim-pack ready." : missing.join(" · ");
 }
 
@@ -73,17 +79,32 @@ function itemCompactWarning(item: InventoryItem, evidenceCount: number) {
 }
 
 export default function ClaimPackDraftScreen() {
-  const { fileId, focusRoomId } = useLocalSearchParams<{
+  const { fileId, focusRoomId, newItemId, claimDraftId } = useLocalSearchParams<{
     fileId: string;
     focusRoomId?: string;
+    newItemId?: string;
+    claimDraftId?: string;
   }>();
   const { session } = useAuth();
   const colors = useColors();
   const insets = useSafeAreaInsets();
+  const scrollRef = useRef<ScrollView>(null);
   const [stage, setStage] = useState<BuilderStage>("scope");
   const [selection, setSelection] = useState<ClaimPackSelection | null>(null);
   const [roomDraftIds, setRoomDraftIds] = useState<Set<string>>(new Set());
   const [didApplyFocusRoom, setDidApplyFocusRoom] = useState(false);
+  const [scope, setScope] = useState<ClaimPackScope>("selected_rooms");
+  const [claimNote, setClaimNote] = useState("");
+  const [clientDraftId] = useState(() => claimDraftId ?? createClaimPackClientDraftId());
+  const [managedRoomId, setManagedRoomId] = useState<string | null>(null);
+  const [highlightItemId, setHighlightItemId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (stage !== "draft" || !managedRoomId) return;
+    requestAnimationFrame(() => {
+      scrollRef.current?.scrollTo({ y: 0, animated: true });
+    });
+  }, [managedRoomId, stage]);
 
   const propertyQuery = useQuery({
     queryKey: ["claim-pack-property", fileId, session?.user.id],
@@ -173,12 +194,24 @@ export default function ClaimPackDraftScreen() {
   const evidenceCounts = evidenceCountsQuery.data ?? {};
 
   useEffect(() => {
-    if (!focusRoomId || didApplyFocusRoom || !roomsQuery.isSuccess) return;
-    setSelection(createRoomsOnlyClaimPackSelection([focusRoomId]));
-    setRoomDraftIds(new Set([focusRoomId]));
+    if (!focusRoomId || didApplyFocusRoom || !roomsQuery.isSuccess || !itemsQuery.isSuccess) return;
+    const snapshot = loadClaimPackDraftSnapshot(clientDraftId);
+    const addedItem = newItemId ? items.find((item) => item.id === newItemId) : null;
+    const baseSelection = snapshot?.selection ?? createRoomsOnlyClaimPackSelection([focusRoomId]);
+    const focusedSelection = addedItem
+      ? selectClaimPackItem(baseSelection, addedItem)
+      : baseSelection;
+    if (snapshot) {
+      setScope(snapshot.scope);
+      setClaimNote(snapshot.claimNote);
+    }
+    setSelection(focusedSelection);
+    setRoomDraftIds(new Set(focusedSelection.selectedRoomIds));
+    setManagedRoomId(focusRoomId);
+    setHighlightItemId(newItemId ?? null);
     setStage("draft");
     setDidApplyFocusRoom(true);
-  }, [didApplyFocusRoom, focusRoomId, roomsQuery.isSuccess]);
+  }, [clientDraftId, didApplyFocusRoom, focusRoomId, items, itemsQuery.isSuccess, newItemId, roomsQuery.isSuccess]);
 
   const effectiveSelection = selection ?? createRoomsOnlyClaimPackSelection([]);
   const summary = calculateClaimPackSummary({
@@ -187,6 +220,15 @@ export default function ClaimPackDraftScreen() {
     evidenceCountsByItemId: evidenceCounts,
     selection: effectiveSelection,
   });
+  const futureGeneratePayload = property
+    ? buildClaimPackGeneratePayload({
+        propertyId: property.id,
+        selection: effectiveSelection,
+        scope,
+        clientDraftId,
+        claimNote,
+      })
+    : null;
 
   const itemsByRoomId = useMemo(() => {
     const map = new Map<string, InventoryItem[]>();
@@ -217,12 +259,15 @@ export default function ClaimPackDraftScreen() {
   };
 
   const startWholeProperty = () => {
+    setScope("whole_property");
     setSelection(createWholePropertyClaimPackSelection(rooms, items));
     setRoomDraftIds(new Set(rooms.map((room) => room.id)));
+    setManagedRoomId(null);
     setStage("draft");
   };
 
   const startByRoom = () => {
+    setScope("selected_rooms");
     setRoomDraftIds(new Set(effectiveSelection.selectedRoomIds));
     setStage("room_picker");
   };
@@ -238,6 +283,8 @@ export default function ClaimPackDraftScreen() {
       }
       return { selectedRoomIds: new Set(selectedRoomIds), selectedItemIds };
     });
+    setScope("selected_rooms");
+    setManagedRoomId(null);
     setStage("draft");
   };
 
@@ -252,11 +299,13 @@ export default function ClaimPackDraftScreen() {
 
   const addRoomToDraft = () => {
     setRoomDraftIds(new Set(effectiveSelection.selectedRoomIds));
+    setManagedRoomId(null);
     setStage("room_picker");
   };
 
   const removeRoomFromDraft = (roomId: string) => {
     setSelection((current) => removeClaimPackRoom(current ?? effectiveSelection, roomId, items));
+    setManagedRoomId((current) => (current === roomId ? null : current));
   };
 
   const selectRoomItems = (roomId: string) => {
@@ -273,6 +322,12 @@ export default function ClaimPackDraftScreen() {
 
   const addItemManually = (room?: InventoryRoom) => {
     if (!property) return;
+    saveClaimPackDraftSnapshot(clientDraftId, {
+      selection: effectiveSelection,
+      scope,
+      claimNote,
+      managedRoomId: room?.id ?? managedRoomId,
+    });
     router.push({
       pathname: "/(tabs)/add-item",
       params: {
@@ -281,8 +336,13 @@ export default function ClaimPackDraftScreen() {
         roomId: room?.id,
         roomName: room?.name,
         returnToClaimPack: "1",
+        claimDraftId: clientDraftId,
       },
     } as Href);
+  };
+
+  const enterRoomSelectionMode = (roomId: string | null) => {
+    setManagedRoomId(roomId);
   };
 
   return (
@@ -318,6 +378,7 @@ export default function ClaimPackDraftScreen() {
         />
       ) : (
         <ScrollView
+          ref={scrollRef}
           contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + 28 }]}
           showsVerticalScrollIndicator={false}
         >
@@ -350,6 +411,11 @@ export default function ClaimPackDraftScreen() {
               selection={effectiveSelection}
               summary={summary}
               evidenceCounts={evidenceCounts}
+              claimNote={claimNote}
+              onChangeClaimNote={setClaimNote}
+              managedRoomId={managedRoomId}
+              onManageRoom={enterRoomSelectionMode}
+              highlightItemId={highlightItemId}
               onAddRoom={addRoomToDraft}
               onRemoveRoom={removeRoomFromDraft}
               onSelectRoomItems={selectRoomItems}
@@ -360,20 +426,25 @@ export default function ClaimPackDraftScreen() {
             />
           )}
 
-          <View style={[styles.footerNotice, { backgroundColor: colors.secondary, borderRadius: colors.radius }]}>
-            <Feather name="shield" size={16} color={colors.primary} />
-            <Text style={[styles.footerNoticeText, { color: colors.mutedForeground }]}>
-              PDF export coming next. This preview does not create a file, upload anything, or change your records.
-            </Text>
-          </View>
+          {!managedRoomId ? (
+            <>
+              <View style={[styles.footerNotice, { backgroundColor: colors.secondary, borderRadius: colors.radius }]}>
+                <Feather name="shield" size={16} color={colors.primary} />
+                <Text style={[styles.footerNoticeText, { color: colors.mutedForeground }]}>
+                  PDF export coming next. This preview does not create a file, upload anything, or change your records.
+                </Text>
+              </View>
 
-          <Pressable
-            disabled
-            style={[styles.disabledButton, { backgroundColor: colors.border, borderRadius: colors.radius }]}
-          >
-            <Feather name="download" size={16} color={colors.mutedForeground} />
-            <Text style={[styles.disabledButtonText, { color: colors.mutedForeground }]}>Generate PDF — coming next</Text>
-          </Pressable>
+              <Pressable
+                disabled
+                accessibilityHint={`Draft includes ${futureGeneratePayload?.selectedItemIds.length ?? 0} selected items.`}
+                style={[styles.disabledButton, { backgroundColor: colors.border, borderRadius: colors.radius }]}
+              >
+                <Feather name="download" size={16} color={colors.mutedForeground} />
+                <Text style={[styles.disabledButtonText, { color: colors.mutedForeground }]}>Generate PDF — coming next</Text>
+              </Pressable>
+            </>
+          ) : null}
         </ScrollView>
       )}
     </>
@@ -555,6 +626,11 @@ function DraftReview({
   selection,
   summary,
   evidenceCounts,
+  claimNote,
+  onChangeClaimNote,
+  managedRoomId,
+  onManageRoom,
+  highlightItemId,
   onAddRoom,
   onRemoveRoom,
   onSelectRoomItems,
@@ -570,6 +646,11 @@ function DraftReview({
   selection: ClaimPackSelection;
   summary: ReturnType<typeof calculateClaimPackSummary>;
   evidenceCounts: Record<string, number>;
+  claimNote: string;
+  onChangeClaimNote: (value: string) => void;
+  managedRoomId: string | null;
+  onManageRoom: (roomId: string | null) => void;
+  highlightItemId: string | null;
   onAddRoom: () => void;
   onRemoveRoom: (roomId: string) => void;
   onSelectRoomItems: (roomId: string) => void;
@@ -578,9 +659,32 @@ function DraftReview({
   onAddItem: (room?: InventoryRoom) => void;
   colors: ReturnType<typeof useColors>;
 }) {
+  const managedRoom = rooms.find((room) => room.id === managedRoomId) ?? null;
+  if (managedRoom) {
+    return (
+      <View style={styles.sections}>
+        <ManageRoomPanel
+          room={managedRoom}
+          items={itemsByRoomId.get(managedRoom.id) ?? []}
+          selectedItemIds={selection.selectedItemIds}
+          evidenceCounts={evidenceCounts}
+          highlightItemId={highlightItemId}
+          onBack={() => onManageRoom(null)}
+          onSelectAll={() => onSelectRoomItems(managedRoom.id)}
+          onClear={() => onClearRoomItems(managedRoom.id)}
+          onToggleItem={onToggleItem}
+          onAddItem={() => onAddItem(managedRoom)}
+          colors={colors}
+        />
+      </View>
+    );
+  }
+
   return (
     <View style={styles.sections}>
       <SummaryCard property={property} summary={summary} colors={colors} />
+      <MissingInfoBanner summary={summary} colors={colors} />
+      <ClaimNoteCard claimNote={claimNote} onChangeClaimNote={onChangeClaimNote} colors={colors} />
 
       <View style={styles.actionRow}>
         <Pressable
@@ -594,14 +698,14 @@ function DraftReview({
           <Text style={[styles.secondaryButtonText, { color: colors.primary }]}>Add another room</Text>
         </Pressable>
         <Pressable
-          onPress={() => onAddItem(undefined)}
+          onPress={() => onAddItem(rooms[0])}
           style={({ pressed }) => [
             styles.secondaryButton,
             { borderColor: colors.border, borderRadius: colors.radius, backgroundColor: colors.card, opacity: pressed ? 0.75 : 1 },
           ]}
         >
           <Feather name="edit-3" size={15} color={colors.primary} />
-          <Text style={[styles.secondaryButtonText, { color: colors.primary }]}>Add item manually</Text>
+          <Text style={[styles.secondaryButtonText, { color: colors.primary }]}>Add missing item</Text>
         </Pressable>
       </View>
 
@@ -613,8 +717,16 @@ function DraftReview({
         </View>
       ) : (
         <>
+          <View style={styles.sectionTitleRow}>
+            <View style={{ flex: 1 }}>
+              <Text style={[styles.sectionHeading, { color: colors.foreground }]}>Rooms in this draft</Text>
+              <Text style={[styles.body, { color: colors.mutedForeground }]}>
+                Choose which items from each room should be included.
+              </Text>
+            </View>
+          </View>
           {rooms.map((room) => (
-            <DraftRoomSection
+            <DraftRoomCard
               key={room.id}
               room={room}
               items={itemsByRoomId.get(room.id) ?? []}
@@ -623,7 +735,7 @@ function DraftReview({
               onRemoveRoom={() => onRemoveRoom(room.id)}
               onSelectAll={() => onSelectRoomItems(room.id)}
               onClear={() => onClearRoomItems(room.id)}
-              onToggleItem={onToggleItem}
+              onManageItems={() => onManageRoom(room.id)}
               onAddItem={() => onAddItem(room)}
               colors={colors}
             />
@@ -675,6 +787,76 @@ function SummaryCard({
   );
 }
 
+function MissingInfoBanner({
+  summary,
+  colors,
+}: {
+  summary: ReturnType<typeof calculateClaimPackSummary>;
+  colors: ReturnType<typeof useColors>;
+}) {
+  const missingTotal = summary.missingValueCount + summary.missingPhotoCount + summary.missingEvidenceCount;
+  if (missingTotal === 0) return null;
+  const chips = [
+    summary.missingValueCount > 0 ? `${summary.missingValueCount} no value` : null,
+    summary.missingPhotoCount > 0 ? `${summary.missingPhotoCount} no photo` : null,
+    summary.missingEvidenceCount > 0 ? `${summary.missingEvidenceCount} no evidence` : null,
+  ].filter(Boolean);
+
+  return (
+    <View style={[styles.warningCard, { backgroundColor: colors.card, borderColor: colors.warning, borderRadius: colors.radius }]}>
+      <View style={styles.warningHeader}>
+        <Feather name="alert-circle" size={16} color={colors.warning} />
+        <Text style={[styles.warningTitle, { color: colors.foreground }]}>Items with missing info</Text>
+      </View>
+      <Text style={[styles.body, { color: colors.mutedForeground }]}>
+        Your pack is still usable without these — you can review them room by room.
+      </Text>
+      <View style={styles.warningChips}>
+        {chips.map((chip) => (
+          <Text key={chip} style={[styles.warningChip, { backgroundColor: colors.accent, color: colors.warning }]}>
+            {chip}
+          </Text>
+        ))}
+      </View>
+    </View>
+  );
+}
+
+function ClaimNoteCard({
+  claimNote,
+  onChangeClaimNote,
+  colors,
+}: {
+  claimNote: string;
+  onChangeClaimNote: (value: string) => void;
+  colors: ReturnType<typeof useColors>;
+}) {
+  return (
+    <View style={[styles.noteCard, { backgroundColor: colors.card, borderColor: colors.border, borderRadius: colors.radius }]}>
+      <Text style={[styles.noteTitle, { color: colors.foreground }]}>Claim context</Text>
+      <Text style={[styles.body, { color: colors.mutedForeground }]}>
+        Optional note for the future PDF, such as “storm damage in lounge” or “theft from garage”.
+      </Text>
+      <TextInput
+        value={claimNote}
+        onChangeText={onChangeClaimNote}
+        placeholder="Add a short claim note"
+        placeholderTextColor={colors.mutedForeground}
+        multiline
+        style={[
+          styles.noteInput,
+          {
+            borderColor: colors.border,
+            borderRadius: colors.radius,
+            color: colors.foreground,
+            backgroundColor: colors.background,
+          },
+        ]}
+      />
+    </View>
+  );
+}
+
 function SummaryCell({
   label,
   value,
@@ -700,7 +882,7 @@ function SummaryCell({
   );
 }
 
-function DraftRoomSection({
+function DraftRoomCard({
   room,
   items,
   selectedItemIds,
@@ -708,7 +890,7 @@ function DraftRoomSection({
   onRemoveRoom,
   onSelectAll,
   onClear,
-  onToggleItem,
+  onManageItems,
   onAddItem,
   colors,
 }: {
@@ -719,11 +901,22 @@ function DraftRoomSection({
   onRemoveRoom: () => void;
   onSelectAll: () => void;
   onClear: () => void;
-  onToggleItem: (item: InventoryItem) => void;
+  onManageItems: () => void;
   onAddItem: () => void;
   colors: ReturnType<typeof useColors>;
 }) {
-  const selectedCount = items.filter((item) => selectedItemIds.has(item.id)).length;
+  const selectedItems = items.filter((item) => selectedItemIds.has(item.id));
+  const selectedCount = selectedItems.length;
+  const selectedValue = selectedItems.reduce((total, item) => total + getItemTotalValue(item), 0);
+  const evidenceCount = selectedItems.reduce((total, item) => total + (evidenceCounts[item.id] ?? 0), 0);
+  const missingCount = selectedItems.reduce(
+    (total, item) =>
+      total +
+      (hasValue(item) ? 0 : 1) +
+      (hasPhoto(item) ? 0 : 1) +
+      ((evidenceCounts[item.id] ?? 0) > 0 ? 0 : 1),
+    0,
+  );
   return (
     <View style={[styles.roomCard, { backgroundColor: colors.card, borderColor: colors.border, borderRadius: colors.radius }]}>
       <View style={styles.roomHeader}>
@@ -733,26 +926,91 @@ function DraftRoomSection({
         <View style={styles.roomHeaderCopy}>
           <Text style={[styles.roomTitle, { color: colors.foreground }]}>{room.name}</Text>
           <Text style={[styles.roomSubtitle, { color: colors.mutedForeground }]}>
-            {formatCount(selectedCount, "item")} selected of {items.length}
+            {formatCount(selectedCount, "item")} selected of {items.length} · {formatCurrency(selectedValue)} est.
+          </Text>
+          <Text style={[styles.roomSubtitle, { color: colors.mutedForeground }]}>
+            {formatCount(evidenceCount, "evidence file", "evidence files")}
+            {missingCount > 0 ? ` · ${formatCount(missingCount, "missing detail", "missing details")}` : ""}
           </Text>
         </View>
         <Pressable onPress={onRemoveRoom} hitSlop={8}>
-          <Text style={[styles.removeText, { color: colors.destructive }]}>Remove</Text>
+          <Text style={[styles.removeText, { color: colors.mutedForeground }]}>Exclude room</Text>
         </Pressable>
       </View>
       <View style={[styles.roomTools, { borderTopColor: colors.border }]}>
+        <Pressable onPress={onManageItems} style={styles.roomToolButton}>
+          <Text style={[styles.linkText, { color: colors.primary }]}>Select items</Text>
+        </Pressable>
         <Pressable onPress={onSelectAll} style={styles.roomToolButton}>
           <Text style={[styles.linkText, { color: colors.primary }]}>Select all items</Text>
         </Pressable>
         <Pressable onPress={onClear} style={styles.roomToolButton}>
-          <Text style={[styles.linkText, { color: colors.primary }]}>Clear room</Text>
+          <Text style={[styles.linkText, { color: colors.primary }]}>Clear selection</Text>
         </Pressable>
         <Pressable onPress={onAddItem} style={styles.roomToolButton}>
-          <Text style={[styles.linkText, { color: colors.primary }]}>Add item</Text>
+          <Text style={[styles.linkText, { color: colors.primary }]}>Add missing item</Text>
         </Pressable>
       </View>
       {items.length === 0 ? (
         <Text style={[styles.emptyRoomText, { color: colors.mutedForeground }]}>No documented items in this room yet. Use Add item to create one.</Text>
+      ) : null}
+    </View>
+  );
+}
+
+function ManageRoomPanel({
+  room,
+  items,
+  selectedItemIds,
+  evidenceCounts,
+  highlightItemId,
+  onBack,
+  onSelectAll,
+  onClear,
+  onToggleItem,
+  onAddItem,
+  colors,
+}: {
+  room: InventoryRoom;
+  items: InventoryItem[];
+  selectedItemIds: Set<string>;
+  evidenceCounts: Record<string, number>;
+  highlightItemId: string | null;
+  onBack: () => void;
+  onSelectAll: () => void;
+  onClear: () => void;
+  onToggleItem: (item: InventoryItem) => void;
+  onAddItem: () => void;
+  colors: ReturnType<typeof useColors>;
+}) {
+  return (
+    <View style={[styles.manageCard, { backgroundColor: colors.card, borderColor: colors.primary, borderRadius: colors.radius }]}>
+      <View style={styles.manageHeader}>
+        <Pressable onPress={onBack} hitSlop={8} style={styles.backPill}>
+          <Feather name="chevron-left" size={15} color={colors.primary} />
+          <Text style={[styles.linkText, { color: colors.primary }]}>Back to draft</Text>
+        </Pressable>
+        <Text style={[styles.manageTitle, { color: colors.foreground }]}>Select {room.name} items</Text>
+        <Text style={[styles.body, { color: colors.mutedForeground }]}>
+          Choose only the items from this room that belong in the claim pack.
+        </Text>
+      </View>
+      <View style={[styles.roomTools, { borderTopColor: colors.border }]}>
+        <Pressable onPress={onSelectAll} style={styles.roomToolButton}>
+          <Text style={[styles.linkText, { color: colors.primary }]}>Select all</Text>
+        </Pressable>
+        <Pressable onPress={onClear} style={styles.roomToolButton}>
+          <Text style={[styles.linkText, { color: colors.primary }]}>Clear selection</Text>
+        </Pressable>
+        <Pressable onPress={onAddItem} style={styles.roomToolButton}>
+          <Text style={[styles.linkText, { color: colors.primary }]}>Add missing item</Text>
+        </Pressable>
+      </View>
+      {items.length === 0 ? (
+        <View style={styles.manageEmpty}>
+          <Text style={[styles.emptyTitle, { color: colors.foreground }]}>No items in this room yet</Text>
+          <Text style={[styles.body, { color: colors.mutedForeground }]}>Add an item manually to include it in this draft.</Text>
+        </View>
       ) : (
         <View style={styles.itemList}>
           {items.map((item) => (
@@ -761,6 +1019,7 @@ function DraftRoomSection({
               item={item}
               selected={selectedItemIds.has(item.id)}
               evidenceCount={evidenceCounts[item.id] ?? 0}
+              highlighted={highlightItemId === item.id}
               onPress={() => onToggleItem(item)}
               colors={colors}
             />
@@ -815,12 +1074,14 @@ function ClaimPackItemRow({
   item,
   selected,
   evidenceCount,
+  highlighted = false,
   onPress,
   colors,
 }: {
   item: InventoryItem;
   selected: boolean;
   evidenceCount: number;
+  highlighted?: boolean;
   onPress: () => void;
   colors: ReturnType<typeof useColors>;
 }) {
@@ -830,7 +1091,11 @@ function ClaimPackItemRow({
       onPress={onPress}
       style={({ pressed }) => [
         styles.itemRow,
-        { borderTopColor: colors.border, opacity: pressed ? 0.72 : 1 },
+        {
+          borderTopColor: colors.border,
+          backgroundColor: highlighted ? colors.accent : "transparent",
+          opacity: pressed ? 0.72 : 1,
+        },
       ]}
     >
       <SelectionBox selected={selected} colors={colors} small />
@@ -904,6 +1169,14 @@ const styles = StyleSheet.create({
   readinessRow: { borderTopWidth: StyleSheet.hairlineWidth, paddingTop: 11, flexDirection: "row", gap: 7, alignItems: "center" },
   readinessText: { flex: 1, fontSize: 12, lineHeight: 17, fontFamily: "Inter_400Regular" },
   draftStatus: { fontSize: 11, fontFamily: "Inter_600SemiBold" },
+  warningCard: { borderWidth: 1, padding: 13, gap: 9 },
+  warningHeader: { flexDirection: "row", alignItems: "center", gap: 7 },
+  warningTitle: { fontSize: 13, fontFamily: "Inter_700Bold" },
+  warningChips: { flexDirection: "row", flexWrap: "wrap", gap: 7 },
+  warningChip: { overflow: "hidden", borderRadius: 999, paddingHorizontal: 9, paddingVertical: 4, fontSize: 11, fontFamily: "Inter_700Bold" },
+  noteCard: { borderWidth: 1, padding: 13, gap: 9 },
+  noteTitle: { fontSize: 14, fontFamily: "Inter_700Bold" },
+  noteInput: { borderWidth: 1, minHeight: 74, paddingHorizontal: 11, paddingVertical: 9, textAlignVertical: "top", fontSize: 13, lineHeight: 18, fontFamily: "Inter_400Regular" },
   actionRow: { flexDirection: "row", gap: 9 },
   secondaryButton: { flex: 1, borderWidth: 1, minHeight: 42, paddingHorizontal: 10, paddingVertical: 8, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 5 },
   secondaryButtonText: { fontSize: 12, fontFamily: "Inter_700Bold", textAlign: "center" },
@@ -922,6 +1195,11 @@ const styles = StyleSheet.create({
   roomToolButton: { paddingVertical: 2 },
   linkText: { fontSize: 12, fontFamily: "Inter_700Bold" },
   emptyRoomText: { paddingHorizontal: 14, paddingBottom: 14, fontSize: 12, fontFamily: "Inter_400Regular" },
+  manageCard: { borderWidth: 1, overflow: "hidden" },
+  manageHeader: { paddingHorizontal: 14, paddingVertical: 13, gap: 5 },
+  backPill: { alignSelf: "flex-start", flexDirection: "row", alignItems: "center", gap: 2, paddingBottom: 3 },
+  manageTitle: { fontSize: 17, fontFamily: "Inter_700Bold" },
+  manageEmpty: { padding: 14, gap: 5 },
   itemList: { paddingHorizontal: 14 },
   itemRow: { borderTopWidth: StyleSheet.hairlineWidth, minHeight: 58, paddingVertical: 10, flexDirection: "row", gap: 10, alignItems: "center" },
   itemCopy: { flex: 1, gap: 3 },

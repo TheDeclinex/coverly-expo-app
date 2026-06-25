@@ -3,12 +3,17 @@ import test from "node:test";
 
 import {
   addClaimPackRoom,
+  buildClaimPackGeneratePayload,
   calculateClaimPackSummary,
   clearClaimPackItemsInRoom,
+  createClaimPackClientDraftId,
   createInitialClaimPackSelection,
   createRoomsOnlyClaimPackSelection,
   createWholePropertyClaimPackSelection,
+  loadClaimPackDraftSnapshot,
   removeClaimPackRoom,
+  saveClaimPackDraftSnapshot,
+  selectClaimPackItem,
   selectAllClaimPackItemsInRoom,
   toggleClaimPackItem,
   toggleClaimPackRoom,
@@ -120,6 +125,33 @@ test("item toggle keeps room selection in sync", () => {
   assert.equal(withoutLoungeItems.selectedRoomIds.has("room-a"), false);
 });
 
+test("manual-add return can select the newly created item and its room", () => {
+  const initial = createRoomsOnlyClaimPackSelection(["room-a"]);
+  const selected = selectClaimPackItem(initial, items[0]);
+
+  assert.equal(selected.selectedRoomIds.has("room-a"), true);
+  assert.equal(selected.selectedItemIds.has("item-tv"), true);
+});
+
+test("draft snapshots preserve selected items across manual-add detours", () => {
+  const selection = {
+    selectedRoomIds: new Set(["room-a", "room-b"]),
+    selectedItemIds: new Set(["item-tv", "item-kettle"]),
+  };
+  saveClaimPackDraftSnapshot("cpd_snapshot", {
+    selection,
+    scope: "selected_rooms",
+    claimNote: "Kitchen claim",
+    managedRoomId: "room-a",
+  });
+  selection.selectedItemIds.clear();
+
+  const restored = loadClaimPackDraftSnapshot("cpd_snapshot");
+  assert.deepEqual([...(restored?.selection.selectedItemIds ?? [])].sort(), ["item-kettle", "item-tv"]);
+  assert.equal(restored?.claimNote, "Kitchen claim");
+  assert.equal(restored?.managedRoomId, "room-a");
+});
+
 test("summary counts selected value, evidence, and missing readiness data", () => {
   const selection = createInitialClaimPackSelection(rooms, items);
   const summary = calculateClaimPackSummary({
@@ -140,4 +172,48 @@ test("summary counts selected value, evidence, and missing readiness data", () =
   assert.equal(summary.missingValueCount, 1);
   assert.equal(summary.missingPhotoCount, 1);
   assert.equal(summary.missingEvidenceCount, 1);
+});
+
+test("client draft ids are stable-format local ids", () => {
+  assert.equal(createClaimPackClientDraftId(1720000000000, 0.5), "cpd_1720000000000_89oqgw");
+});
+
+test("future generate payload is sorted and trims optional claim note", () => {
+  const selection = {
+    selectedRoomIds: new Set(["room-b", "room-a"]),
+    selectedItemIds: new Set(["item-tv", "item-chair"]),
+  };
+
+  assert.deepEqual(
+    buildClaimPackGeneratePayload({
+      propertyId: "file-1",
+      selection,
+      scope: "selected_rooms",
+      clientDraftId: "cpd_test",
+      claimNote: "  Flood damage in kitchen  ",
+    }),
+    {
+      propertyId: "file-1",
+      selectedRoomIds: ["room-a", "room-b"],
+      selectedItemIds: ["item-chair", "item-tv"],
+      scope: "selected_rooms",
+      clientDraftId: "cpd_test",
+      claimNote: "Flood damage in kitchen",
+    },
+  );
+});
+
+test("future generate payload omits blank claim note", () => {
+  const selection = createRoomsOnlyClaimPackSelection(["room-a"]);
+
+  assert.equal(
+    buildClaimPackGeneratePayload({
+      propertyId: "file-1",
+      selection,
+      scope: "selected_rooms",
+      clientDraftId: "cpd_test",
+      claimNote: "   ",
+    }).claimNote,
+    null,
+  );
 });

@@ -19,6 +19,8 @@ export interface ClaimPackSelection {
   selectedItemIds: Set<string>;
 }
 
+export type ClaimPackScope = "whole_property" | "selected_rooms";
+
 export interface ClaimPackSummary {
   selectedRoomsCount: number;
   selectedItemsCount: number;
@@ -27,6 +29,63 @@ export interface ClaimPackSummary {
   missingValueCount: number;
   missingPhotoCount: number;
   missingEvidenceCount: number;
+}
+
+export interface ClaimPackGenerateDraftPayload {
+  propertyId: string;
+  selectedRoomIds: string[];
+  selectedItemIds: string[];
+  scope: ClaimPackScope;
+  clientDraftId: string;
+  claimNote: string | null;
+}
+
+export interface ClaimPackDraftSnapshot {
+  selection: ClaimPackSelection;
+  scope: ClaimPackScope;
+  claimNote: string;
+  managedRoomId: string | null;
+}
+
+const draftSnapshots = new Map<string, ClaimPackDraftSnapshot>();
+
+function cloneSelection(selection: ClaimPackSelection): ClaimPackSelection {
+  return {
+    selectedRoomIds: new Set(selection.selectedRoomIds),
+    selectedItemIds: new Set(selection.selectedItemIds),
+  };
+}
+
+export function saveClaimPackDraftSnapshot(
+  clientDraftId: string,
+  snapshot: ClaimPackDraftSnapshot,
+): void {
+  draftSnapshots.set(clientDraftId, {
+    ...snapshot,
+    selection: cloneSelection(snapshot.selection),
+  });
+}
+
+export function loadClaimPackDraftSnapshot(
+  clientDraftId: string | null | undefined,
+): ClaimPackDraftSnapshot | null {
+  if (!clientDraftId) return null;
+  const snapshot = draftSnapshots.get(clientDraftId);
+  if (!snapshot) return null;
+  return {
+    ...snapshot,
+    selection: cloneSelection(snapshot.selection),
+  };
+}
+
+export function createClaimPackClientDraftId(
+  now = Date.now(),
+  random = Math.random(),
+): string {
+  const randomPart = Math.floor(random * 1_000_000_000)
+    .toString(36)
+    .padStart(6, "0");
+  return `cpd_${now}_${randomPart}`;
 }
 
 export function itemClaimPackValue(item: ClaimPackItemLike): number {
@@ -164,6 +223,41 @@ export function toggleClaimPackItem(
   }
 
   return { selectedRoomIds, selectedItemIds };
+}
+
+export function selectClaimPackItem(
+  selection: ClaimPackSelection,
+  item: ClaimPackItemLike,
+): ClaimPackSelection {
+  const selectedRoomIds = new Set(selection.selectedRoomIds);
+  const selectedItemIds = new Set(selection.selectedItemIds);
+  selectedItemIds.add(item.id);
+  if (item.room_id) selectedRoomIds.add(item.room_id);
+  return { selectedRoomIds, selectedItemIds };
+}
+
+export function buildClaimPackGeneratePayload({
+  propertyId,
+  selection,
+  scope,
+  clientDraftId,
+  claimNote,
+}: {
+  propertyId: string;
+  selection: ClaimPackSelection;
+  scope: ClaimPackScope;
+  clientDraftId: string;
+  claimNote?: string | null;
+}): ClaimPackGenerateDraftPayload {
+  const trimmedNote = claimNote?.trim() ?? "";
+  return {
+    propertyId,
+    selectedRoomIds: [...selection.selectedRoomIds].sort(),
+    selectedItemIds: [...selection.selectedItemIds].sort(),
+    scope,
+    clientDraftId,
+    claimNote: trimmedNote.length > 0 ? trimmedNote : null,
+  };
 }
 
 export function calculateClaimPackSummary({

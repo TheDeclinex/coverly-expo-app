@@ -119,12 +119,13 @@ function StyledInput({
 }
 
 export default function AddItemScreen() {
-  const { fileId, roomId, fileName, roomName, returnToClaimPack } = useLocalSearchParams<{
+  const { fileId, roomId, fileName, roomName, returnToClaimPack, claimDraftId } = useLocalSearchParams<{
     fileId?: string;
     roomId?: string;
     fileName?: string;
     roomName?: string;
     returnToClaimPack?: string;
+    claimDraftId?: string;
   }>();
   const { session } = useAuth();
   const colors = useColors();
@@ -154,6 +155,7 @@ export default function AddItemScreen() {
   const [saving, setSaving] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [photoWarning, setPhotoWarning] = useState<string | null>(null);
+  const addingToClaimPack = returnToClaimPack === "1";
 
   const { data: properties } = useQuery({
     queryKey: ["properties", session?.user.id],
@@ -412,12 +414,14 @@ export default function AddItemScreen() {
       queryKey: ["claim-pack-evidence-counts", selectedFileId],
     });
 
-    if (returnToClaimPack === "1") {
+    if (addingToClaimPack) {
       router.replace({
         pathname: "/(tabs)/claim-pack/[fileId]",
         params: {
           fileId: selectedFileId,
           focusRoomId: selectedRoomId,
+          newItemId: payload.id,
+          claimDraftId: claimDraftId ?? "",
         },
       } as Href);
       return;
@@ -443,13 +447,22 @@ export default function AddItemScreen() {
     <>
       <Stack.Screen
         options={{
-          title: "Add Item",
+          title: addingToClaimPack ? "Add to Claim Pack" : "Add Item",
           headerBackVisible: false,
           headerLeft: () => (
             <ContextBackButton
-              label={roomId ? roomName ?? "Room" : fileName ?? "Home"}
+              label={addingToClaimPack ? "Claim Pack" : roomId ? roomName ?? "Room" : fileName ?? "Home"}
               onPress={() => {
-                if (roomId) {
+                if (addingToClaimPack && selectedFileId) {
+                  router.replace({
+                    pathname: "/(tabs)/claim-pack/[fileId]",
+                    params: {
+                      fileId: selectedFileId,
+                      focusRoomId: selectedRoomId || roomId,
+                      claimDraftId: claimDraftId ?? "",
+                    },
+                  } as Href);
+                } else if (roomId) {
                   router.replace({
                     pathname: "/(tabs)/room/[id]",
                     params: {
@@ -483,6 +496,29 @@ export default function AddItemScreen() {
           ]}
           keyboardShouldPersistTaps="handled"
         >
+          {addingToClaimPack ? (
+            <View
+              style={[
+                styles.claimPackBanner,
+                {
+                  backgroundColor: colors.card,
+                  borderColor: colors.primary,
+                  borderRadius: colors.radius,
+                },
+              ]}
+            >
+              <Feather name="file-text" size={16} color={colors.primary} />
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.claimPackBannerTitle, { color: colors.foreground }]}>
+                  Adding to Claim Pack
+                </Text>
+                <Text style={[styles.claimPackBannerText, { color: colors.mutedForeground }]}>
+                  {roomName ? `${roomName} · ` : ""}Save this item and it will be included in your draft.
+                </Text>
+              </View>
+            </View>
+          ) : null}
+
           {/* LOCATION */}
           <View style={styles.section}>
             <Text style={[styles.sectionTitle, { color: colors.mutedForeground }]}>
@@ -950,6 +986,23 @@ export default function AddItemScreen() {
 const styles = StyleSheet.create({
   scroll: { padding: 16, gap: 20 },
   section: { gap: 14 },
+  claimPackBanner: {
+    borderWidth: 1,
+    padding: 13,
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 10,
+  },
+  claimPackBannerTitle: {
+    fontSize: 14,
+    fontFamily: "Inter_700Bold",
+  },
+  claimPackBannerText: {
+    marginTop: 3,
+    fontSize: 12,
+    lineHeight: 17,
+    fontFamily: "Inter_400Regular",
+  },
   sectionTitle: {
     fontSize: 11,
     fontFamily: "Inter_600SemiBold",
