@@ -1,5 +1,6 @@
 {
   "expo": {
+    "owner": "coverly",
     "name": "Coverly",
     "slug": "coverly",
     "version": "1.0.0",
@@ -23,7 +24,11 @@
     },
     "android": {
       "package": "nz.coverly.app",
-      "versionCode": 1
+      "versionCode": 1,
+      "permissions": [
+        "android.permission.RECORD_AUDIO",
+        "android.permission.MODIFY_AUDIO_SETTINGS"
+      ]
     },
     "web": {
       "favicon": "./assets/images/icon.png"
@@ -55,6 +60,11 @@
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
+    },
+    "extra": {
+      "eas": {
+        "projectId": "e5e80314-7ccd-4981-97c4-5be844c2967a"
+      }
     }
   }
 }
