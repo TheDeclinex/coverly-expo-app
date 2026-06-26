@@ -18,6 +18,10 @@ import { LoadingState } from "@/components/LoadingState";
 import { useAuth } from "@/context/AuthContext";
 import { useColors } from "@/hooks/useColors";
 import {
+  getClaimPackDraft,
+  saveClaimPackDraft,
+} from "@/lib/claim-pack-draft-storage";
+import {
   buildClaimPackGeneratePayload,
   calculateClaimPackSummary,
   clearClaimPackItemsInRoom,
@@ -60,22 +64,16 @@ function formatCount(value: number, singular: string, plural = `${singular}s`) {
   return `${value} ${value === 1 ? singular : plural}`;
 }
 
-function readinessCopy(summary: ReturnType<typeof calculateClaimPackSummary>) {
-  const missing = [
-    summary.missingValueCount > 0 ? formatCount(summary.missingValueCount, "missing value", "missing values") : null,
-    summary.missingPhotoCount > 0 ? formatCount(summary.missingPhotoCount, "missing photo", "missing photos") : null,
-    summary.missingEvidenceCount > 0 ? formatCount(summary.missingEvidenceCount, "item without evidence", "items without evidence") : null,
-  ].filter((chip): chip is string => Boolean(chip));
-  return missing.length === 0 ? "Selected items look claim-pack ready." : missing.join(" · ");
-}
-
-function itemCompactWarning(item: InventoryItem, evidenceCount: number) {
+function itemCompactWarning(item: InventoryItem) {
   const missing = [
     hasValue(item) ? null : "value",
     hasPhoto(item) ? null : "photo",
-    evidenceCount > 0 ? null : "evidence",
   ].filter(Boolean);
   return missing.length === 0 ? null : `Needs ${missing.join(", ")}`;
+}
+
+function itemNeedsClaimPackReview(item: InventoryItem) {
+  return !hasValue(item) || !hasPhoto(item);
 }
 
 export default function ClaimPackDraftScreen() {
@@ -95,9 +93,14 @@ export default function ClaimPackDraftScreen() {
   const [didApplyFocusRoom, setDidApplyFocusRoom] = useState(false);
   const [scope, setScope] = useState<ClaimPackScope>("selected_rooms");
   const [claimNote, setClaimNote] = useState("");
+  const [insurerName, setInsurerName] = useState("");
+  const [policyNumber, setPolicyNumber] = useState("");
+  const [claimNumber, setClaimNumber] = useState("");
   const [clientDraftId] = useState(() => claimDraftId ?? createClaimPackClientDraftId());
   const [managedRoomId, setManagedRoomId] = useState<string | null>(null);
   const [highlightItemId, setHighlightItemId] = useState<string | null>(null);
+  const [didLoadStoredDraft, setDidLoadStoredDraft] = useState(false);
+  const [didPrefillClaimDetails, setDidPrefillClaimDetails] = useState(false);
 
   useEffect(() => {
     if (stage !== "draft" || !managedRoomId) return;
@@ -194,6 +197,41 @@ export default function ClaimPackDraftScreen() {
   const evidenceCounts = evidenceCountsQuery.data ?? {};
 
   useEffect(() => {
+    if (!property || didPrefillClaimDetails || claimDraftId) return;
+    setInsurerName(property.insurer_name ?? "");
+    setPolicyNumber(property.policy_number ?? "");
+    setDidPrefillClaimDetails(true);
+  }, [claimDraftId, didPrefillClaimDetails, property]);
+
+  useEffect(() => {
+    if (!session?.user.id || !claimDraftId || focusRoomId || didLoadStoredDraft || !roomsQuery.isSuccess || !itemsQuery.isSuccess) return;
+    let cancelled = false;
+    void getClaimPackDraft(session.user.id, claimDraftId).then((draft) => {
+      if (cancelled || !draft) {
+        if (!cancelled) setDidLoadStoredDraft(true);
+        return;
+      }
+      setScope(draft.scope);
+      setClaimNote(draft.claimNote);
+      setInsurerName(draft.insurerName);
+      setPolicyNumber(draft.policyNumber);
+      setClaimNumber(draft.claimNumber);
+      setSelection({
+        selectedRoomIds: new Set(draft.selectedRoomIds),
+        selectedItemIds: new Set(draft.selectedItemIds),
+      });
+      setRoomDraftIds(new Set(draft.selectedRoomIds));
+      setManagedRoomId(null);
+      setStage("draft");
+      setDidLoadStoredDraft(true);
+      setDidPrefillClaimDetails(true);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [claimDraftId, didLoadStoredDraft, focusRoomId, itemsQuery.isSuccess, roomsQuery.isSuccess, session?.user.id]);
+
+  useEffect(() => {
     if (!focusRoomId || didApplyFocusRoom || !roomsQuery.isSuccess || !itemsQuery.isSuccess) return;
     const snapshot = loadClaimPackDraftSnapshot(clientDraftId);
     const addedItem = newItemId ? items.find((item) => item.id === newItemId) : null;
@@ -204,6 +242,10 @@ export default function ClaimPackDraftScreen() {
     if (snapshot) {
       setScope(snapshot.scope);
       setClaimNote(snapshot.claimNote);
+      setInsurerName(snapshot.insurerName ?? "");
+      setPolicyNumber(snapshot.policyNumber ?? "");
+      setClaimNumber(snapshot.claimNumber ?? "");
+      setDidPrefillClaimDetails(true);
     }
     setSelection(focusedSelection);
     setRoomDraftIds(new Set(focusedSelection.selectedRoomIds));
@@ -257,6 +299,33 @@ export default function ClaimPackDraftScreen() {
     void itemsQuery.refetch();
     void evidenceCountsQuery.refetch();
   };
+
+  const persistDraft = (draftSelection = effectiveSelection) => {
+    if (!session?.user.id || !property) return;
+    const now = new Date().toISOString();
+    void saveClaimPackDraft(session.user.id, {
+      id: clientDraftId,
+      fileId: property.id,
+      propertyName: property.name,
+      insurerName,
+      policyNumber,
+      claimNumber,
+      claimNote,
+      selectedRoomIds: [...draftSelection.selectedRoomIds],
+      selectedItemIds: [...draftSelection.selectedItemIds],
+      scope,
+      createdAt: now,
+      updatedAt: now,
+    });
+  };
+
+  useEffect(() => {
+    if (stage !== "draft" || !selection || !property || !session?.user.id) return;
+    const timeout = setTimeout(() => {
+      persistDraft(selection);
+    }, 450);
+    return () => clearTimeout(timeout);
+  }, [claimNote, claimNumber, clientDraftId, insurerName, policyNumber, property, scope, selection, session?.user.id, stage]);
 
   const startWholeProperty = () => {
     setScope("whole_property");
@@ -322,10 +391,14 @@ export default function ClaimPackDraftScreen() {
 
   const addItemManually = (room?: InventoryRoom) => {
     if (!property) return;
+    persistDraft();
     saveClaimPackDraftSnapshot(clientDraftId, {
       selection: effectiveSelection,
       scope,
       claimNote,
+      insurerName,
+      policyNumber,
+      claimNumber,
       managedRoomId: room?.id ?? managedRoomId,
     });
     router.push({
@@ -413,6 +486,12 @@ export default function ClaimPackDraftScreen() {
               evidenceCounts={evidenceCounts}
               claimNote={claimNote}
               onChangeClaimNote={setClaimNote}
+              insurerName={insurerName}
+              onChangeInsurerName={setInsurerName}
+              policyNumber={policyNumber}
+              onChangePolicyNumber={setPolicyNumber}
+              claimNumber={claimNumber}
+              onChangeClaimNumber={setClaimNumber}
               managedRoomId={managedRoomId}
               onManageRoom={enterRoomSelectionMode}
               highlightItemId={highlightItemId}
@@ -470,7 +549,7 @@ function BuilderHero({
         <Text style={[styles.kicker, { color: colors.mutedForeground }]}>{step.toUpperCase()}</Text>
         <Text style={[styles.title, { color: colors.foreground }]}>{property.name}</Text>
         <Text style={[styles.body, { color: colors.mutedForeground }]}>
-          Build a claim-pack draft for selected property contents, photos and supporting evidence.
+          Build a claim pack draft for selected property contents, photos and supporting evidence.
         </Text>
       </View>
     </View>
@@ -565,9 +644,9 @@ function RoomPicker({
     <View style={styles.sections}>
       <View style={styles.sectionTitleRow}>
         <View style={{ flex: 1 }}>
-          <Text style={[styles.sectionHeading, { color: colors.foreground }]}>Choose rooms</Text>
+          <Text style={[styles.sectionHeading, { color: colors.foreground }]}>Rooms in this claim pack</Text>
           <Text style={[styles.body, { color: colors.mutedForeground }]}>
-            Select the rooms involved in this claim-pack draft.
+            Choose which rooms and items should be included before generating your claim pack.
           </Text>
         </View>
         <Pressable onPress={onBack} hitSlop={8}>
@@ -599,6 +678,9 @@ function RoomPicker({
                 <Text style={[styles.roomTitle, { color: colors.foreground }]}>{room.name}</Text>
                 <Text style={[styles.roomSubtitle, { color: colors.mutedForeground }]}>{formatCount(roomItems.length, "item")} documented</Text>
               </View>
+              <Text style={[styles.roomState, { color: selected ? colors.primary : colors.mutedForeground }]}>
+                {selected ? "Included" : "Excluded"}
+              </Text>
             </Pressable>
           );
         })
@@ -628,6 +710,12 @@ function DraftReview({
   evidenceCounts,
   claimNote,
   onChangeClaimNote,
+  insurerName,
+  onChangeInsurerName,
+  policyNumber,
+  onChangePolicyNumber,
+  claimNumber,
+  onChangeClaimNumber,
   managedRoomId,
   onManageRoom,
   highlightItemId,
@@ -648,6 +736,12 @@ function DraftReview({
   evidenceCounts: Record<string, number>;
   claimNote: string;
   onChangeClaimNote: (value: string) => void;
+  insurerName: string;
+  onChangeInsurerName: (value: string) => void;
+  policyNumber: string;
+  onChangePolicyNumber: (value: string) => void;
+  claimNumber: string;
+  onChangeClaimNumber: (value: string) => void;
   managedRoomId: string | null;
   onManageRoom: (roomId: string | null) => void;
   highlightItemId: string | null;
@@ -660,6 +754,14 @@ function DraftReview({
   colors: ReturnType<typeof useColors>;
 }) {
   const managedRoom = rooms.find((room) => room.id === managedRoomId) ?? null;
+  const selectedItems = [
+    ...rooms.flatMap((room) => itemsByRoomId.get(room.id) ?? []),
+    ...selectedUnassignedItems,
+  ].filter((item) => selection.selectedItemIds.has(item.id));
+  const itemsNeedingReviewCount = selectedItems.filter((item) =>
+    itemNeedsClaimPackReview(item),
+  ).length;
+
   if (managedRoom) {
     return (
       <View style={styles.sections}>
@@ -682,9 +784,19 @@ function DraftReview({
 
   return (
     <View style={styles.sections}>
-      <SummaryCard property={property} summary={summary} colors={colors} />
-      <MissingInfoBanner summary={summary} colors={colors} />
-      <ClaimNoteCard claimNote={claimNote} onChangeClaimNote={onChangeClaimNote} colors={colors} />
+      <SummaryCard property={property} summary={summary} itemsNeedingReviewCount={itemsNeedingReviewCount} colors={colors} />
+      <MissingInfoBanner itemsNeedingReviewCount={itemsNeedingReviewCount} colors={colors} />
+      <ClaimDetailsCard
+        insurerName={insurerName}
+        onChangeInsurerName={onChangeInsurerName}
+        policyNumber={policyNumber}
+        onChangePolicyNumber={onChangePolicyNumber}
+        claimNumber={claimNumber}
+        onChangeClaimNumber={onChangeClaimNumber}
+        claimNote={claimNote}
+        onChangeClaimNote={onChangeClaimNote}
+        colors={colors}
+      />
 
       <View style={styles.actionRow}>
         <Pressable
@@ -719,9 +831,9 @@ function DraftReview({
         <>
           <View style={styles.sectionTitleRow}>
             <View style={{ flex: 1 }}>
-              <Text style={[styles.sectionHeading, { color: colors.foreground }]}>Rooms in this draft</Text>
+              <Text style={[styles.sectionHeading, { color: colors.foreground }]}>Rooms in this claim pack</Text>
               <Text style={[styles.body, { color: colors.mutedForeground }]}>
-                Choose which items from each room should be included.
+                Choose which rooms and items should be included before generating your claim pack.
               </Text>
             </View>
           </View>
@@ -758,16 +870,19 @@ function DraftReview({
 function SummaryCard({
   property,
   summary,
+  itemsNeedingReviewCount,
   colors,
 }: {
   property: InventoryFile;
   summary: ReturnType<typeof calculateClaimPackSummary>;
+  itemsNeedingReviewCount: number;
   colors: ReturnType<typeof useColors>;
 }) {
   return (
     <View style={[styles.summaryCard, { backgroundColor: colors.card, borderColor: colors.border, borderRadius: colors.radius }]}>
-      <Text style={[styles.kicker, { color: colors.mutedForeground }]}>DRAFT SUMMARY</Text>
-      <Text style={[styles.summaryProperty, { color: colors.foreground }]}>{property.name}</Text>
+      <Text style={[styles.kicker, { color: colors.mutedForeground }]}>DRAFT REVIEW</Text>
+      <Text style={[styles.summaryProperty, { color: colors.foreground }]}>Claim pack draft</Text>
+      <Text style={[styles.summaryLabel, { color: colors.mutedForeground }]}>{property.name}</Text>
       <View style={styles.summaryGrid}>
         <SummaryCell label="Rooms" value={summary.selectedRoomsCount} colors={colors} />
         <SummaryCell label="Items" value={summary.selectedItemsCount} colors={colors} />
@@ -776,11 +891,13 @@ function SummaryCard({
       </View>
       <View style={[styles.readinessRow, { borderTopColor: colors.border }]}>
         <Feather
-          name={summary.missingValueCount + summary.missingPhotoCount + summary.missingEvidenceCount === 0 ? "check-circle" : "alert-circle"}
+          name={itemsNeedingReviewCount === 0 ? "check-circle" : "alert-circle"}
           size={15}
-          color={summary.missingValueCount + summary.missingPhotoCount + summary.missingEvidenceCount === 0 ? colors.success : colors.warning}
+          color={itemsNeedingReviewCount === 0 ? colors.success : colors.warning}
         />
-        <Text style={[styles.readinessText, { color: colors.mutedForeground }]}>{readinessCopy(summary)}</Text>
+        <Text style={[styles.readinessText, { color: colors.mutedForeground }]}>
+          {itemsNeedingReviewCount > 0 ? formatCount(itemsNeedingReviewCount, "item needs review", "items need review") : "Selected items look claim-pack ready."}
+        </Text>
       </View>
       <Text style={[styles.draftStatus, { color: colors.mutedForeground }]}>Draft only · PDF export coming next</Text>
     </View>
@@ -788,55 +905,101 @@ function SummaryCard({
 }
 
 function MissingInfoBanner({
-  summary,
+  itemsNeedingReviewCount,
   colors,
 }: {
-  summary: ReturnType<typeof calculateClaimPackSummary>;
+  itemsNeedingReviewCount: number;
   colors: ReturnType<typeof useColors>;
 }) {
-  const missingTotal = summary.missingValueCount + summary.missingPhotoCount + summary.missingEvidenceCount;
-  if (missingTotal === 0) return null;
-  const chips = [
-    summary.missingValueCount > 0 ? `${summary.missingValueCount} no value` : null,
-    summary.missingPhotoCount > 0 ? `${summary.missingPhotoCount} no photo` : null,
-    summary.missingEvidenceCount > 0 ? `${summary.missingEvidenceCount} no evidence` : null,
-  ].filter(Boolean);
+  if (itemsNeedingReviewCount === 0) return null;
 
   return (
     <View style={[styles.warningCard, { backgroundColor: colors.card, borderColor: colors.warning, borderRadius: colors.radius }]}>
       <View style={styles.warningHeader}>
         <Feather name="alert-circle" size={16} color={colors.warning} />
-        <Text style={[styles.warningTitle, { color: colors.foreground }]}>Items with missing info</Text>
+        <Text style={[styles.warningTitle, { color: colors.foreground }]}>
+          {formatCount(itemsNeedingReviewCount, "item needs review", "items need review")}
+        </Text>
       </View>
       <Text style={[styles.body, { color: colors.mutedForeground }]}>
-        Your pack is still usable without these — you can review them room by room.
+        You can still generate the draft later, but checking values, photos and evidence will make the claim pack more useful.
       </Text>
-      <View style={styles.warningChips}>
-        {chips.map((chip) => (
-          <Text key={chip} style={[styles.warningChip, { backgroundColor: colors.accent, color: colors.warning }]}>
-            {chip}
-          </Text>
-        ))}
-      </View>
     </View>
   );
 }
 
-function ClaimNoteCard({
+function ClaimDetailsCard({
+  insurerName,
+  onChangeInsurerName,
+  policyNumber,
+  onChangePolicyNumber,
+  claimNumber,
+  onChangeClaimNumber,
   claimNote,
   onChangeClaimNote,
   colors,
 }: {
+  insurerName: string;
+  onChangeInsurerName: (value: string) => void;
+  policyNumber: string;
+  onChangePolicyNumber: (value: string) => void;
+  claimNumber: string;
+  onChangeClaimNumber: (value: string) => void;
   claimNote: string;
   onChangeClaimNote: (value: string) => void;
   colors: ReturnType<typeof useColors>;
 }) {
   return (
     <View style={[styles.noteCard, { backgroundColor: colors.card, borderColor: colors.border, borderRadius: colors.radius }]}>
-      <Text style={[styles.noteTitle, { color: colors.foreground }]}>Claim context</Text>
+      <Text style={[styles.noteTitle, { color: colors.foreground }]}>Claim details</Text>
       <Text style={[styles.body, { color: colors.mutedForeground }]}>
-        Optional note for the future PDF, such as “storm damage in lounge” or “theft from garage”.
+        Add the details you want shown on this claim pack draft.
       </Text>
+      <TextInput
+        value={insurerName}
+        onChangeText={onChangeInsurerName}
+        placeholder="Insurer"
+        placeholderTextColor={colors.mutedForeground}
+        style={[
+          styles.singleLineInput,
+          {
+            borderColor: colors.border,
+            borderRadius: colors.radius,
+            color: colors.foreground,
+            backgroundColor: colors.background,
+          },
+        ]}
+      />
+      <TextInput
+        value={policyNumber}
+        onChangeText={onChangePolicyNumber}
+        placeholder="Policy number"
+        placeholderTextColor={colors.mutedForeground}
+        style={[
+          styles.singleLineInput,
+          {
+            borderColor: colors.border,
+            borderRadius: colors.radius,
+            color: colors.foreground,
+            backgroundColor: colors.background,
+          },
+        ]}
+      />
+      <TextInput
+        value={claimNumber}
+        onChangeText={onChangeClaimNumber}
+        placeholder="Claim number"
+        placeholderTextColor={colors.mutedForeground}
+        style={[
+          styles.singleLineInput,
+          {
+            borderColor: colors.border,
+            borderRadius: colors.radius,
+            color: colors.foreground,
+            backgroundColor: colors.background,
+          },
+        ]}
+      />
       <TextInput
         value={claimNote}
         onChangeText={onChangeClaimNote}
@@ -882,6 +1045,48 @@ function SummaryCell({
   );
 }
 
+function ActionPill({
+  label,
+  onPress,
+  variant = "neutral",
+  icon,
+  colors,
+}: {
+  label: string;
+  onPress: () => void;
+  variant?: "primary" | "neutral" | "outline";
+  icon?: React.ComponentProps<typeof Feather>["name"];
+  colors: ReturnType<typeof useColors>;
+}) {
+  const isPrimary = variant === "primary";
+  const isNeutral = variant === "neutral";
+  return (
+    <Pressable
+      onPress={onPress}
+      style={({ pressed }) => [
+        styles.actionPill,
+        isPrimary ? styles.actionPillPrimary : null,
+        {
+          backgroundColor: isPrimary ? colors.primary : isNeutral ? colors.secondary : colors.card,
+          borderColor: isPrimary ? colors.primary : colors.border,
+          opacity: pressed ? 0.76 : 1,
+        },
+      ]}
+    >
+      {icon ? (
+        <Feather
+          name={icon}
+          size={13}
+          color={isPrimary ? colors.primaryForeground : isNeutral ? colors.foreground : colors.primary}
+        />
+      ) : null}
+      <Text style={[styles.actionPillText, { color: isPrimary ? colors.primaryForeground : isNeutral ? colors.foreground : colors.primary }]}>
+        {label}
+      </Text>
+    </Pressable>
+  );
+}
+
 function DraftRoomCard({
   room,
   items,
@@ -913,8 +1118,7 @@ function DraftRoomCard({
     (total, item) =>
       total +
       (hasValue(item) ? 0 : 1) +
-      (hasPhoto(item) ? 0 : 1) +
-      ((evidenceCounts[item.id] ?? 0) > 0 ? 0 : 1),
+      (hasPhoto(item) ? 0 : 1),
     0,
   );
   return (
@@ -926,7 +1130,7 @@ function DraftRoomCard({
         <View style={styles.roomHeaderCopy}>
           <Text style={[styles.roomTitle, { color: colors.foreground }]}>{room.name}</Text>
           <Text style={[styles.roomSubtitle, { color: colors.mutedForeground }]}>
-            {formatCount(selectedCount, "item")} selected of {items.length} · {formatCurrency(selectedValue)} est.
+            {selectedCount > 0 ? `${selectedCount} of ${items.length} items selected` : "No items selected yet"} · {formatCurrency(selectedValue)} est.
           </Text>
           <Text style={[styles.roomSubtitle, { color: colors.mutedForeground }]}>
             {formatCount(evidenceCount, "evidence file", "evidence files")}
@@ -934,22 +1138,25 @@ function DraftRoomCard({
           </Text>
         </View>
         <Pressable onPress={onRemoveRoom} hitSlop={8}>
-          <Text style={[styles.removeText, { color: colors.mutedForeground }]}>Exclude room</Text>
+          <Text style={[styles.removeText, { color: colors.mutedForeground }]}>Exclude</Text>
         </Pressable>
       </View>
       <View style={[styles.roomTools, { borderTopColor: colors.border }]}>
-        <Pressable onPress={onManageItems} style={styles.roomToolButton}>
-          <Text style={[styles.linkText, { color: colors.primary }]}>Select items</Text>
+        <Pressable
+          onPress={onManageItems}
+          style={({ pressed }) => [
+            styles.roomPrimaryAction,
+            { backgroundColor: colors.primary, borderRadius: colors.radius, opacity: pressed ? 0.76 : 1 },
+          ]}
+        >
+          <Feather name="plus-circle" size={15} color={colors.primaryForeground} />
+          <Text style={[styles.primaryButtonText, { color: colors.primaryForeground }]}>Add items to claim pack</Text>
         </Pressable>
-        <Pressable onPress={onSelectAll} style={styles.roomToolButton}>
-          <Text style={[styles.linkText, { color: colors.primary }]}>Select all items</Text>
-        </Pressable>
-        <Pressable onPress={onClear} style={styles.roomToolButton}>
-          <Text style={[styles.linkText, { color: colors.primary }]}>Clear selection</Text>
-        </Pressable>
-        <Pressable onPress={onAddItem} style={styles.roomToolButton}>
-          <Text style={[styles.linkText, { color: colors.primary }]}>Add missing item</Text>
-        </Pressable>
+        <View style={styles.roomSecondaryActions}>
+          <ActionPill label="Select all" variant="neutral" onPress={onSelectAll} colors={colors} />
+          <ActionPill label="Clear" variant="neutral" onPress={onClear} colors={colors} />
+          <ActionPill label="Add missing item" icon="plus" variant="outline" onPress={onAddItem} colors={colors} />
+        </View>
       </View>
       {items.length === 0 ? (
         <Text style={[styles.emptyRoomText, { color: colors.mutedForeground }]}>No documented items in this room yet. Use Add item to create one.</Text>
@@ -986,25 +1193,18 @@ function ManageRoomPanel({
   return (
     <View style={[styles.manageCard, { backgroundColor: colors.card, borderColor: colors.primary, borderRadius: colors.radius }]}>
       <View style={styles.manageHeader}>
-        <Pressable onPress={onBack} hitSlop={8} style={styles.backPill}>
-          <Feather name="chevron-left" size={15} color={colors.primary} />
-          <Text style={[styles.linkText, { color: colors.primary }]}>Back to draft</Text>
-        </Pressable>
-        <Text style={[styles.manageTitle, { color: colors.foreground }]}>Select {room.name} items</Text>
+        <View style={styles.manageTitleRow}>
+          <Text style={[styles.manageTitle, { color: colors.foreground }]}>Add items from {room.name}</Text>
+          <ActionPill label="Done adding" icon="check" variant="primary" onPress={onBack} colors={colors} />
+        </View>
         <Text style={[styles.body, { color: colors.mutedForeground }]}>
-          Choose only the items from this room that belong in the claim pack.
+          Choose the items to add to this claim pack. Your selections are saved automatically.
         </Text>
       </View>
       <View style={[styles.roomTools, { borderTopColor: colors.border }]}>
-        <Pressable onPress={onSelectAll} style={styles.roomToolButton}>
-          <Text style={[styles.linkText, { color: colors.primary }]}>Select all</Text>
-        </Pressable>
-        <Pressable onPress={onClear} style={styles.roomToolButton}>
-          <Text style={[styles.linkText, { color: colors.primary }]}>Clear selection</Text>
-        </Pressable>
-        <Pressable onPress={onAddItem} style={styles.roomToolButton}>
-          <Text style={[styles.linkText, { color: colors.primary }]}>Add missing item</Text>
-        </Pressable>
+        <ActionPill label="Select all" variant="neutral" onPress={onSelectAll} colors={colors} />
+        <ActionPill label="Clear" variant="neutral" onPress={onClear} colors={colors} />
+        <ActionPill label="Add missing item" icon="plus" variant="outline" onPress={onAddItem} colors={colors} />
       </View>
       {items.length === 0 ? (
         <View style={styles.manageEmpty}>
@@ -1026,6 +1226,11 @@ function ManageRoomPanel({
           ))}
         </View>
       )}
+      <View style={[styles.manageFooter, { borderTopColor: colors.border }]}>
+        <Pressable onPress={onBack} style={[styles.primaryButton, { backgroundColor: colors.primary, borderRadius: colors.radius }]}>
+          <Text style={[styles.primaryButtonText, { color: colors.primaryForeground }]}>Done adding</Text>
+        </Pressable>
+      </View>
     </View>
   );
 }
@@ -1085,7 +1290,7 @@ function ClaimPackItemRow({
   onPress: () => void;
   colors: ReturnType<typeof useColors>;
 }) {
-  const warning = selected ? itemCompactWarning(item, evidenceCount) : null;
+  const warning = selected ? itemCompactWarning(item) : null;
   return (
     <Pressable
       onPress={onPress}
@@ -1172,10 +1377,9 @@ const styles = StyleSheet.create({
   warningCard: { borderWidth: 1, padding: 13, gap: 9 },
   warningHeader: { flexDirection: "row", alignItems: "center", gap: 7 },
   warningTitle: { fontSize: 13, fontFamily: "Inter_700Bold" },
-  warningChips: { flexDirection: "row", flexWrap: "wrap", gap: 7 },
-  warningChip: { overflow: "hidden", borderRadius: 999, paddingHorizontal: 9, paddingVertical: 4, fontSize: 11, fontFamily: "Inter_700Bold" },
   noteCard: { borderWidth: 1, padding: 13, gap: 9 },
   noteTitle: { fontSize: 14, fontFamily: "Inter_700Bold" },
+  singleLineInput: { borderWidth: 1, minHeight: 44, paddingHorizontal: 11, paddingVertical: 9, fontSize: 13, fontFamily: "Inter_400Regular" },
   noteInput: { borderWidth: 1, minHeight: 74, paddingHorizontal: 11, paddingVertical: 9, textAlignVertical: "top", fontSize: 13, lineHeight: 18, fontFamily: "Inter_400Regular" },
   actionRow: { flexDirection: "row", gap: 9 },
   secondaryButton: { flex: 1, borderWidth: 1, minHeight: 42, paddingHorizontal: 10, paddingVertical: 8, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 5 },
@@ -1190,16 +1394,22 @@ const styles = StyleSheet.create({
   roomHeaderCopy: { flex: 1, gap: 2 },
   roomTitle: { fontSize: 15, fontFamily: "Inter_700Bold" },
   roomSubtitle: { fontSize: 12, fontFamily: "Inter_400Regular" },
+  roomState: { fontSize: 12, fontFamily: "Inter_700Bold" },
   removeText: { fontSize: 12, fontFamily: "Inter_700Bold" },
-  roomTools: { borderTopWidth: StyleSheet.hairlineWidth, paddingHorizontal: 14, paddingVertical: 10, flexDirection: "row", flexWrap: "wrap", gap: 12 },
-  roomToolButton: { paddingVertical: 2 },
+  roomTools: { borderTopWidth: StyleSheet.hairlineWidth, paddingHorizontal: 14, paddingVertical: 10, gap: 9 },
+  roomPrimaryAction: { minHeight: 44, paddingHorizontal: 12, paddingVertical: 9, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 7 },
+  roomSecondaryActions: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
+  actionPill: { borderWidth: 1, borderRadius: 999, minHeight: 32, paddingHorizontal: 12, paddingVertical: 6, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 5 },
+  actionPillPrimary: { paddingHorizontal: 13 },
+  actionPillText: { fontSize: 12, fontFamily: "Inter_700Bold" },
   linkText: { fontSize: 12, fontFamily: "Inter_700Bold" },
   emptyRoomText: { paddingHorizontal: 14, paddingBottom: 14, fontSize: 12, fontFamily: "Inter_400Regular" },
   manageCard: { borderWidth: 1, overflow: "hidden" },
   manageHeader: { paddingHorizontal: 14, paddingVertical: 13, gap: 5 },
-  backPill: { alignSelf: "flex-start", flexDirection: "row", alignItems: "center", gap: 2, paddingBottom: 3 },
-  manageTitle: { fontSize: 17, fontFamily: "Inter_700Bold" },
+  manageTitleRow: { flexDirection: "row", alignItems: "center", gap: 10 },
+  manageTitle: { flex: 1, fontSize: 17, fontFamily: "Inter_700Bold" },
   manageEmpty: { padding: 14, gap: 5 },
+  manageFooter: { borderTopWidth: StyleSheet.hairlineWidth, padding: 14 },
   itemList: { paddingHorizontal: 14 },
   itemRow: { borderTopWidth: StyleSheet.hairlineWidth, minHeight: 58, paddingVertical: 10, flexDirection: "row", gap: 10, alignItems: "center" },
   itemCopy: { flex: 1, gap: 3 },

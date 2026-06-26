@@ -156,8 +156,9 @@ export default function AddItemScreen() {
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [photoWarning, setPhotoWarning] = useState<string | null>(null);
   const addingToClaimPack = returnToClaimPack === "1";
+  const launchStep = !selectedFileId ? "property" : !selectedRoomId ? "room" : "details";
 
-  const { data: properties } = useQuery({
+  const { data: properties, isLoading: propertiesLoading } = useQuery({
     queryKey: ["properties", session?.user.id],
     queryFn: async () => {
       const { data, error } = await supabase
@@ -170,7 +171,7 @@ export default function AddItemScreen() {
     enabled: !!session,
   });
 
-  const { data: rooms } = useQuery({
+  const { data: rooms, isLoading: roomsLoading } = useQuery({
     queryKey: ["rooms", selectedFileId, session?.user.id],
     queryFn: async () => {
       const { data, error } = await supabase
@@ -303,11 +304,11 @@ export default function AddItemScreen() {
       return;
     }
     if (!selectedFileId) {
-      setErrorMsg("Please select a property above.");
+      setErrorMsg("Please choose a property.");
       return;
     }
     if (!selectedRoomId) {
-      setErrorMsg("Please select a room above.");
+      setErrorMsg("Please choose a room.");
       return;
     }
     if (!session?.user.id) {
@@ -442,6 +443,10 @@ export default function AddItemScreen() {
     properties?.find((p) => p.id === selectedFileId)?.name ??
     fileName ??
     "Select property";
+  const selectedRoomName =
+    rooms?.find((r) => r.id === selectedRoomId)?.name ??
+    roomName ??
+    "Select room";
 
   return (
     <>
@@ -522,135 +527,110 @@ export default function AddItemScreen() {
           {/* LOCATION */}
           <View style={styles.section}>
             <Text style={[styles.sectionTitle, { color: colors.mutedForeground }]}>
-              LOCATION
+              {launchStep === "property" ? "CHOOSE A PROPERTY" : launchStep === "room" ? "CHOOSE A ROOM" : "LOCATION"}
             </Text>
-
-            {!fileId ? (
-              <FormField label="Property" required colors={colors}>
-                <ScrollView
-                  horizontal
-                  showsHorizontalScrollIndicator={false}
-                  contentContainerStyle={{ gap: 8, paddingVertical: 2 }}
-                >
-                  {(properties ?? []).map((p) => (
-                    <Pressable
-                      key={p.id}
-                      onPress={() => {
-                        setSelectedFileId(p.id);
-                        setSelectedRoomId("");
-                        setErrorMsg(null);
-                      }}
-                      style={({ pressed }) => [
-                        styles.chip,
-                        {
-                          backgroundColor:
-                            selectedFileId === p.id
-                              ? colors.primary
-                              : colors.secondary,
-                          borderRadius: 20,
-                          opacity: pressed ? 0.8 : 1,
-                        },
-                      ]}
-                    >
-                      <Text
-                        style={{
-                          fontSize: 13,
-                          fontFamily: "Inter_500Medium",
-                          color:
-                            selectedFileId === p.id
-                              ? colors.primaryForeground
-                              : colors.foreground,
-                        }}
-                      >
-                        {p.name}
-                      </Text>
-                    </Pressable>
-                  ))}
-                </ScrollView>
-              </FormField>
-            ) : (
-              <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-                <Feather name="home" size={14} color={colors.primary} />
-                <Text
-                  style={{
-                    fontSize: 14,
-                    fontFamily: "Inter_500Medium",
-                    color: colors.foreground,
-                  }}
-                >
-                  {selectedPropertyName}
-                </Text>
-              </View>
-            )}
-
-            <FormField label="Room" required colors={colors}>
-              {!selectedFileId ? (
-                <Text
-                  style={{
-                    fontSize: 13,
-                    fontFamily: "Inter_400Regular",
-                    color: colors.mutedForeground,
-                  }}
-                >
-                  Select a property first
-                </Text>
-              ) : !roomId ? (
-                <ScrollView
-                  horizontal
-                  showsHorizontalScrollIndicator={false}
-                  contentContainerStyle={{ gap: 8, paddingVertical: 2 }}
-                >
-                  {(rooms ?? []).map((r) => (
-                    <Pressable
-                      key={r.id}
-                      onPress={() => {
-                        setSelectedRoomId(r.id);
-                        setErrorMsg(null);
-                      }}
-                      style={({ pressed }) => [
-                        styles.chip,
-                        {
-                          backgroundColor:
-                            selectedRoomId === r.id
-                              ? colors.primary
-                              : colors.secondary,
-                          borderRadius: 20,
-                          opacity: pressed ? 0.8 : 1,
-                        },
-                      ]}
-                    >
-                      <Text
-                        style={{
-                          fontSize: 13,
-                          fontFamily: "Inter_500Medium",
-                          color:
-                            selectedRoomId === r.id
-                              ? colors.primaryForeground
-                              : colors.foreground,
-                        }}
-                      >
-                        {r.name}
-                      </Text>
-                    </Pressable>
-                  ))}
-                </ScrollView>
-              ) : (
-                <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-                  <Feather name="layers" size={14} color={colors.primary} />
-                  <Text
-                    style={{
-                      fontSize: 14,
-                      fontFamily: "Inter_500Medium",
-                      color: colors.foreground,
+            {launchStep === "property" ? (
+              <>
+                <Text style={[styles.stepHelper, { color: colors.mutedForeground }]}>Select where this item belongs.</Text>
+                {propertiesLoading ? (
+                  <ActivityIndicator color={colors.primary} />
+                ) : null}
+                {(properties ?? []).map((p) => (
+                  <Pressable
+                    key={p.id}
+                    onPress={() => {
+                      setSelectedFileId(p.id);
+                      setSelectedRoomId("");
+                      setErrorMsg(null);
                     }}
+                    style={({ pressed }) => [
+                      styles.selectionCard,
+                      { backgroundColor: colors.card, borderColor: colors.border, borderRadius: colors.radius, opacity: pressed ? 0.76 : 1 },
+                    ]}
                   >
-                    {roomName}
-                  </Text>
+                    <Feather name="home" size={18} color={colors.primary} />
+                    <Text style={[styles.selectionTitle, { color: colors.foreground }]}>{p.name}</Text>
+                    <Feather name="chevron-right" size={17} color={colors.mutedForeground} />
+                  </Pressable>
+                ))}
+                {!propertiesLoading && (properties ?? []).length === 0 ? (
+                  <Pressable
+                    onPress={() => router.push("/(tabs)/add-property" as Href)}
+                    style={({ pressed }) => [
+                      styles.selectionCard,
+                      { backgroundColor: colors.card, borderColor: colors.border, borderRadius: colors.radius, opacity: pressed ? 0.76 : 1 },
+                    ]}
+                  >
+                    <Feather name="plus" size={18} color={colors.primary} />
+                    <Text style={[styles.selectionTitle, { color: colors.foreground }]}>Add a property first</Text>
+                    <Feather name="chevron-right" size={17} color={colors.mutedForeground} />
+                  </Pressable>
+                ) : null}
+              </>
+            ) : launchStep === "room" ? (
+              <>
+                <Text style={[styles.stepHelper, { color: colors.mutedForeground }]}>Select the room this item should be added to.</Text>
+                <View style={[styles.locationSummary, { borderColor: colors.border, borderRadius: colors.radius }]}>
+                  <Feather name="home" size={14} color={colors.primary} />
+                  <Text style={[styles.locationSummaryText, { color: colors.foreground }]}>{selectedPropertyName}</Text>
+                  {!fileId ? (
+                    <Pressable onPress={() => setSelectedFileId("")} hitSlop={8}>
+                      <Text style={[styles.locationChangeText, { color: colors.primary }]}>Change</Text>
+                    </Pressable>
+                  ) : null}
                 </View>
-              )}
-            </FormField>
+                {roomsLoading ? (
+                  <ActivityIndicator color={colors.primary} />
+                ) : null}
+                {(rooms ?? []).map((r) => (
+                  <Pressable
+                    key={r.id}
+                    onPress={() => {
+                      setSelectedRoomId(r.id);
+                      setErrorMsg(null);
+                    }}
+                    style={({ pressed }) => [
+                      styles.selectionCard,
+                      { backgroundColor: colors.card, borderColor: colors.border, borderRadius: colors.radius, opacity: pressed ? 0.76 : 1 },
+                    ]}
+                  >
+                    <Feather name="layers" size={18} color={colors.primary} />
+                    <Text style={[styles.selectionTitle, { color: colors.foreground }]}>{r.name}</Text>
+                    <Feather name="chevron-right" size={17} color={colors.mutedForeground} />
+                  </Pressable>
+                ))}
+                {selectedFileId && !roomsLoading && (rooms ?? []).length === 0 ? (
+                  <View style={[styles.emptyLocationCard, { backgroundColor: colors.card, borderColor: colors.border, borderRadius: colors.radius }]}>
+                    <Text style={[styles.emptyLocationTitle, { color: colors.foreground }]}>No rooms yet</Text>
+                    <Text style={[styles.stepHelper, { color: colors.mutedForeground }]}>Add a room to this property, then come back to add the item.</Text>
+                    <Pressable
+                      onPress={() => router.push({ pathname: "/(tabs)/property/[id]", params: { id: selectedFileId, name: selectedPropertyName } } as Href)}
+                      style={({ pressed }) => [
+                        styles.inlinePrimaryButton,
+                        { backgroundColor: colors.primary, borderRadius: colors.radius, opacity: pressed ? 0.8 : 1 },
+                      ]}
+                    >
+                      <Text style={[styles.inlinePrimaryButtonText, { color: colors.primaryForeground }]}>Open property</Text>
+                    </Pressable>
+                  </View>
+                ) : null}
+              </>
+            ) : (
+              <>
+                <View style={[styles.locationSummary, { borderColor: colors.border, borderRadius: colors.radius }]}>
+                  <Feather name="home" size={14} color={colors.primary} />
+                  <Text style={[styles.locationSummaryText, { color: colors.foreground }]}>{selectedPropertyName}</Text>
+                </View>
+                <View style={[styles.locationSummary, { borderColor: colors.border, borderRadius: colors.radius }]}>
+                  <Feather name="layers" size={14} color={colors.primary} />
+                  <Text style={[styles.locationSummaryText, { color: colors.foreground }]}>{selectedRoomName}</Text>
+                </View>
+              </>
+            )}
           </View>
 
+          {launchStep === "details" ? (
+            <>
           {/* ITEM DETAILS */}
           <View style={styles.section}>
             <Text style={[styles.sectionTitle, { color: colors.mutedForeground }]}>
@@ -955,6 +935,8 @@ export default function AddItemScreen() {
               </>
             )}
           </Pressable>
+            </>
+          ) : null}
         </ScrollView>
       </KeyboardAvoidingView>
       <VoiceInputSheet
@@ -1008,6 +990,16 @@ const styles = StyleSheet.create({
     fontFamily: "Inter_600SemiBold",
     letterSpacing: 0.8,
   },
+  stepHelper: { fontSize: 13, lineHeight: 18, fontFamily: "Inter_400Regular" },
+  selectionCard: { borderWidth: 1, minHeight: 56, paddingHorizontal: 14, paddingVertical: 12, flexDirection: "row", alignItems: "center", gap: 11 },
+  selectionTitle: { flex: 1, fontSize: 15, fontFamily: "Inter_600SemiBold" },
+  locationSummary: { borderWidth: 1, paddingHorizontal: 12, paddingVertical: 10, flexDirection: "row", alignItems: "center", gap: 8 },
+  locationSummaryText: { flex: 1, fontSize: 14, fontFamily: "Inter_500Medium" },
+  locationChangeText: { fontSize: 12, fontFamily: "Inter_700Bold" },
+  emptyLocationCard: { borderWidth: 1, padding: 14, gap: 10 },
+  emptyLocationTitle: { fontSize: 15, fontFamily: "Inter_700Bold" },
+  inlinePrimaryButton: { minHeight: 42, alignItems: "center", justifyContent: "center", paddingHorizontal: 14 },
+  inlinePrimaryButtonText: { fontSize: 14, fontFamily: "Inter_700Bold" },
   chip: { paddingHorizontal: 14, paddingVertical: 8 },
   photoPreview: { width: "100%", height: 200 },
   removePhotoBtn: {

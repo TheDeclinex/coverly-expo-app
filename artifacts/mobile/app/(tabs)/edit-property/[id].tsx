@@ -103,6 +103,8 @@ export default function EditPropertyScreen() {
   const [name, setName] = useState("");
   const [propertyType, setPropertyType] = useState<string | null>(null);
   const [coverAmount, setCoverAmount] = useState("");
+  const [insurerName, setInsurerName] = useState("");
+  const [policyNumber, setPolicyNumber] = useState("");
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -113,6 +115,8 @@ export default function EditPropertyScreen() {
       setName(property.name ?? "");
       setPropertyType(property.property_type ?? null);
       setCoverAmount(property.contents_sum_insured != null ? String(property.contents_sum_insured) : "");
+      setInsurerName(property.insurer_name ?? "");
+      setPolicyNumber(property.policy_number ?? "");
     }
   }, [property]);
 
@@ -135,6 +139,8 @@ export default function EditPropertyScreen() {
         name: name.trim(),
         property_type: propertyType ?? null,
         contents_sum_insured: coverAmount ? parseFloat(coverAmount) : null,
+        insurer_name: insurerName.trim() || null,
+        policy_number: policyNumber.trim() || null,
         last_modified: new Date().toISOString(),
       })
       .eq("id", id);
@@ -256,7 +262,7 @@ export default function EditPropertyScreen() {
           {/* ── Insurance ── */}
           <View style={styles.section}>
             <Text style={[styles.sectionTitle, { color: colors.mutedForeground }]}>
-              INSURANCE (OPTIONAL)
+              INSURANCE DETAILS
             </Text>
             <FormField label="Recorded contents cover amount" colors={colors}>
               <InputBox
@@ -269,6 +275,24 @@ export default function EditPropertyScreen() {
               <Text style={{ fontSize: 11, fontFamily: "Inter_400Regular", color: colors.mutedForeground }}>
                 Used to track how your inventory value compares to your recorded cover.
               </Text>
+            </FormField>
+
+            <FormField label="Insurer (optional)" colors={colors}>
+              <InputBox
+                value={insurerName}
+                onChangeText={setInsurerName}
+                placeholder="e.g. Tower, AMI, State"
+                colors={colors}
+              />
+            </FormField>
+
+            <FormField label="Policy number (optional)" colors={colors}>
+              <InputBox
+                value={policyNumber}
+                onChangeText={setPolicyNumber}
+                placeholder="Optional policy reference"
+                colors={colors}
+              />
             </FormField>
           </View>
 

@@ -93,7 +93,7 @@ interface ScanImage {
 }
 
 interface ScanRequest {
-  mode: 'single_photo' | 'multi_photo' | 'video_frames';
+  mode: 'single_photo' | 'multi_photo' | 'video_frames' | 'single_item';
   images: ScanImage[];
   context?: { propertyId?: string; fileId?: string; roomName?: string };
   model?: string;
@@ -183,6 +183,7 @@ async function fetchWithTimeout(
 
 function operationForMode(mode: ScanRequest['mode']): 'single_photo_scan' | 'multi_photo_scan' | 'video_frame_scan' | null {
   if (mode === 'single_photo') return 'single_photo_scan';
+  if (mode === 'single_item') return 'single_photo_scan';
   if (mode === 'multi_photo') return 'multi_photo_scan';
   if (mode === 'video_frames') return 'video_frame_scan';
   return null;
@@ -406,6 +407,19 @@ List EVERY clearly visible, individually replaceable household item.
 Do NOT stop after the most obvious items. Look carefully at the entire image including corners, shelves, walls, and surfaces.
 
 Group repeated identical items (e.g. matching chairs, stacked books, sets of utensils) into one record with quantity > 1.
+
+${FIELDS}
+
+For sourceImageId use "photo_1".
+Return ONLY the raw JSON array.`;
+  }
+
+  if (mode === 'single_item') {
+    return `Inspect this close-up item photo and identify ONE primary household item only.
+
+If multiple objects are visible, choose the most central, prominent, clearly identifiable replaceable item.
+Do NOT list background objects, nearby accessories, packaging, surfaces, walls, floors, or secondary items.
+Return exactly one item when a clear primary item is visible. Return an empty array only if no replaceable item is clear enough to identify.
 
 ${FIELDS}
 

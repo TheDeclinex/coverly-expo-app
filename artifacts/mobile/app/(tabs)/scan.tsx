@@ -1,7 +1,9 @@
 import { Feather } from "@expo/vector-icons";
+import { File } from "expo-file-system";
 import { Image } from "expo-image";
 import * as Haptics from "expo-haptics";
 import * as ImagePicker from "expo-image-picker";
+import * as VideoThumbnails from "expo-video-thumbnails";
 import { Stack, router, useLocalSearchParams, type Href } from "expo-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import React, { useEffect, useRef, useState } from "react";
@@ -34,6 +36,7 @@ import { buildItemInsertPayload } from "@/lib/item-insert-helpers";
 import { formatCurrency } from "@/lib/inventory-mappers";
 import {
   MAX_MULTI_PHOTO_IMAGES,
+  MAX_VIDEO_SCAN_FRAMES,
   runAiScan,
   validateScanInput,
 } from "@/lib/scan-service";
@@ -95,8 +98,7 @@ const SCAN_MODES: ScanModeCard[] = [
     title: "Video room scan",
     subtitle:
       "Record or upload a room walkthrough video for maximum coverage.",
-    creditLabel: "Coming soon",
-    comingSoon: true,
+    creditLabel: `Up to ${MAX_VIDEO_SCAN_FRAMES} frames`,
   },
 ];
 
@@ -113,6 +115,28 @@ function scanLog(message: string, details?: Record<string, unknown>) {
   } else {
     console.info(`[Scan] ${message}`);
   }
+}
+
+async function uriToBase64(uri: string): Promise<string> {
+  if (Platform.OS === "web") {
+    const response = await fetch(uri);
+    if (!response.ok) throw new Error(`Could not read generated video frame (${response.status}).`);
+    const blob = await response.blob();
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onerror = () => reject(reader.error ?? new Error("Could not read generated video frame."));
+      reader.onload = () => {
+        const result = reader.result;
+        if (typeof result !== "string") {
+          reject(new Error("Generated video frame did not produce base64 data."));
+          return;
+        }
+        resolve(result.slice(result.indexOf(",") + 1));
+      };
+      reader.readAsDataURL(blob);
+    });
+  }
+  return new File(uri).base64();
 }
 
 export default function ScanScreen() {
@@ -358,6 +382,92 @@ export default function ScanScreen() {
     }
   };
 
+  const extractVideoFrames = async (videoUri: string, durationMs: number | null | undefined): Promise<ScanEncodedImage[]> => {
+    const effectiveDuration = durationMs && durationMs > 0 ? durationMs : 10_000;
+    const frameCount = Math.max(1, Math.min(MAX_VIDEO_SCAN_FRAMES, Math.ceil(effectiveDuration / 1000)));
+    const interval = effectiveDuration / frameCount;
+    const frames: ScanEncodedImage[] = [];
+
+    for (let index = 0; index < frameCount; index += 1) {
+      const time = Math.max(0, Math.min(effectiveDuration - 1, Math.round(index * interval + interval / 2)));
+      const thumbnail = await VideoThumbnails.getThumbnailAsync(videoUri, {
+        time,
+        quality: 0.8,
+      });
+      frames.push({
+        uri: thumbnail.uri,
+        base64: await uriToBase64(thumbnail.uri),
+        mimeType: "image/jpeg",
+      });
+    }
+
+    return frames;
+  };
+
+  const scanVideoAsset = async (asset: ImagePicker.ImagePickerAsset) => {
+    setScanStatus("picking");
+    setScanError(null);
+    try {
+      scanLog("video frame extraction started", {
+        durationMs: asset.duration ?? null,
+        maxFrames: MAX_VIDEO_SCAN_FRAMES,
+      });
+      const frames = await extractVideoFrames(asset.uri, asset.duration);
+      scanLog("video frame extraction completed", {
+        frameCount: frames.length,
+        approxBase64Chars: frames.reduce((sum, frame) => sum + frame.base64.length, 0),
+      });
+      setImages(frames);
+      await handleStartScan("video_room", frames);
+    } catch (error) {
+      console.error("[Scan] video frame extraction failed", error);
+      setScanStatus("idle");
+      setScanError(error instanceof Error ? error.message : "Could not prepare video frames. Try a shorter or clearer video.");
+    }
+  };
+
+  const pickVideo = async () => {
+    if (!selectedFileId || !selectedRoomId) {
+      setScanError("Choose a property and room before adding video.");
+      return;
+    }
+    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (status !== "granted") {
+      Alert.alert("Permission needed", "Allow photo library access to choose a video.");
+      return;
+    }
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Videos,
+      quality: 0.8,
+      allowsMultipleSelection: false,
+    });
+    if (!result.canceled && result.assets[0]) {
+      await scanVideoAsset(result.assets[0]);
+    }
+  };
+
+  const recordVideo = async () => {
+    if (!selectedFileId || !selectedRoomId) {
+      setScanError("Choose a property and room before recording video.");
+      return;
+    }
+    if (Platform.OS !== "web") {
+      const { status } = await ImagePicker.requestCameraPermissionsAsync();
+      if (status !== "granted") {
+        Alert.alert("Permission needed", "Allow camera access to record video.");
+        return;
+      }
+    }
+    const result = await ImagePicker.launchCameraAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Videos,
+      quality: 0.8,
+      videoMaxDuration: 30,
+    });
+    if (!result.canceled && result.assets[0]) {
+      await scanVideoAsset(result.assets[0]);
+    }
+  };
+
   const takeAnotherMultiPhoto = () => {
     setMultiPhotoPromptVisible(false);
     if (multiPhotoCameraTimerRef.current) {
@@ -384,6 +494,7 @@ export default function ScanScreen() {
     clearCaptureState();
     aiScanEntitlementCheckedRef.current = true;
     setSelectedMode(mode);
+    if (mode === "video_room") return;
     void takePhoto(mode, mode !== "multi_photo_room");
   };
 
@@ -1021,6 +1132,7 @@ export default function ScanScreen() {
   // ── Main scan screen ──────────────────────────────────────────────────────────
 
   const isScanning = scanStatus === "scanning";
+  const isPreparingVideo = scanStatus === "picking";
   const canScan =
     selectedMode &&
     selectedFileId &&
@@ -1033,6 +1145,21 @@ export default function ScanScreen() {
       <>
         <Stack.Screen options={{ title: "Scanning…", headerShown: false }} />
         <AiScanningOverlay images={images} />
+      </>
+    );
+  }
+
+  if (isPreparingVideo) {
+    return (
+      <>
+        <Stack.Screen options={{ title: "Preparing video…", headerShown: false }} />
+        <View style={[styles.preparingScreen, { backgroundColor: colors.background }]}>
+          <ActivityIndicator color={colors.primary} />
+          <Text style={[styles.preparingTitle, { color: colors.foreground }]}>Preparing video frames</Text>
+          <Text style={[styles.preparingText, { color: colors.mutedForeground }]}>
+            Coverly is choosing the clearest frames before scanning.
+          </Text>
+        </View>
       </>
     );
   }
@@ -1454,14 +1581,35 @@ export default function ScanScreen() {
           </View>
         )}
 
-        {/* Video coming soon */}
+        {/* Video picker */}
         {selectedMode === "video_room" && (
-          <View style={[styles.comingSoonCard, { backgroundColor: colors.card, borderColor: colors.border, borderRadius: colors.radius }]}>
-            <Feather name="video" size={32} color={colors.border} />
-            <Text style={[styles.comingSoonTitle, { color: colors.foreground }]}>Video scan coming soon</Text>
-            <Text style={[styles.comingSoonSub, { color: colors.mutedForeground }]}>
-              This mode will extract representative frames from a room walkthrough video and avoid duplicate items automatically.
+          <View style={styles.section}>
+            <Text style={[styles.sectionLabel, { color: colors.mutedForeground }]}>VIDEO</Text>
+            <Text style={[styles.videoHelper, { color: colors.mutedForeground }]}>
+              Record or choose a room walkthrough. Coverly will scan up to {MAX_VIDEO_SCAN_FRAMES} frames.
             </Text>
+            <View style={{ flexDirection: "row", gap: 10 }}>
+              <Pressable
+                onPress={() => void recordVideo()}
+                style={({ pressed }) => [
+                  styles.photoBtn,
+                  { backgroundColor: colors.card, borderColor: colors.border, borderRadius: colors.radius, opacity: pressed ? 0.8 : 1 },
+                ]}
+              >
+                <Feather name="video" size={20} color={colors.primary} />
+                <Text style={[styles.photoBtnText, { color: colors.primary }]}>Record</Text>
+              </Pressable>
+              <Pressable
+                onPress={() => void pickVideo()}
+                style={({ pressed }) => [
+                  styles.photoBtn,
+                  { backgroundColor: colors.card, borderColor: colors.border, borderRadius: colors.radius, opacity: pressed ? 0.8 : 1 },
+                ]}
+              >
+                <Feather name="film" size={20} color={colors.primary} />
+                <Text style={[styles.photoBtnText, { color: colors.primary }]}>Library</Text>
+              </Pressable>
+            </View>
           </View>
         )}
 
@@ -1639,6 +1787,10 @@ const styles = StyleSheet.create({
   comingSoonCard: { borderWidth: 1, padding: 24, alignItems: "center", gap: 12 },
   comingSoonTitle: { fontSize: 16, fontFamily: "Inter_600SemiBold", textAlign: "center" },
   comingSoonSub: { fontSize: 13, fontFamily: "Inter_400Regular", textAlign: "center", lineHeight: 20 },
+  preparingScreen: { flex: 1, alignItems: "center", justifyContent: "center", padding: 24, gap: 10 },
+  preparingTitle: { fontSize: 18, fontFamily: "Inter_700Bold", textAlign: "center" },
+  preparingText: { fontSize: 13, lineHeight: 19, fontFamily: "Inter_400Regular", textAlign: "center" },
+  videoHelper: { fontSize: 13, lineHeight: 18, fontFamily: "Inter_400Regular" },
   errorCard: { borderWidth: 1, padding: 12, flexDirection: "row", alignItems: "flex-start", gap: 8 },
   errorText: { fontSize: 13, fontFamily: "Inter_400Regular", lineHeight: 18, flex: 1 },
   scanBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, paddingVertical: 15, marginTop: 4 },

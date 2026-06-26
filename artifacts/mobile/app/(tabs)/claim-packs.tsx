@@ -1,13 +1,17 @@
 import { Feather } from "@expo/vector-icons";
 import { useQuery } from "@tanstack/react-query";
-import { Stack, router, type Href } from "expo-router";
-import React from "react";
+import { Stack, router, type Href, useFocusEffect } from "expo-router";
+import React, { useCallback } from "react";
 import { ScrollView, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { AccountRow, AccountSection } from "@/components/AccountMenu";
 import { useAuth } from "@/context/AuthContext";
 import { useColors } from "@/hooks/useColors";
+import {
+  listClaimPackDrafts,
+  type StoredClaimPackDraft,
+} from "@/lib/claim-pack-draft-storage";
 import { supabase } from "@/lib/supabase";
 import type { InventoryFile } from "@/types";
 
@@ -60,11 +64,30 @@ export default function ClaimPacksScreen() {
     retry: 1,
   });
 
+  const draftsQuery = useQuery({
+    queryKey: ["claim-pack-drafts", session?.user.id],
+    queryFn: () => listClaimPackDrafts(session?.user.id ?? ""),
+    enabled: !!session?.user.id,
+    staleTime: 5_000,
+  });
+
+  useFocusEffect(
+    useCallback(() => {
+      if (session?.user.id) void draftsQuery.refetch();
+    }, [session?.user.id]),
+  );
+
   const properties = propertiesQuery.data ?? [];
   const openDraft = (fileId: string) => {
     router.push({
       pathname: "/(tabs)/claim-pack/[fileId]",
       params: { fileId },
+    } as Href);
+  };
+  const continueDraft = (draft: StoredClaimPackDraft) => {
+    router.push({
+      pathname: "/(tabs)/claim-pack/[fileId]",
+      params: { fileId: draft.fileId, claimDraftId: draft.id },
     } as Href);
   };
 
@@ -93,6 +116,32 @@ export default function ClaimPacksScreen() {
             </Text>
           </View>
         </View>
+
+        <AccountSection title="Your drafts">
+          {draftsQuery.isLoading ? (
+            <AccountRow icon="loader" title="Loading drafts" subtitle="Checking saved claim-pack drafts." value="Loading…" last />
+          ) : draftsQuery.data?.length ? (
+            draftsQuery.data.map((draft, index) => (
+              <AccountRow
+                key={draft.id}
+                icon="edit-3"
+                title={draft.propertyName}
+                subtitle={claimPackDraftSubtitle(draft)}
+                value="Continue"
+                onPress={() => continueDraft(draft)}
+                last={index === (draftsQuery.data?.length ?? 0) - 1}
+              />
+            ))
+          ) : (
+            <AccountRow
+              icon="archive"
+              title="No saved drafts"
+              subtitle="Start a claim pack and your room and item choices will appear here."
+              value="Empty"
+              last
+            />
+          )}
+        </AccountSection>
 
         <AccountSection title="Choose a property">
           {propertiesQuery.isLoading ? (
@@ -175,6 +224,16 @@ function claimPackHistorySubtitle(pack: ClaimPackHistoryRow): string {
   const items = pack.totals?.selectedItemsCount ? `${pack.totals.selectedItemsCount} items` : null;
   const value = pack.totals?.selectedEstimatedValue ? formatCurrency(pack.totals.selectedEstimatedValue) : null;
   return [items, value, dateLabel].filter(Boolean).join(" · ");
+}
+
+function claimPackDraftSubtitle(draft: StoredClaimPackDraft): string {
+  const updatedDate = new Date(draft.updatedAt);
+  const dateLabel = Number.isNaN(updatedDate.getTime())
+    ? "Saved draft"
+    : `Updated ${updatedDate.toLocaleDateString("en-NZ", { day: "numeric", month: "short" })}`;
+  const items = draft.selectedItemIds.length > 0 ? `${draft.selectedItemIds.length} items` : "No items selected yet";
+  const claim = draft.claimNumber.trim() ? `Claim ${draft.claimNumber.trim()}` : null;
+  return [items, claim, dateLabel].filter(Boolean).join(" · ");
 }
 
 function formatCurrency(value: number): string {

@@ -41,6 +41,13 @@ export default function AccountScreen() {
   const email = profile?.email ?? session?.user.email ?? "Email unavailable";
   const displayName = profile?.fullName ?? null;
   const planLabel = isLoading ? "Loading…" : profile?.plan ?? "Plan unavailable";
+  const planStatusLabel = subscriptionStatus ?? (profile?.plan === "Free" ? "Free" : "Active");
+  const planStatusHelper = subscriptionPeriodEnd
+    ? `Renews or expires ${new Date(subscriptionPeriodEnd).toLocaleDateString("en-NZ")}`
+    : profile?.plan === "Free"
+      ? "Free plan"
+      : "Managed through your Apple or Google account";
+  const planStatusDetail = planStatusLabel === planLabel ? planStatusHelper : `${planStatusLabel} · ${planStatusHelper}`;
   const initialsSource = displayName ?? (email === "Email unavailable" ? "?" : email);
   const initials = initialsSource.slice(0, 1).toUpperCase();
   const version = Constants.expoConfig?.version ?? "Unknown";
@@ -115,11 +122,26 @@ export default function AccountScreen() {
         )}
 
         <AccountSection title="Plan & billing">
-          <AccountRow icon="credit-card" title="Current plan" value={planLabel} />
+          <AccountRow icon="credit-card" title="Your plan" subtitle={planStatusDetail} value={planLabel} />
           <AccountRow icon="arrow-up-circle" title="Upgrade Coverly" subtitle="View Apple or Google subscription options" onPress={() => router.push("/upgrade" as Href)} />
-          <AccountRow icon="settings" title="Subscription status" subtitle={subscriptionPeriodEnd ? `Renews or expires ${new Date(subscriptionPeriodEnd).toLocaleDateString("en-NZ")}` : "Manage subscriptions in your Apple or Google account"} value={subscriptionStatus ?? (profile?.plan === "Free" ? "Free" : "Active")} />
-          <AccountRow icon="refresh-cw" title="Restore purchases" value={purchaseLoading ? "Restoring…" : undefined} disabled={purchaseLoading} onPress={() => void restore()} />
-          <AccountRow icon="list" title="Plan access" subtitle={profile?.plan === "Free" ? "One property; premium actions show an upgrade prompt" : "AI features included · Fair use applies"} value={gatesEnabled ? "Enforced" : "Test mode"} last />
+          <AccountRow
+            icon="refresh-cw"
+            title="Restore purchases"
+            subtitle="Use after reinstalling, changing devices, or signing in again."
+            value={purchaseLoading ? "Restoring…" : undefined}
+            disabled={purchaseLoading}
+            onPress={() => void restore()}
+            last={!isAdmin}
+          />
+          {isAdmin ? (
+            <AccountRow
+              icon="list"
+              title="Access level"
+              subtitle={profile?.plan === "Free" ? "Free plan limits are visible in the app" : "AI features included · Fair use applies"}
+              value={gatesEnabled ? "Standard" : "Preview"}
+              last
+            />
+          ) : null}
         </AccountSection>
 
         <UsageAllowanceCard

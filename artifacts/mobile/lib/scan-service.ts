@@ -42,18 +42,19 @@ interface ScanFunctionResponse {
  * Maximum images allowed per multi-photo scan batch.
  */
 export const MAX_MULTI_PHOTO_IMAGES = 5;
+export const MAX_VIDEO_SCAN_FRAMES = 20;
 
 /**
  * Map mobile ScanMode values to the production scan-room-photo mode strings.
- * single_item has no dedicated production mode — single_photo detects what is visible.
  */
 function toProductionMode(
   mode: ScanInput["mode"]
-): "single_photo" | "multi_photo" | "video_frames" {
+): "single_photo" | "multi_photo" | "video_frames" | "single_item" {
   switch (mode) {
     case "single_photo_room":
-    case "single_item":
       return "single_photo";
+    case "single_item":
+      return "single_item";
     case "multi_photo_room":
       return "multi_photo";
     case "video_room":
@@ -68,6 +69,25 @@ function confidenceToLabel(n: number): string {
   if (n >= 0.75) return "high";
   if (n >= 0.45) return "medium";
   return "low";
+}
+
+function confidenceScore(confidence: string | null | undefined): number {
+  if (confidence === "high") return 3;
+  if (confidence === "medium") return 2;
+  if (confidence === "low") return 1;
+  return 0;
+}
+
+function primarySingleItem(items: ScanDetectedItem[]): ScanDetectedItem[] {
+  if (items.length <= 1) return items;
+  const [primary] = [...items].sort((a, b) => {
+    const aDistance = a.pin ? Math.hypot(a.pin.x - 50, a.pin.y - 50) : 999;
+    const bDistance = b.pin ? Math.hypot(b.pin.x - 50, b.pin.y - 50) : 999;
+    const distanceDelta = aDistance - bDistance;
+    if (Math.abs(distanceDelta) > 8) return distanceDelta;
+    return confidenceScore(b.confidence) - confidenceScore(a.confidence);
+  });
+  return primary ? [primary] : [];
 }
 
 function scanLog(message: string, details?: Record<string, unknown>) {
@@ -333,7 +353,7 @@ export async function runAiScan(input: ScanInput): Promise<ScanResult> {
         };
       });
 
-    return { status: "success", items };
+    return { status: "success", items: input.mode === "single_item" ? primarySingleItem(items) : items };
   } catch (err) {
     console.error("[Scan] function invoke failed", err);
     return {
@@ -351,11 +371,6 @@ export function validateScanInput(input: ScanInput): string | null {
   if (!input.fileId) return "Property required";
   if (!input.roomId) return "Room required";
 
-  if (input.mode === "video_room") {
-    if (!input.videoUri) return "Video required for video scan";
-    return null;
-  }
-
   if (input.images.length === 0) return "At least one photo required";
 
   if (
@@ -363,6 +378,13 @@ export function validateScanInput(input: ScanInput): string | null {
     input.images.length > MAX_MULTI_PHOTO_IMAGES
   ) {
     return `Maximum ${MAX_MULTI_PHOTO_IMAGES} photos per multi-photo scan`;
+  }
+
+  if (
+    input.mode === "video_room" &&
+    input.images.length > MAX_VIDEO_SCAN_FRAMES
+  ) {
+    return `Maximum ${MAX_VIDEO_SCAN_FRAMES} frames per video scan`;
   }
 
   return null;

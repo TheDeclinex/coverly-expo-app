@@ -44,6 +44,9 @@ export interface ClaimPackDraftSnapshot {
   selection: ClaimPackSelection;
   scope: ClaimPackScope;
   claimNote: string;
+  insurerName?: string;
+  policyNumber?: string;
+  claimNumber?: string;
   managedRoomId: string | null;
 }
 
