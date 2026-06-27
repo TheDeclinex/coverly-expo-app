@@ -1,6 +1,8 @@
 import { Feather } from "@expo/vector-icons";
+import { File, Paths } from "expo-file-system";
 import { useQuery } from "@tanstack/react-query";
 import { Stack, router, type Href, useFocusEffect } from "expo-router";
+import * as WebBrowser from "expo-web-browser";
 import React, { useCallback } from "react";
 import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -13,16 +15,27 @@ import {
   listClaimPackDrafts,
   type StoredClaimPackDraft,
 } from "@/lib/claim-pack-draft-storage";
+import {
+  claimPackHistoryValueLabel,
+  getClaimPackHistoryStatus,
+  safeClaimPackPdfFilename,
+} from "@/lib/claim-pack-history";
 import { supabase } from "@/lib/supabase";
 import type { InventoryFile } from "@/types";
+
+const CLAIM_PACK_SIGNED_URL_EXPIRY_SECONDS = 60 * 10;
 
 type ClaimPackHistoryRow = {
   id: string;
   file_id?: string | null;
+  pack_ref?: string | null;
+  status?: string | null;
   filename?: string | null;
   generated_at?: string | null;
   storage_path?: string | null;
   generation_error?: string | null;
+  total_value?: number | null;
+  item_count?: number | null;
   totals?: {
     selectedItemsCount?: number;
     selectedEstimatedValue?: number;
@@ -34,6 +47,7 @@ export default function ClaimPacksScreen() {
   const { session } = useAuth();
   const colors = useColors();
   const insets = useSafeAreaInsets();
+  const [openingPackId, setOpeningPackId] = React.useState<string | null>(null);
 
   const propertiesQuery = useQuery({
     queryKey: ["claim-pack-properties", session?.user.id],
@@ -55,7 +69,7 @@ export default function ClaimPacksScreen() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("claim_packs")
-        .select("id, file_id, filename, generated_at, storage_path, generation_error, totals")
+        .select("id, file_id, pack_ref, status, filename, generated_at, storage_path, generation_error, total_value, item_count, totals")
         .order("generated_at", { ascending: false, nullsFirst: false })
         .limit(5);
       if (error) throw error;
@@ -110,6 +124,38 @@ export default function ClaimPacksScreen() {
         },
       ],
     );
+  };
+  const openPreviousPack = async (pack: ClaimPackHistoryRow) => {
+    const status = getClaimPackHistoryStatus(pack);
+    if (status !== "openable" || !pack.storage_path) return;
+    setOpeningPackId(pack.id);
+    try {
+      const { data, error } = await supabase.storage
+        .from("claim-packs")
+        .createSignedUrl(pack.storage_path, CLAIM_PACK_SIGNED_URL_EXPIRY_SECONDS);
+      if (error || !data?.signedUrl) throw error ?? new Error("Signed URL was not returned.");
+      const filename = safeClaimPackPdfFilename(pack.filename, pack.pack_ref ?? pack.id);
+      try {
+        const file = await File.downloadFileAsync(data.signedUrl, new File(Paths.cache, filename), { idempotent: true });
+        await WebBrowser.openBrowserAsync(file.uri);
+      } catch (localOpenError) {
+        console.warn("[claim-packs] Local claim pack open fallback", {
+          packId: pack.id,
+          message: localOpenError instanceof Error ? localOpenError.message : "Unknown error",
+        });
+        await WebBrowser.openBrowserAsync(data.signedUrl);
+      }
+    } catch (openError) {
+      console.warn("[claim-packs] Could not open previous claim pack", {
+        packId: pack.id,
+        status: pack.status ?? null,
+        hasStoragePath: Boolean(pack.storage_path),
+        message: openError instanceof Error ? openError.message : "Unknown error",
+      });
+      Alert.alert("Couldn\u2019t open this Claim Pack. Please try again.");
+    } finally {
+      setOpeningPackId(null);
+    }
   };
 
   return (
@@ -211,16 +257,22 @@ export default function ClaimPacksScreen() {
               last
             />
           ) : historyQuery.data?.length ? (
-            historyQuery.data.map((pack, index) => (
-              <AccountRow
-                key={pack.id}
-                icon={pack.generation_error ? "alert-circle" : "file-text"}
-                title={pack.filename ?? "Claim pack"}
-                subtitle={claimPackHistorySubtitle(pack)}
-                value={pack.generation_error ? "Failed" : pack.storage_path ? "PDF ready" : "Draft"}
-                last={index === (historyQuery.data?.length ?? 0) - 1}
-              />
-            ))
+            historyQuery.data.map((pack, index) => {
+              const historyStatus = getClaimPackHistoryStatus(pack);
+              const isOpening = openingPackId === pack.id;
+              return (
+                <AccountRow
+                  key={pack.id}
+                  icon={historyStatus === "failed" ? "alert-circle" : "file-text"}
+                  title={pack.filename ?? "Claim pack"}
+                  subtitle={claimPackHistorySubtitle(pack)}
+                  value={claimPackHistoryValueLabel(historyStatus, isOpening)}
+                  disabled={isOpening}
+                  onPress={historyStatus === "openable" && !isOpening ? () => void openPreviousPack(pack) : undefined}
+                  last={index === (historyQuery.data?.length ?? 0) - 1}
+                />
+              );
+            })
           ) : (
             <AccountRow
               icon="archive"
@@ -287,14 +339,24 @@ function DraftClaimPackRow({
 }
 
 function claimPackHistorySubtitle(pack: ClaimPackHistoryRow): string {
+  const status = getClaimPackHistoryStatus(pack);
   const generatedDate = pack.generated_at ? new Date(pack.generated_at) : null;
   const dateLabel = generatedDate && !Number.isNaN(generatedDate.getTime())
     ? generatedDate.toLocaleDateString("en-NZ", { day: "numeric", month: "short", year: "numeric" })
     : "Draft metadata";
-  const items = pack.totals?.selectedItemsCount ? `${pack.totals.selectedItemsCount} items` : null;
-  const totalValue = pack.totals?.selectedEstimatedValue ?? pack.totals?.totalEstimatedValue;
+  if (status === "failed") return [safeGenerationError(pack.generation_error), dateLabel].filter(Boolean).join(" · ");
+  if (status === "legacy") return ["PDF not available in mobile", dateLabel].join(" · ");
+  const itemCount = pack.totals?.selectedItemsCount ?? pack.item_count ?? null;
+  const items = itemCount ? `${itemCount} items` : null;
+  const totalValue = pack.totals?.selectedEstimatedValue ?? pack.totals?.totalEstimatedValue ?? pack.total_value;
   const value = totalValue ? formatCurrency(totalValue) : null;
   return [items, value, dateLabel].filter(Boolean).join(" · ");
+}
+
+function safeGenerationError(value: string | null | undefined): string {
+  const message = value?.replace(/\s+/g, " ").trim();
+  if (!message) return "Generation failed";
+  return message.length > 90 ? `${message.slice(0, 87)}...` : message;
 }
 
 function claimPackDraftSubtitle(draft: StoredClaimPackDraft): string {

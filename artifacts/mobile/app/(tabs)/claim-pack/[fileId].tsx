@@ -20,6 +20,7 @@ import { LoadingState } from "@/components/LoadingState";
 import { useAuth } from "@/context/AuthContext";
 import { useColors } from "@/hooks/useColors";
 import {
+  deleteClaimPackDraft,
   getClaimPackDraft,
   saveClaimPackDraft,
 } from "@/lib/claim-pack-draft-storage";
@@ -30,6 +31,7 @@ import {
 import {
   buildClaimPackGeneratePayload,
   calculateClaimPackSummary,
+  clearClaimPackDraftSnapshot,
   clearClaimPackItemsInRoom,
   createClaimPackClientDraftId,
   createRoomsOnlyClaimPackSelection,
@@ -348,12 +350,12 @@ export default function ClaimPackDraftScreen() {
   };
 
   useEffect(() => {
-    if (stage !== "draft" || !selection || !property || !session?.user.id) return;
+    if (stage !== "draft" || !selection || !property || !session?.user.id || generatedPdf) return;
     const timeout = setTimeout(() => {
       persistDraft(selection);
     }, 450);
     return () => clearTimeout(timeout);
-  }, [claimNote, claimNumber, clientDraftId, insurerName, policyNumber, property, scope, selection, session?.user.id, stage]);
+  }, [claimNote, claimNumber, clientDraftId, generatedPdf, insurerName, policyNumber, property, scope, selection, session?.user.id, stage]);
 
   const startWholeProperty = () => {
     setScope("whole_property");
@@ -457,7 +459,14 @@ export default function ClaimPackDraftScreen() {
     try {
       const result = await generateClaimPackPdf(futureGeneratePayload);
       setGeneratedPdf(result);
-      await queryClient.invalidateQueries({ queryKey: ["claim-pack-history", session?.user.id] });
+      clearClaimPackDraftSnapshot(clientDraftId);
+      if (session?.user.id) {
+        await deleteClaimPackDraft(session.user.id, clientDraftId);
+      }
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["claim-pack-history", session?.user.id] }),
+        queryClient.invalidateQueries({ queryKey: ["claim-pack-drafts", session?.user.id] }),
+      ]);
     } catch (error) {
       setGeneratedPdf(null);
       setGenerateError(safeClaimPackExportError(error));

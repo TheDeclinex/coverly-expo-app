@@ -5,6 +5,7 @@ import {
   addClaimPackRoom,
   buildClaimPackGeneratePayload,
   calculateClaimPackSummary,
+  clearClaimPackDraftSnapshot,
   clearClaimPackItemsInRoom,
   createClaimPackClientDraftId,
   createInitialClaimPackSelection,
@@ -61,6 +62,19 @@ test("defaults all rooms and items into a draft claim-pack selection", () => {
 
   assert.deepEqual([...selection.selectedRoomIds].sort(), ["room-a", "room-b"]);
   assert.deepEqual([...selection.selectedItemIds].sort(), ["item-chair", "item-kettle", "item-tv"]);
+});
+
+test("draft snapshots can be cleared after successful generation", () => {
+  saveClaimPackDraftSnapshot("draft-to-clear", {
+    selection: createRoomsOnlyClaimPackSelection(["room-a"]),
+    scope: "selected_rooms",
+    claimNote: "",
+    managedRoomId: null,
+  });
+
+  assert.ok(loadClaimPackDraftSnapshot("draft-to-clear"));
+  clearClaimPackDraftSnapshot("draft-to-clear");
+  assert.equal(loadClaimPackDraftSnapshot("draft-to-clear"), null);
 });
 
 test("whole property selection includes every room and item", () => {

@@ -26,10 +26,13 @@ import { useToast } from "@/components/Toast";
 import { useAuth } from "@/context/AuthContext";
 import { useEntitlements } from "@/context/EntitlementsContext";
 import { useColors } from "@/hooks/useColors";
+import { useVoiceRecording } from "@/hooks/useVoiceRecording";
+import { callVoiceDescribe } from "@/lib/voice-input";
 import {
   buildReplacementSearchQuery,
   filterReplacementResults,
   getItemUnitEstimate,
+  replacementVoiceTranscriptToQuery,
   ReplacementPriceSearchError,
   searchReplacementPrices,
   type ReplacementPriceFilter,
@@ -247,12 +250,22 @@ export default function ReplacementPricingScreen() {
   const insets = useSafeAreaInsets();
   const queryClient = useQueryClient();
   const { showToast } = useToast();
+  const voice = useVoiceRecording(20);
+  const {
+    isRecording: voiceIsRecording,
+    maxDurationReached: voiceMaxDurationReached,
+    startRecording: startVoiceRecording,
+    stopRecording: stopVoiceRecording,
+    reset: resetVoiceRecording,
+  } = voice;
 
   const [searchQuery, setSearchQuery] = useState("");
   const [results, setResults] = useState<ReplacementPriceResult[] | null>(null);
   const [filter, setFilter] = useState<ReplacementPriceFilter>("all");
   const [searching, setSearching] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
+  const [voiceProcessing, setVoiceProcessing] = useState(false);
+  const [voiceError, setVoiceError] = useState<string | null>(null);
   const [limitModal, setLimitModal] = useState<NormalizedLimitError | null>(null);
   const [selectingPosition, setSelectingPosition] = useState<number | null>(null);
   const autoSearchedItemId = React.useRef<string | null>(null);
@@ -325,6 +338,59 @@ export default function ReplacementPricingScreen() {
   const handleSearch = () => {
     void runSearch(searchQuery);
   };
+
+  const stopAndTranscribeSearch = React.useCallback(async () => {
+    setVoiceError(null);
+    const recording = await stopVoiceRecording();
+    if (!recording) {
+      setVoiceError("Could not transcribe. Try again or type your search.");
+      return;
+    }
+
+    setVoiceProcessing(true);
+    try {
+      const result = await callVoiceDescribe(recording, {
+        mode: "item_edit",
+        currentName: item?.name,
+        currentCategory: item?.category ?? undefined,
+        currentDescription: searchQuery,
+      });
+      const transcript = result.response?.success
+        ? replacementVoiceTranscriptToQuery(result.response.transcript)
+        : "";
+      if (!transcript) {
+        setVoiceError("Could not transcribe. Try again or type your search.");
+        return;
+      }
+      setSearchQuery(transcript);
+    } catch {
+      setVoiceError("Could not transcribe. Try again or type your search.");
+    } finally {
+      setVoiceProcessing(false);
+      await resetVoiceRecording();
+    }
+  }, [item?.category, item?.name, resetVoiceRecording, searchQuery, stopVoiceRecording]);
+
+  const handleVoiceSearchDescription = React.useCallback(async () => {
+    if (searching || voiceProcessing) return;
+    setVoiceError(null);
+    if (voiceIsRecording) {
+      await stopAndTranscribeSearch();
+      return;
+    }
+    const started = await startVoiceRecording();
+    if (!started) {
+      setVoiceError("Could not transcribe. Try again or type your search.");
+    }
+  }, [searching, startVoiceRecording, stopAndTranscribeSearch, voiceIsRecording, voiceProcessing]);
+
+  React.useEffect(() => {
+    if (voiceMaxDurationReached) void stopAndTranscribeSearch();
+  }, [stopAndTranscribeSearch, voiceMaxDurationReached]);
+
+  React.useEffect(() => () => {
+    void resetVoiceRecording();
+  }, [resetVoiceRecording]);
 
   const goBackToItem = React.useCallback(() => {
     if (!item) {
@@ -510,23 +576,53 @@ export default function ReplacementPricingScreen() {
           </Text>
 
           <View style={styles.searchRow}>
-            <TextInput
-              value={searchQuery}
-              onChangeText={setSearchQuery}
-              placeholder="Brand, model, item"
-              placeholderTextColor={colors.mutedForeground}
-              returnKeyType="search"
-              onSubmitEditing={handleSearch}
-              editable={!searching}
+            <View
               style={[
-                styles.searchInput,
+                styles.searchInputWrap,
                 {
-                  color: colors.foreground,
                   backgroundColor: colors.card,
                   borderColor: colors.input,
                 },
               ]}
-            />
+            >
+              <TextInput
+                value={searchQuery}
+                onChangeText={(value) => {
+                  setSearchQuery(value);
+                  setVoiceError(null);
+                }}
+                placeholder="Brand, model, item"
+                placeholderTextColor={colors.mutedForeground}
+                returnKeyType="search"
+                onSubmitEditing={handleSearch}
+                editable={!searching}
+                style={[
+                  styles.searchInput,
+                  {
+                    color: colors.foreground,
+                  },
+                ]}
+              />
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Speak search description"
+                disabled={searching || voiceProcessing}
+                onPress={() => void handleVoiceSearchDescription()}
+                style={({ pressed }) => [
+                  styles.voiceButton,
+                  {
+                    backgroundColor: voiceIsRecording ? colors.primary : colors.secondary,
+                    opacity: searching || voiceProcessing ? 0.5 : pressed ? 0.72 : 1,
+                  },
+                ]}
+              >
+                {voiceProcessing ? (
+                  <ActivityIndicator size="small" color={colors.primary} />
+                ) : (
+                  <Feather name={voiceIsRecording ? "square" : "mic"} size={16} color={voiceIsRecording ? colors.primaryForeground : colors.primary} />
+                )}
+              </Pressable>
+            </View>
             <Pressable
               onPress={handleSearch}
               disabled={searching || !searchQuery.trim()}
@@ -545,6 +641,12 @@ export default function ReplacementPricingScreen() {
               )}
             </Pressable>
           </View>
+
+          {voiceIsRecording || voiceProcessing || voiceError ? (
+            <Text style={[styles.voiceStatus, { color: voiceError ? colors.destructive : colors.mutedForeground }]}>
+              {voiceError ?? (voiceProcessing ? "Transcribing..." : "Listening... tap the mic to finish.")}
+            </Text>
+          ) : null}
 
           {!searching && searchError ? (
             <View style={[styles.errorBox, { borderColor: colors.destructive }]}>
@@ -656,13 +758,35 @@ const styles = StyleSheet.create({
   estimate: { fontSize: 12, lineHeight: 18, fontFamily: "Inter_400Regular" },
   helper: { fontSize: 13, lineHeight: 20, fontFamily: "Inter_400Regular" },
   searchRow: { flexDirection: "row", gap: 8 },
-  searchInput: {
+  searchInputWrap: {
     flex: 1,
     minHeight: 46,
     borderWidth: 1,
     borderRadius: 10,
-    paddingHorizontal: 13,
+    paddingLeft: 13,
+    paddingRight: 6,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  searchInput: {
+    flex: 1,
+    minHeight: 44,
+    paddingVertical: 0,
     fontSize: 14,
+    fontFamily: "Inter_400Regular",
+  },
+  voiceButton: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  voiceStatus: {
+    marginTop: -6,
+    fontSize: 12,
+    lineHeight: 17,
     fontFamily: "Inter_400Regular",
   },
   searchButton: {

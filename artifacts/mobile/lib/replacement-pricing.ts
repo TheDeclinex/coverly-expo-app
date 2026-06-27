@@ -1,5 +1,6 @@
 import { anonKey, debugSupabaseUrl, supabase } from "@/lib/supabase";
 import type { InventoryItem } from "@/types";
+export { replacementVoiceTranscriptToQuery } from "./replacement-pricing-query.ts";
 
 export interface ReplacementPriceSearchRequest {
   itemName: string;

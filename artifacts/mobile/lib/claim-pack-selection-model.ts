@@ -81,6 +81,11 @@ export function loadClaimPackDraftSnapshot(
   };
 }
 
+export function clearClaimPackDraftSnapshot(clientDraftId: string | null | undefined): void {
+  if (!clientDraftId) return;
+  draftSnapshots.delete(clientDraftId);
+}
+
 export function createClaimPackClientDraftId(
   now = Date.now(),
   random = Math.random(),
