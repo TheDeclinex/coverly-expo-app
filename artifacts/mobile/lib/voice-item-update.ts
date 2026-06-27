@@ -1,5 +1,6 @@
 import type { InventoryItem } from "@/types";
 import type { VoiceItemPatch } from "@/types/voice";
+import { ITEM_CATEGORIES } from "../constants/categories.ts";
 
 function hasOwn(patch: VoiceItemPatch, key: keyof VoiceItemPatch): boolean {
   return Object.prototype.hasOwnProperty.call(patch, key);
@@ -7,6 +8,14 @@ function hasOwn(patch: VoiceItemPatch, key: keyof VoiceItemPatch): boolean {
 
 function optionalText(value: string | null | undefined): string | null {
   return value?.trim() || null;
+}
+
+function validCategory(value: string | null | undefined): string | null | undefined {
+  if (value === undefined) return undefined;
+  if (value === null) return null;
+  const normalized = value.trim().toLowerCase();
+  if (!normalized) return null;
+  return ITEM_CATEGORIES.find((category) => category.toLowerCase() === normalized);
 }
 
 function validMoney(value: number | null | undefined, label: string): number | null {
@@ -42,6 +51,10 @@ export function buildVoiceItemUpdatePayload(
   }
 
   if (hasOwn(patch, "brand_maker")) update.brand_maker = optionalText(patch.brand_maker);
+  if (hasOwn(patch, "category")) {
+    const category = validCategory(patch.category);
+    if (category !== undefined) update.category = category;
+  }
   if (hasOwn(patch, "model_series")) update.model_series = optionalText(patch.model_series);
   if (hasOwn(patch, "purchase_source")) update.purchase_source = optionalText(patch.purchase_source);
   if (hasOwn(patch, "purchase_year_approx")) update.purchase_year_approx = optionalText(patch.purchase_year_approx);

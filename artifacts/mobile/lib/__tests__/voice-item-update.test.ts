@@ -17,9 +17,19 @@ test("builds a narrow payload from approved voice fields", () => {
     brand_maker: "Samsung",
     notes: "Receipt attached",
   });
-  for (const key of ["barcode", "web_listing_url", "attachments", "image_url", "room_id", "category", "condition_label"]) {
+  for (const key of ["barcode", "web_listing_url", "attachments", "image_url", "room_id", "condition_label"]) {
     assert.equal(key in update, false, `${key} must be preserved`);
   }
+});
+
+test("voice edit can update a valid item category", () => {
+  const update = buildVoiceItemUpdatePayload({ category: "electronics" });
+  assert.deepEqual(update, { category: "Electronics" });
+});
+
+test("unrecognised category does not overwrite existing category", () => {
+  const update = buildVoiceItemUpdatePayload({ category: "not a real category" });
+  assert.deepEqual(update, {});
 });
 
 test("replacement price writes the unit value without multiplying quantity", () => {

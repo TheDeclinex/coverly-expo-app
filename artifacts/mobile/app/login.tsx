@@ -202,22 +202,13 @@ export default function LoginScreen() {
     }
     setLoading(true);
     setError(null);
-    // Sign-up flow notes:
-    // 1. Supabase verifies the user's email before the account becomes active —
-    //    the user must tap the link in the confirmation email first.
-    // 2. `emailRedirectTo` is the URL the user lands on *after* clicking that
-    //    verification link; it is purely a post-verification landing page and
-    //    does not affect Expo or the app itself.
-    // 3. We are temporarily using the live Coverly homepage as the redirect
-    //    because the intended destination (`https://www.coverly.nz/auth/verified`)
-    //    does not exist yet.
-    // 4. Switch `emailRedirectTo` back to `https://www.coverly.nz/auth/verified`
-    //    once that page has been built and the URL is allowlisted in Supabase →
-    //    Authentication → URL Configuration → Redirect URLs.
+    // Post-verification landing page. Keep this Coverly-owned URL allowlisted in
+    // Supabase Auth redirect settings; native deep-link callback can replace it
+    // once app links are fully configured.
     const { data, error: authError } = await supabase.auth.signUp({
       email: email.trim(),
       password,
-      options: { emailRedirectTo: "https://www.coverly.nz" },
+      options: { emailRedirectTo: "https://www.coverly.nz/auth/verified" },
     });
     setLoading(false);
     if (authError) {

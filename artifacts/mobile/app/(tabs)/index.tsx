@@ -21,7 +21,6 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Svg, { Circle } from "react-native-svg";
 
-import { EmptyState } from "@/components/EmptyState";
 import { ErrorState } from "@/components/ErrorState";
 import { LoadingState } from "@/components/LoadingState";
 import { RecommendedActionCard } from "@/components/RecommendedActionCard";
@@ -776,18 +775,66 @@ export default function HomeScreen() {
             />
           }
           ListEmptyComponent={
-            <View style={{ paddingHorizontal: 16, paddingTop: 32, gap: 14 }}>
-              {homeRecommendedAction ? <RecommendedActionCard {...homeRecommendedAction} /> : null}
-              <EmptyState
-                icon="home"
-                title="No properties yet"
-                subtitle="Your properties will appear here once added"
-              />
-            </View>
+            <FirstUseEmptyState onAddProperty={handleAddProperty} />
           }
         />
       )}
     </>
+  );
+}
+
+function FirstUseEmptyState({ onAddProperty }: { onAddProperty: () => void }) {
+  const colors = useColors();
+  const steps: Array<{ icon: keyof typeof Feather.glyphMap; title: string; body: string }> = [
+    { icon: "home", title: "Add your property", body: "Create the place you want to inventory." },
+    { icon: "zap", title: "Scan a room", body: "Capture visible items from photos." },
+    { icon: "paperclip", title: "Add evidence", body: "Attach receipts, photos, and notes." },
+    { icon: "package", title: "Create a claim pack", body: "Export selected items when needed." },
+  ];
+
+  return (
+    <View style={styles.firstUseWrap}>
+      <LinearGradient
+        colors={["#F6FBFA", "#FFFFFF"]}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 1 }}
+        style={[styles.firstUseCard, { borderColor: HOME_SUMMARY_BORDER, borderRadius: colors.radius }]}
+      >
+        <View style={[styles.firstUseIcon, { backgroundColor: colors.accent }]}>
+          <Feather name="shield" size={24} color={colors.primary} />
+        </View>
+        <Text style={[styles.firstUseTitle, { color: colors.foreground }]}>Welcome to Coverly</Text>
+        <Text style={[styles.firstUseBody, { color: colors.mutedForeground }]}>
+          Start by adding your first property, then scan a room or add items manually.
+        </Text>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Add property"
+          onPress={onAddProperty}
+          style={({ pressed }) => [
+            styles.firstUsePrimary,
+            { backgroundColor: colors.primary, opacity: pressed ? 0.84 : 1 },
+          ]}
+        >
+          <Feather name="plus-circle" size={17} color={colors.primaryForeground} />
+          <Text style={[styles.firstUsePrimaryText, { color: colors.primaryForeground }]}>Add property</Text>
+        </Pressable>
+      </LinearGradient>
+
+      <View style={styles.firstUseSteps}>
+        {steps.map((step) => (
+          <View key={step.title} style={[styles.firstUseStep, { backgroundColor: colors.card, borderColor: colors.border, borderRadius: colors.radius }]}>
+            <View style={[styles.firstUseStepIcon, { backgroundColor: colors.secondary }]}>
+              <Feather name={step.icon} size={16} color={colors.primary} />
+            </View>
+            <View style={styles.firstUseStepCopy}>
+              <Text style={[styles.firstUseStepTitle, { color: colors.foreground }]}>{step.title}</Text>
+              <Text style={[styles.firstUseStepBody, { color: colors.mutedForeground }]}>{step.body}</Text>
+            </View>
+          </View>
+        ))}
+      </View>
+    </View>
   );
 }
 
@@ -885,6 +932,79 @@ const styles = StyleSheet.create({
   quickActionText: {
     fontSize: 14,
     fontFamily: "Inter_600SemiBold",
+  },
+  firstUseWrap: {
+    paddingHorizontal: 16,
+    paddingTop: 26,
+    gap: 12,
+  },
+  firstUseCard: {
+    borderWidth: 1,
+    padding: 18,
+    alignItems: "center",
+    gap: 10,
+  },
+  firstUseIcon: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  firstUseTitle: {
+    fontSize: 22,
+    fontFamily: "Inter_700Bold",
+    textAlign: "center",
+  },
+  firstUseBody: {
+    fontSize: 14,
+    lineHeight: 21,
+    fontFamily: "Inter_400Regular",
+    textAlign: "center",
+  },
+  firstUsePrimary: {
+    minHeight: 44,
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    marginTop: 4,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 7,
+  },
+  firstUsePrimaryText: {
+    fontSize: 14,
+    fontFamily: "Inter_700Bold",
+  },
+  firstUseSteps: {
+    gap: 10,
+  },
+  firstUseStep: {
+    borderWidth: 1,
+    padding: 12,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
+  firstUseStepIcon: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  firstUseStepCopy: {
+    flex: 1,
+    gap: 2,
+  },
+  firstUseStepTitle: {
+    fontSize: 13,
+    fontFamily: "Inter_600SemiBold",
+  },
+  firstUseStepBody: {
+    fontSize: 11,
+    lineHeight: 16,
+    fontFamily: "Inter_400Regular",
   },
   card: {
     borderWidth: 1,

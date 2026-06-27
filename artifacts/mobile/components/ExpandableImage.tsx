@@ -1,7 +1,7 @@
 import { Feather } from "@expo/vector-icons";
 import { Image } from "expo-image";
 import type { ImageContentFit } from "expo-image";
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { Pressable, View } from "react-native";
 import type { StyleProp, ViewStyle } from "react-native";
 
@@ -52,6 +52,7 @@ export function ExpandableImage({
   const [lightboxVisible, setLightboxVisible] = useState(false);
   const [dims, setDims] = useState({ w: 0, h: 0 });
   const [hasError, setHasError] = useState(false);
+  const suppressNextPress = useRef(false);
 
   // Reset error state whenever the URI changes so a new valid URL gets a fresh load attempt.
   useEffect(() => {
@@ -105,7 +106,26 @@ export function ExpandableImage({
   return (
     <>
       <Pressable
-        onPress={() => setLightboxVisible(true)}
+        onPress={() => {
+          if (suppressNextPress.current) {
+            suppressNextPress.current = false;
+            return;
+          }
+          setLightboxVisible(true);
+        }}
+        onLongPress={(event) => {
+          if (!hasPin || !onReposition) return;
+          suppressNextPress.current = true;
+          const { locationX, locationY } = event.nativeEvent;
+          const nextX = Math.max(0, Math.min(1, locationX / dims.w));
+          const nextY = Math.max(0, Math.min(1, locationY / dims.h));
+          void onReposition(nextX, nextY).finally(() => {
+            setTimeout(() => {
+              suppressNextPress.current = false;
+            }, 700);
+          });
+        }}
+        delayLongPress={450}
         style={[style, { overflow: "hidden" }]}
         onLayout={(e) => {
           const { width, height } = e.nativeEvent.layout;
