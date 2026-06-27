@@ -1,0 +1,24 @@
+0 verbose cli C:\Program Files\nodejs\node.exe C:\Program Files\nodejs\node_modules\npm\bin\npm-cli.js
+1 info using npm@11.12.1
+2 info using node@v24.15.0
+3 silly config load:file:C:\Program Files\nodejs\node_modules\npm\npmrc
+4 silly config load:file:C:\Users\User\Documents\GitHub\coverly-expo-app\.npmrc
+5 silly config load:file:C:\Users\User\Documents\GitHub\coverly-expo-app\.tmp\supabase-home\.npmrc
+6 silly config load:file:C:\Users\User\AppData\Roaming\npm\etc\npmrc
+7 verbose title npm exec supabase functions deploy generate-claim-pack --project-ref jqijavrugjidqzbbgpag
+8 verbose argv "exec" "--" "supabase" "functions" "deploy" "generate-claim-pack" "--project-ref" "jqijavrugjidqzbbgpag"
+9 verbose logfile logs-max:10 dir:C:\Users\User\Documents\GitHub\coverly-expo-app\.tmp\npm-cache\_logs\2026-06-26T23_25_23_954Z-
+10 verbose logfile C:\Users\User\Documents\GitHub\coverly-expo-app\.tmp\npm-cache\_logs\2026-06-26T23_25_23_954Z-debug-0.log
+11 warn Unknown project config "auto-install-peers". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.
+12 warn Unknown project config "strict-peer-dependencies". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.
+13 silly logfile done cleaning log files
+14 silly packumentCache heap:2348810240 maxSize:587202560 maxEntrySize:293601280
+15 http fetch GET 200 https://registry.npmjs.org/supabase 757ms (cache revalidated)
+16 silly packumentCache heap:2348810240 maxSize:587202560 maxEntrySize:293601280
+17 silly packumentCache heap:2348810240 maxSize:587202560 maxEntrySize:293601280
+18 verbose cwd C:\Users\User\Documents\GitHub\coverly-expo-app
+19 verbose os Windows_NT 10.0.19045
+20 verbose node v24.15.0
+21 verbose npm  v11.12.1
+22 verbose exit 1
+23 verbose code 1

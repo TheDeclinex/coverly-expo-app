@@ -1,0 +1,1203 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Coverly Claim Pack Mockup</title>
+    <style>
+      :root {
+        --ink: #1e293b;
+        --muted: #64748b;
+        --soft: #f8fafb;
+        --paper: #ffffff;
+        --line: #dbe5eb;
+        --teal: #0f8f83;
+        --teal-dark: #0f766e;
+        --teal-soft: #eef9f6;
+        --slate: #334155;
+        --amber: #b45309;
+        --amber-soft: #fff7ed;
+        --red: #b91c1c;
+        --red-soft: #fef2f2;
+        --blue: #2563eb;
+        --blue-soft: #eff6ff;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        background: #e8eef2;
+        color: var(--ink);
+        font-family:
+          Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+          "Segoe UI", sans-serif;
+        font-size: 13px;
+        line-height: 1.45;
+      }
+
+      .toolbar {
+        position: sticky;
+        top: 0;
+        z-index: 10;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 16px;
+        padding: 14px 24px;
+        background: rgba(248, 250, 251, 0.94);
+        border-bottom: 1px solid var(--line);
+        backdrop-filter: blur(14px);
+      }
+
+      .toolbar strong {
+        color: var(--slate);
+      }
+
+      .toolbar button {
+        border: 0;
+        border-radius: 8px;
+        background: var(--teal);
+        color: white;
+        padding: 10px 14px;
+        font-weight: 700;
+        cursor: pointer;
+      }
+
+      .document {
+        max-width: 980px;
+        margin: 28px auto 56px;
+      }
+
+      .page {
+        position: relative;
+        min-height: 1320px;
+        margin: 0 0 24px;
+        padding: 54px 58px 64px;
+        background: var(--paper);
+        border: 1px solid #d7e0e7;
+        box-shadow: 0 22px 55px rgba(15, 23, 42, 0.11);
+      }
+
+      .page::after {
+        content: attr(data-page);
+        position: absolute;
+        right: 58px;
+        bottom: 28px;
+        color: #94a3b8;
+        font-size: 11px;
+      }
+
+      .brand-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        gap: 32px;
+        margin-bottom: 42px;
+      }
+
+      .logo {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+      }
+
+      .logo-mark {
+        width: 42px;
+        height: 42px;
+        border-radius: 12px;
+        background:
+          linear-gradient(135deg, rgba(15, 143, 131, 0.16), transparent 55%),
+          var(--teal-soft);
+        border: 1px solid #b8e3dc;
+        display: grid;
+        place-items: center;
+        color: var(--teal-dark);
+        font-weight: 900;
+        letter-spacing: 0;
+      }
+
+      .brand-name {
+        font-size: 25px;
+        font-weight: 850;
+        letter-spacing: 0;
+      }
+
+      .tagline {
+        color: var(--muted);
+        font-size: 12px;
+        margin-top: 1px;
+      }
+
+      .doc-meta {
+        text-align: right;
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      .kicker {
+        color: var(--teal-dark);
+        font-size: 12px;
+        font-weight: 800;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+      }
+
+      h1,
+      h2,
+      h3 {
+        margin: 0;
+        letter-spacing: 0;
+        line-height: 1.15;
+      }
+
+      h1 {
+        margin-top: 12px;
+        font-size: 52px;
+        color: #102633;
+      }
+
+      h2 {
+        margin-bottom: 18px;
+        font-size: 24px;
+        color: #122331;
+      }
+
+      h3 {
+        margin: 24px 0 10px;
+        font-size: 15px;
+        color: #182638;
+      }
+
+      p {
+        margin: 0 0 12px;
+      }
+
+      .cover-grid {
+        display: grid;
+        grid-template-columns: 1.2fr 0.8fr;
+        gap: 24px;
+        margin-top: 46px;
+      }
+
+      .panel,
+      .metric,
+      .callout {
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: #fff;
+      }
+
+      .panel {
+        padding: 20px;
+      }
+
+      .panel.tint {
+        background: var(--teal-soft);
+        border-color: #ccebe6;
+      }
+
+      .intro {
+        color: #334155;
+        font-size: 15px;
+      }
+
+      .label {
+        color: var(--muted);
+        font-size: 11px;
+        font-weight: 750;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+      }
+
+      .value {
+        margin-top: 5px;
+        font-size: 15px;
+        font-weight: 750;
+      }
+
+      .field-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 16px 22px;
+      }
+
+      .summary-strip {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 12px;
+        margin: 28px 0;
+      }
+
+      .metric {
+        padding: 15px;
+        min-height: 86px;
+      }
+
+      .metric strong {
+        display: block;
+        margin-top: 7px;
+        font-size: 23px;
+        color: #102633;
+      }
+
+      .metric small {
+        color: var(--muted);
+        font-weight: 650;
+      }
+
+      .callout {
+        margin: 18px 0;
+        padding: 16px 18px;
+        border-left: 5px solid var(--teal);
+        background: #fbfefd;
+      }
+
+      .callout.warning {
+        border-left-color: var(--amber);
+        background: var(--amber-soft);
+      }
+
+      .two-col {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 22px;
+      }
+
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        margin: 12px 0 20px;
+        table-layout: fixed;
+      }
+
+      th,
+      td {
+        padding: 9px 10px;
+        border-bottom: 1px solid var(--line);
+        vertical-align: top;
+        overflow-wrap: break-word;
+      }
+
+      th {
+        background: #f4f7f8;
+        color: #475569;
+        font-size: 10.5px;
+        font-weight: 850;
+        text-align: left;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+      }
+
+      td.amount,
+      th.amount {
+        text-align: right;
+        white-space: nowrap;
+      }
+
+      .status {
+        display: inline-flex;
+        align-items: center;
+        min-height: 22px;
+        padding: 3px 8px;
+        border-radius: 999px;
+        font-size: 11px;
+        font-weight: 800;
+        line-height: 1.2;
+      }
+
+      .status.complete {
+        background: var(--teal-soft);
+        color: var(--teal-dark);
+      }
+
+      .status.review {
+        background: var(--amber-soft);
+        color: var(--amber);
+      }
+
+      .status.missing {
+        background: var(--red-soft);
+        color: var(--red);
+      }
+
+      .status.info {
+        background: var(--blue-soft);
+        color: var(--blue);
+      }
+
+      .room-header {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        gap: 18px;
+        align-items: center;
+        padding: 16px 18px;
+        margin: 20px 0 0;
+        border: 1px solid #cfe3df;
+        border-radius: 8px 8px 0 0;
+        background: var(--teal-soft);
+      }
+
+      .room-title {
+        font-size: 17px;
+        font-weight: 850;
+      }
+
+      .room-stats {
+        display: flex;
+        gap: 16px;
+        color: var(--muted);
+        font-size: 12px;
+        font-weight: 750;
+      }
+
+      .room-notes {
+        margin: 0 0 12px;
+        padding: 12px 18px;
+        border-right: 1px solid var(--line);
+        border-bottom: 1px solid var(--line);
+        border-left: 1px solid var(--line);
+        color: #475569;
+      }
+
+      .evidence-grid {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 14px;
+        margin: 12px 0 24px;
+      }
+
+      .evidence-card {
+        min-height: 156px;
+        border: 1px dashed #b8c6cf;
+        border-radius: 8px;
+        background: #f8fafb;
+        padding: 12px;
+      }
+
+      .thumb {
+        height: 76px;
+        border-radius: 6px;
+        background:
+          linear-gradient(135deg, rgba(15, 143, 131, 0.11), transparent),
+          repeating-linear-gradient(
+            -45deg,
+            #eef3f5,
+            #eef3f5 8px,
+            #e5edf1 8px,
+            #e5edf1 16px
+          );
+        border: 1px solid #d7e2e7;
+        display: grid;
+        place-items: center;
+        color: #64748b;
+        font-size: 11px;
+        font-weight: 800;
+        text-align: center;
+      }
+
+      .evidence-card strong {
+        display: block;
+        margin-top: 10px;
+      }
+
+      .evidence-card span {
+        display: block;
+        margin-top: 3px;
+        color: var(--muted);
+        font-size: 11px;
+      }
+
+      .signature-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 22px;
+        margin-top: 26px;
+      }
+
+      .signature-box {
+        min-height: 94px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 14px;
+      }
+
+      .notes-box {
+        height: 190px;
+        margin-top: 12px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background:
+          repeating-linear-gradient(
+            to bottom,
+            #fff,
+            #fff 34px,
+            #e2e8f0 35px
+          );
+      }
+
+      .section-rule {
+        height: 1px;
+        margin: 26px 0;
+        background: var(--line);
+      }
+
+      .small {
+        color: var(--muted);
+        font-size: 11px;
+      }
+
+      .avoid-break {
+        break-inside: avoid;
+      }
+
+      @media print {
+        body {
+          background: white;
+          font-size: 11px;
+        }
+
+        .toolbar {
+          display: none;
+        }
+
+        .document {
+          max-width: none;
+          margin: 0;
+        }
+
+        .page {
+          width: 210mm;
+          min-height: 297mm;
+          margin: 0;
+          padding: 18mm 16mm 16mm;
+          border: 0;
+          box-shadow: none;
+          page-break-after: always;
+        }
+
+        h1 {
+          font-size: 42px;
+        }
+
+        .summary-strip {
+          grid-template-columns: repeat(4, 1fr);
+        }
+      }
+
+      @media (max-width: 760px) {
+        .toolbar {
+          align-items: flex-start;
+          flex-direction: column;
+        }
+
+        .document {
+          margin: 0;
+        }
+
+        .page {
+          min-height: auto;
+          padding: 32px 18px 54px;
+          border-right: 0;
+          border-left: 0;
+        }
+
+        .brand-row,
+        .cover-grid,
+        .two-col,
+        .signature-grid {
+          grid-template-columns: 1fr;
+          display: grid;
+        }
+
+        .doc-meta {
+          text-align: left;
+        }
+
+        .summary-strip,
+        .field-grid,
+        .evidence-grid {
+          grid-template-columns: 1fr;
+        }
+
+        h1 {
+          font-size: 38px;
+        }
+
+        table {
+          font-size: 12px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="toolbar">
+      <div>
+        <strong>Coverly Claim Pack HTML Mockup</strong>
+        <span class="small"> - draft layout for print and PDF export</span>
+      </div>
+      <button onclick="window.print()">Print / Save as PDF</button>
+    </div>
+
+    <main class="document">
+      <section class="page" data-page="Page 1">
+        <div class="brand-row">
+          <div class="logo">
+            <div class="logo-mark">C</div>
+            <div>
+              <div class="brand-name">Coverly</div>
+              <div class="tagline">Know what you own</div>
+            </div>
+          </div>
+          <div class="doc-meta">
+            Generated 26 June 2026<br />
+            Claim reference CLM-2026-00482<br />
+            Prepared for Amelia Walker
+          </div>
+        </div>
+
+        <div class="kicker">Insurance supporting document</div>
+        <h1>Claim Pack</h1>
+
+        <div class="cover-grid">
+          <div class="panel tint">
+            <p class="intro">
+              This Coverly Claim Pack provides a structured household contents
+              inventory for the property listed below. It includes affected
+              rooms, item schedules, replacement value estimates, and evidence
+              references to support insurer and assessor review.
+            </p>
+            <p class="small">
+              This document is intended to support a contents insurance claim.
+              It does not guarantee claim acceptance, policy coverage, or final
+              settlement value.
+            </p>
+          </div>
+
+          <div class="panel">
+            <div class="field-grid">
+              <div>
+                <div class="label">Property</div>
+                <div class="value">Harakeke Family Home</div>
+              </div>
+              <div>
+                <div class="label">Event type</div>
+                <div class="value">House fire</div>
+              </div>
+              <div>
+                <div class="label">Address</div>
+                <div class="value">
+                  42 Kowhai Street, Mount Albert, Auckland 1025
+                </div>
+              </div>
+              <div>
+                <div class="label">Insurer</div>
+                <div class="value">Southern Harbour Insurance</div>
+              </div>
+              <div>
+                <div class="label">Policy number</div>
+                <div class="value">SHI-CONT-728491</div>
+              </div>
+              <div>
+                <div class="label">Event date</div>
+                <div class="value">14 June 2026</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="summary-strip">
+          <div class="metric">
+            <small>Total claimed value</small>
+            <strong>NZD $43,875</strong>
+          </div>
+          <div class="metric">
+            <small>Rooms included</small>
+            <strong>6</strong>
+          </div>
+          <div class="metric">
+            <small>Items included</small>
+            <strong>38</strong>
+          </div>
+          <div class="metric">
+            <small>Need review</small>
+            <strong>9</strong>
+          </div>
+        </div>
+
+        <div class="two-col">
+          <div>
+            <h3>Contents Cover Position</h3>
+            <table>
+              <tr>
+                <th>Field</th>
+                <th class="amount">Amount</th>
+              </tr>
+              <tr>
+                <td>Contents sum insured</td>
+                <td class="amount">NZD $110,000.00</td>
+              </tr>
+              <tr>
+                <td>Current listed claim value</td>
+                <td class="amount">NZD $43,875.00</td>
+              </tr>
+              <tr>
+                <td>Estimated remaining cover</td>
+                <td class="amount">NZD $66,125.00</td>
+              </tr>
+            </table>
+          </div>
+          <div>
+            <h3>Evidence Coverage</h3>
+            <table>
+              <tr>
+                <th>Evidence type</th>
+                <th class="amount">Count</th>
+              </tr>
+              <tr>
+                <td>Item or room photos</td>
+                <td class="amount">25</td>
+              </tr>
+              <tr>
+                <td>Receipts</td>
+                <td class="amount">5</td>
+              </tr>
+              <tr>
+                <td>Manuals or warranties</td>
+                <td class="amount">6</td>
+              </tr>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <section class="page" data-page="Page 2">
+        <h2>Executive Summary</h2>
+        <div class="callout">
+          A fire originating in the kitchen caused significant smoke and heat
+          damage to the kitchen, dining area, lounge, and hallway. Some bedroom
+          and laundry contents may have smoke or water contamination and are
+          marked for review where appropriate.
+        </div>
+
+        <table>
+          <tr>
+            <th>Metric</th>
+            <th class="amount">Value</th>
+            <th>Comment</th>
+          </tr>
+          <tr>
+            <td>Total claimed contents value</td>
+            <td class="amount">NZD $43,875.00</td>
+            <td>Based on item schedule included in this pack</td>
+          </tr>
+          <tr>
+            <td>Rooms included</td>
+            <td class="amount">6</td>
+            <td>Kitchen, dining, lounge, hallway, bedroom, laundry</td>
+          </tr>
+          <tr>
+            <td>Items included</td>
+            <td class="amount">38</td>
+            <td>Includes grouped lower-value household items</td>
+          </tr>
+          <tr>
+            <td>Items with photos or evidence</td>
+            <td class="amount">29</td>
+            <td>Photos, receipts, manuals, warranties, or room images</td>
+          </tr>
+          <tr>
+            <td>Items needing review</td>
+            <td class="amount">9</td>
+            <td>Price, evidence, coverage, or assessor review needed</td>
+          </tr>
+        </table>
+
+        <h3>Policyholder and Property Details</h3>
+        <table>
+          <tr>
+            <th>Field</th>
+            <th>Details</th>
+            <th>Field</th>
+            <th>Details</th>
+          </tr>
+          <tr>
+            <td>Policyholder</td>
+            <td>Amelia Walker</td>
+            <td>Additional insured</td>
+            <td>James Walker</td>
+          </tr>
+          <tr>
+            <td>Phone</td>
+            <td>+64 21 555 0184</td>
+            <td>Email</td>
+            <td>amelia.walker@example.co.nz</td>
+          </tr>
+          <tr>
+            <td>Property type</td>
+            <td>Owner-occupied standalone house</td>
+            <td>Claim lodged</td>
+            <td>17 June 2026</td>
+          </tr>
+          <tr>
+            <td>Insurer</td>
+            <td>Southern Harbour Insurance</td>
+            <td>Policy number</td>
+            <td>SHI-CONT-728491</td>
+          </tr>
+        </table>
+
+        <h3>Claim Overview</h3>
+        <p>
+          The policyholder is claiming for household contents affected by the
+          fire and related smoke, heat, and water exposure. The strongest
+          evidence is available for larger appliances, electronics, and lounge
+          furniture previously captured in Coverly. Several household bundles
+          have partial evidence or user-entered valuation estimates and should
+          be reviewed before final claim decisions.
+        </p>
+
+        <div class="callout warning">
+          Missing or incomplete information is highlighted throughout the pack.
+          Items marked for review should be checked by the policyholder,
+          insurer, or assessor before settlement decisions are made.
+        </div>
+      </section>
+
+      <section class="page" data-page="Page 3">
+        <h2>Room-by-Room Inventory Summary</h2>
+
+        <div class="avoid-break">
+          <div class="room-header">
+            <div class="room-title">Kitchen</div>
+            <div class="room-stats">
+              <span>10 items</span>
+              <span>NZD $9,840.00</span>
+              <span class="status complete">Complete</span>
+            </div>
+          </div>
+          <div class="room-notes">
+            Kitchen sustained direct fire and heat damage. Major appliances and
+            benchtop appliances have photo evidence.
+          </div>
+          <table>
+            <tr>
+              <th>Item</th>
+              <th>Category</th>
+              <th class="amount">Qty</th>
+              <th class="amount">Replacement value</th>
+              <th>Evidence</th>
+              <th>Status</th>
+            </tr>
+            <tr>
+              <td>Fisher & Paykel fridge-freezer</td>
+              <td>Appliance</td>
+              <td class="amount">1</td>
+              <td class="amount">NZD $2,199.00</td>
+              <td>Photo, manual</td>
+              <td><span class="status complete">Complete</span></td>
+            </tr>
+            <tr>
+              <td>Bosch dishwasher</td>
+              <td>Appliance</td>
+              <td class="amount">1</td>
+              <td class="amount">NZD $1,349.00</td>
+              <td>Photo, receipt</td>
+              <td><span class="status complete">Complete</span></td>
+            </tr>
+            <tr>
+              <td>Breville Barista Express coffee machine</td>
+              <td>Appliance</td>
+              <td class="amount">1</td>
+              <td class="amount">NZD $899.00</td>
+              <td>Photo, receipt</td>
+              <td><span class="status complete">Complete</span></td>
+            </tr>
+            <tr>
+              <td>Pantry small appliances bundle</td>
+              <td>Appliance</td>
+              <td class="amount">1</td>
+              <td class="amount">NZD $735.00</td>
+              <td>Partial photo</td>
+              <td><span class="status review">Price review</span></td>
+            </tr>
+            <tr>
+              <td>Glassware and servingware</td>
+              <td>Kitchenware</td>
+              <td class="amount">1</td>
+              <td class="amount">NZD $550.00</td>
+              <td>None</td>
+              <td><span class="status missing">Missing evidence</span></td>
+            </tr>
+          </table>
+        </div>
+
+        <div class="avoid-break">
+          <div class="room-header">
+            <div class="room-title">Lounge</div>
+            <div class="room-stats">
+              <span>9 items</span>
+              <span>NZD $16,910.00</span>
+              <span class="status complete">Complete</span>
+            </div>
+          </div>
+          <div class="room-notes">
+            Lounge was smoke damaged with some heat exposure. Electronics and
+            furniture have strong photo evidence.
+          </div>
+          <table>
+            <tr>
+              <th>Item</th>
+              <th>Category</th>
+              <th class="amount">Qty</th>
+              <th class="amount">Replacement value</th>
+              <th>Evidence</th>
+              <th>Status</th>
+            </tr>
+            <tr>
+              <td>Samsung 65-inch OLED TV</td>
+              <td>Electronics</td>
+              <td class="amount">1</td>
+              <td class="amount">NZD $3,299.00</td>
+              <td>Photo, manual</td>
+              <td><span class="status complete">Complete</span></td>
+            </tr>
+            <tr>
+              <td>Sonos Arc soundbar</td>
+              <td>Electronics</td>
+              <td class="amount">1</td>
+              <td class="amount">NZD $1,699.00</td>
+              <td>Photo, receipt</td>
+              <td><span class="status complete">Complete</span></td>
+            </tr>
+            <tr>
+              <td>Freedom three-seat sofa</td>
+              <td>Furniture</td>
+              <td class="amount">1</td>
+              <td class="amount">NZD $2,799.00</td>
+              <td>Photo</td>
+              <td><span class="status complete">Complete</span></td>
+            </tr>
+            <tr>
+              <td>Wool floor rug</td>
+              <td>Furniture</td>
+              <td class="amount">1</td>
+              <td class="amount">NZD $1,250.00</td>
+              <td>Photo</td>
+              <td><span class="status review">Valuation review</span></td>
+            </tr>
+            <tr>
+              <td>Curtains and blinds</td>
+              <td>Furnishings</td>
+              <td class="amount">1</td>
+              <td class="amount">NZD $3,367.00</td>
+              <td>Photo</td>
+              <td><span class="status review">Assessor review</span></td>
+            </tr>
+          </table>
+        </div>
+      </section>
+
+      <section class="page" data-page="Page 4">
+        <h2>Room Summary Continued</h2>
+
+        <table>
+          <tr>
+            <th>Room</th>
+            <th>Status</th>
+            <th class="amount">Items</th>
+            <th class="amount">Replacement value</th>
+            <th>Evidence completeness</th>
+            <th>Notes</th>
+          </tr>
+          <tr>
+            <td>Dining area</td>
+            <td><span class="status complete">Complete</span></td>
+            <td class="amount">5</td>
+            <td class="amount">NZD $5,235.00</td>
+            <td>Medium</td>
+            <td>Furniture visible in pre-loss room photos.</td>
+          </tr>
+          <tr>
+            <td>Hallway</td>
+            <td><span class="status info">Partial</span></td>
+            <td class="amount">4</td>
+            <td class="amount">NZD $1,690.00</td>
+            <td>Medium</td>
+            <td>Decorative mirror and photo replacement approach need review.</td>
+          </tr>
+          <tr>
+            <td>Main bedroom</td>
+            <td><span class="status review">Needs review</span></td>
+            <td class="amount">6</td>
+            <td class="amount">NZD $7,450.00</td>
+            <td>Medium</td>
+            <td>Cleaning versus replacement assessment required.</td>
+          </tr>
+          <tr>
+            <td>Laundry</td>
+            <td><span class="status info">Partial</span></td>
+            <td class="amount">4</td>
+            <td class="amount">NZD $2,750.00</td>
+            <td>Medium</td>
+            <td>Cleaning supplies bundle not yet priced.</td>
+          </tr>
+        </table>
+
+        <h2>Detailed Item Schedule</h2>
+        <table>
+          <tr>
+            <th>Item ID</th>
+            <th>Item</th>
+            <th>Brand / model</th>
+            <th>Condition</th>
+            <th>Year</th>
+            <th class="amount">Original</th>
+            <th class="amount">Replacement</th>
+            <th>Basis</th>
+            <th>Status</th>
+          </tr>
+          <tr>
+            <td>KIT-001</td>
+            <td>Fridge-freezer</td>
+            <td>Fisher & Paykel RF522BRPX6</td>
+            <td>Good</td>
+            <td>2021</td>
+            <td class="amount">NZD $1,899</td>
+            <td class="amount">NZD $2,199</td>
+            <td>Replacement listing</td>
+            <td><span class="status complete">Complete</span></td>
+          </tr>
+          <tr>
+            <td>KIT-003</td>
+            <td>Coffee machine</td>
+            <td>Breville Barista Express</td>
+            <td>Good</td>
+            <td>2023</td>
+            <td class="amount">NZD $799</td>
+            <td class="amount">NZD $899</td>
+            <td>Receipt</td>
+            <td><span class="status complete">Complete</span></td>
+          </tr>
+          <tr>
+            <td>LOU-001</td>
+            <td>OLED television</td>
+            <td>Samsung 65-inch OLED</td>
+            <td>Very good</td>
+            <td>2024</td>
+            <td class="amount">NZD $3,199</td>
+            <td class="amount">NZD $3,299</td>
+            <td>Replacement listing</td>
+            <td><span class="status complete">Complete</span></td>
+          </tr>
+          <tr>
+            <td>LOU-004</td>
+            <td>Wool rug</td>
+            <td>Unknown</td>
+            <td>Good</td>
+            <td>2019</td>
+            <td class="amount">Unknown</td>
+            <td class="amount">NZD $1,250</td>
+            <td>AI-estimated</td>
+            <td><span class="status review">Review</span></td>
+          </tr>
+          <tr>
+            <td>BED-002</td>
+            <td>Queen mattress</td>
+            <td>Sleepyhead Sanctuary</td>
+            <td>Good</td>
+            <td>2021</td>
+            <td class="amount">NZD $1,899</td>
+            <td class="amount">NZD $2,199</td>
+            <td>Comparable listing</td>
+            <td><span class="status review">Assessor review</span></td>
+          </tr>
+          <tr>
+            <td>LAU-004</td>
+            <td>Cleaning supplies bundle</td>
+            <td>Mixed</td>
+            <td>Unknown</td>
+            <td>2026</td>
+            <td class="amount">Unknown</td>
+            <td class="amount">Not priced</td>
+            <td>Not available</td>
+            <td><span class="status missing">Price missing</span></td>
+          </tr>
+        </table>
+
+        <p class="small">
+          The production PDF should continue this table for all selected items
+          and move long notes into an item detail appendix when needed.
+        </p>
+      </section>
+
+      <section class="page" data-page="Page 5">
+        <h2>Evidence Appendix</h2>
+        <p>
+          Evidence is grouped by room and linked back to item IDs. In a digital
+          PDF, each evidence reference should open the relevant image, receipt,
+          manual, warranty, or valuation document.
+        </p>
+
+        <div class="evidence-grid">
+          <div class="evidence-card">
+            <div class="thumb">PHOTO PLACEHOLDER</div>
+            <strong>EV-KIT-001</strong>
+            <span>KIT-001 - Fridge-freezer front view</span>
+            <span>Type: item photo</span>
+          </div>
+          <div class="evidence-card">
+            <div class="thumb">RECEIPT PLACEHOLDER</div>
+            <strong>EV-KIT-003</strong>
+            <span>KIT-002 - Dishwasher purchase receipt</span>
+            <span>Type: receipt</span>
+          </div>
+          <div class="evidence-card">
+            <div class="thumb">PHOTO PLACEHOLDER</div>
+            <strong>EV-LOU-001</strong>
+            <span>LOU-001 - Samsung TV wall view</span>
+            <span>Type: item photo</span>
+          </div>
+          <div class="evidence-card">
+            <div class="thumb">RECEIPT PLACEHOLDER</div>
+            <strong>EV-LOU-003</strong>
+            <span>LOU-002 - Sonos Arc receipt</span>
+            <span>Type: receipt</span>
+          </div>
+          <div class="evidence-card">
+            <div class="thumb">PHOTO PLACEHOLDER</div>
+            <strong>EV-BED-003</strong>
+            <span>BED-004 - Wardrobe partial photo</span>
+            <span>Type: partial room photo</span>
+          </div>
+          <div class="evidence-card">
+            <div class="thumb">MANUAL PLACEHOLDER</div>
+            <strong>EV-LAU-002</strong>
+            <span>LAU-001 - Washing machine manual</span>
+            <span>Type: manual PDF</span>
+          </div>
+        </div>
+
+        <h2>Missing Information and Review Checklist</h2>
+        <table>
+          <tr>
+            <th>Item ID</th>
+            <th>Item</th>
+            <th>Room</th>
+            <th>Issue</th>
+            <th>Suggested action</th>
+          </tr>
+          <tr>
+            <td>LAU-004</td>
+            <td>Cleaning supplies bundle</td>
+            <td>Laundry</td>
+            <td>Replacement price missing</td>
+            <td>Add estimated price or exclude from claim pack.</td>
+          </tr>
+          <tr>
+            <td>KIT-009</td>
+            <td>Glassware and servingware</td>
+            <td>Kitchen</td>
+            <td>Evidence missing</td>
+            <td>Add photo, receipt, or confirm estimate.</td>
+          </tr>
+          <tr>
+            <td>LOU-004</td>
+            <td>Wool rug</td>
+            <td>Lounge</td>
+            <td>Brand and valuation confidence low</td>
+            <td>Confirm size, material, maker, or comparable listing.</td>
+          </tr>
+          <tr>
+            <td>BED-004</td>
+            <td>Adult clothing bundle</td>
+            <td>Main bedroom</td>
+            <td>Broad bundle with partial evidence</td>
+            <td>Break into categories if value is material.</td>
+          </tr>
+        </table>
+
+        <div class="callout warning">
+          Rooms not yet complete: Hallway, Main bedroom, Laundry. These should
+          be checked before the claim pack is treated as final.
+        </div>
+      </section>
+
+      <section class="page" data-page="Page 6">
+        <h2>Declaration and Notes</h2>
+        <p>
+          I, Amelia Walker, confirm that the information included in this
+          Coverly Claim Pack is provided to the best of my knowledge based on
+          available records, photographs, receipts, and estimates.
+        </p>
+        <p>
+          I understand that the insurer, assessor, or loss adjuster may request
+          additional information, verification, or clarification before making
+          any claim decision.
+        </p>
+
+        <div class="signature-grid">
+          <div class="signature-box">
+            <div class="label">Policyholder signature</div>
+          </div>
+          <div class="signature-box">
+            <div class="label">Date</div>
+          </div>
+        </div>
+
+        <h3>Additional Policyholder Notes</h3>
+        <div class="notes-box"></div>
+
+        <h3>Insurer / Assessor Notes</h3>
+        <div class="notes-box"></div>
+
+        <div class="section-rule"></div>
+
+        <h2>Template Recommendations</h2>
+        <table>
+          <tr>
+            <th>Decision</th>
+            <th>Recommendation</th>
+          </tr>
+          <tr>
+            <td>First page</td>
+            <td>
+              Keep it to claim identity, event context, total value, evidence
+              coverage, and review count. Avoid item-level detail on the cover.
+            </td>
+          </tr>
+          <tr>
+            <td>Room versus item</td>
+            <td>
+              Use room sections for assessor context and item schedules for
+              settlement review. Keep evidence linked by clean item IDs.
+            </td>
+          </tr>
+          <tr>
+            <td>Printable</td>
+            <td>
+              Use compact tables, repeated headers, page numbers, neutral
+              colours, and status labels that work without colour.
+            </td>
+          </tr>
+          <tr>
+            <td>Digital PDF</td>
+            <td>
+              Make item IDs, evidence references, room names, and replacement
+              listings clickable. Add PDF bookmarks for major sections.
+            </td>
+          </tr>
+          <tr>
+            <td>Appendix</td>
+            <td>
+              Move raw AI analysis, duplicate photos, metadata, and long
+              replacement search results out of the main flow.
+            </td>
+          </tr>
+        </table>
+      </section>
+    </main>
+  </body>
+</html>

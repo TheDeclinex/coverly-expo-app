@@ -1,8 +1,10 @@
 import { Feather } from "@expo/vector-icons";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import * as WebBrowser from "expo-web-browser";
 import { Stack, router, type Href, useLocalSearchParams } from "expo-router";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
+  ActivityIndicator,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -22,6 +24,10 @@ import {
   saveClaimPackDraft,
 } from "@/lib/claim-pack-draft-storage";
 import {
+  generateClaimPackPdf,
+  type GenerateClaimPackPdfSuccess,
+} from "@/lib/claim-pack-export";
+import {
   buildClaimPackGeneratePayload,
   calculateClaimPackSummary,
   clearClaimPackItemsInRoom,
@@ -37,6 +43,11 @@ import {
   type ClaimPackScope,
   type ClaimPackSelection,
 } from "@/lib/claim-pack-selection-model";
+import {
+  buildClaimPackReview,
+  claimPackReviewPanelState,
+  type ClaimPackReviewIssue,
+} from "@/lib/claim-pack-review";
 import {
   formatCurrency,
   getItemTotalValue,
@@ -64,16 +75,28 @@ function formatCount(value: number, singular: string, plural = `${singular}s`) {
   return `${value} ${value === 1 ? singular : plural}`;
 }
 
+function safeClaimPackExportError(error: unknown): string {
+  const fallback = "We couldn't generate your claim pack PDF. Please try again.";
+  if (!(error instanceof Error) || !error.message.trim()) return fallback;
+  const message = error.message.trim();
+  if (/unauthorized|invalid or expired session|missing authentication/i.test(message)) {
+    return "Please sign in again, then try generating your claim pack PDF.";
+  }
+  if (/at least one selected item/i.test(message)) {
+    return "Select at least one item before generating your claim pack PDF.";
+  }
+  if (/storage|upload|signed url/i.test(message)) {
+    return "We couldn't prepare the PDF download link. Please try again.";
+  }
+  return fallback;
+}
+
 function itemCompactWarning(item: InventoryItem) {
   const missing = [
     hasValue(item) ? null : "value",
     hasPhoto(item) ? null : "photo",
   ].filter(Boolean);
   return missing.length === 0 ? null : `Needs ${missing.join(", ")}`;
-}
-
-function itemNeedsClaimPackReview(item: InventoryItem) {
-  return !hasValue(item) || !hasPhoto(item);
 }
 
 export default function ClaimPackDraftScreen() {
@@ -86,6 +109,7 @@ export default function ClaimPackDraftScreen() {
   const { session } = useAuth();
   const colors = useColors();
   const insets = useSafeAreaInsets();
+  const queryClient = useQueryClient();
   const scrollRef = useRef<ScrollView>(null);
   const [stage, setStage] = useState<BuilderStage>("scope");
   const [selection, setSelection] = useState<ClaimPackSelection | null>(null);
@@ -101,6 +125,10 @@ export default function ClaimPackDraftScreen() {
   const [highlightItemId, setHighlightItemId] = useState<string | null>(null);
   const [didLoadStoredDraft, setDidLoadStoredDraft] = useState(false);
   const [didPrefillClaimDetails, setDidPrefillClaimDetails] = useState(false);
+  const [approvedReviewIssueIds, setApprovedReviewIssueIds] = useState<Set<string>>(new Set());
+  const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
+  const [generatedPdf, setGeneratedPdf] = useState<GenerateClaimPackPdfSuccess | null>(null);
+  const [generateError, setGenerateError] = useState<string | null>(null);
 
   useEffect(() => {
     if (stage !== "draft" || !managedRoomId) return;
@@ -418,6 +446,31 @@ export default function ClaimPackDraftScreen() {
     setManagedRoomId(roomId);
   };
 
+  const approveReviewIssue = (issueId: string) => {
+    setApprovedReviewIssueIds((current) => new Set(current).add(issueId));
+  };
+
+  const generatePdf = async () => {
+    if (!futureGeneratePayload || isGeneratingPdf) return;
+    setIsGeneratingPdf(true);
+    setGenerateError(null);
+    try {
+      const result = await generateClaimPackPdf(futureGeneratePayload);
+      setGeneratedPdf(result);
+      await queryClient.invalidateQueries({ queryKey: ["claim-pack-history", session?.user.id] });
+    } catch (error) {
+      setGeneratedPdf(null);
+      setGenerateError(safeClaimPackExportError(error));
+    } finally {
+      setIsGeneratingPdf(false);
+    }
+  };
+
+  const openGeneratedPdf = async () => {
+    if (!generatedPdf?.signedUrl) return;
+    await WebBrowser.openBrowserAsync(generatedPdf.signedUrl);
+  };
+
   return (
     <>
       <Stack.Screen
@@ -501,29 +554,22 @@ export default function ClaimPackDraftScreen() {
               onClearRoomItems={clearRoomItems}
               onToggleItem={toggleItem}
               onAddItem={addItemManually}
+              approvedReviewIssueIds={approvedReviewIssueIds}
+              onApproveReviewIssue={approveReviewIssue}
+              onGeneratePdf={generatePdf}
+              onOpenGeneratedPdf={openGeneratedPdf}
+              isGeneratingPdf={isGeneratingPdf}
+              generatedPdf={generatedPdf}
+              generateError={generateError}
               colors={colors}
             />
           )}
 
-          {!managedRoomId ? (
-            <>
-              <View style={[styles.footerNotice, { backgroundColor: colors.secondary, borderRadius: colors.radius }]}>
-                <Feather name="shield" size={16} color={colors.primary} />
-                <Text style={[styles.footerNoticeText, { color: colors.mutedForeground }]}>
-                  PDF export coming next. This preview does not create a file, upload anything, or change your records.
-                </Text>
-              </View>
-
-              <Pressable
-                disabled
-                accessibilityHint={`Draft includes ${futureGeneratePayload?.selectedItemIds.length ?? 0} selected items.`}
-                style={[styles.disabledButton, { backgroundColor: colors.border, borderRadius: colors.radius }]}
-              >
-                <Feather name="download" size={16} color={colors.mutedForeground} />
-                <Text style={[styles.disabledButtonText, { color: colors.mutedForeground }]}>Generate PDF — coming next</Text>
-              </Pressable>
-            </>
-          ) : null}
+          {stage !== "draft" || managedRoomId ? null : (
+            <Text style={[styles.exportFootnote, { color: colors.mutedForeground }]}>
+              PDFs are generated securely by Coverly and saved to your claim-pack history.
+            </Text>
+          )}
         </ScrollView>
       )}
     </>
@@ -725,6 +771,13 @@ function DraftReview({
   onClearRoomItems,
   onToggleItem,
   onAddItem,
+  approvedReviewIssueIds,
+  onApproveReviewIssue,
+  onGeneratePdf,
+  onOpenGeneratedPdf,
+  isGeneratingPdf,
+  generatedPdf,
+  generateError,
   colors,
 }: {
   property: InventoryFile;
@@ -751,16 +804,72 @@ function DraftReview({
   onClearRoomItems: (roomId: string) => void;
   onToggleItem: (item: InventoryItem) => void;
   onAddItem: (room?: InventoryRoom) => void;
+  approvedReviewIssueIds: Set<string>;
+  onApproveReviewIssue: (issueId: string) => void;
+  onGeneratePdf: () => void;
+  onOpenGeneratedPdf: () => void;
+  isGeneratingPdf: boolean;
+  generatedPdf: GenerateClaimPackPdfSuccess | null;
+  generateError: string | null;
   colors: ReturnType<typeof useColors>;
 }) {
+  const [isReviewExpanded, setIsReviewExpanded] = useState(false);
   const managedRoom = rooms.find((room) => room.id === managedRoomId) ?? null;
-  const selectedItems = [
+  const draftItems = [
     ...rooms.flatMap((room) => itemsByRoomId.get(room.id) ?? []),
     ...selectedUnassignedItems,
-  ].filter((item) => selection.selectedItemIds.has(item.id));
-  const itemsNeedingReviewCount = selectedItems.filter((item) =>
-    itemNeedsClaimPackReview(item),
-  ).length;
+  ];
+  const review = buildClaimPackReview({
+    property,
+    rooms,
+    items: draftItems,
+    selection,
+    evidenceCountsByItemId: evidenceCounts,
+    approvedIssueIds: approvedReviewIssueIds,
+    draftInsurerName: insurerName,
+    draftPolicyNumber: policyNumber,
+  });
+  const unresolvedReviewIssues = review.unresolvedIssues;
+  const hasSelectedItems = review.summary.hasSelectedItems;
+  const blockingIssues = unresolvedReviewIssues.filter(
+    (issue) => issue.severity === "high" || issue.type === "missing_property_metadata",
+  );
+  const exportBlockReason = !hasSelectedItems
+    ? "Select at least one item to generate a claim pack PDF."
+    : blockingIssues.length > 0
+      ? "Resolve or approve required review items before generating the PDF."
+      : null;
+  const canGeneratePdf = exportBlockReason === null && !isGeneratingPdf;
+
+  const openItemEditor = (itemId: string) => {
+    router.push({
+      pathname: "/(tabs)/edit-item/[id]",
+      params: { id: itemId },
+    } as Href);
+  };
+
+  const openPriceSearch = (itemId: string) => {
+    router.push({
+      pathname: "/(tabs)/replacement-pricing/[id]",
+      params: { id: itemId },
+    } as Href);
+  };
+
+  const openPropertyEditor = () => {
+    router.push({
+      pathname: "/(tabs)/edit-property/[id]",
+      params: { id: property.id },
+    } as Href);
+  };
+
+  const excludeReviewItem = (itemId: string) => {
+    const item = draftItems.find((candidate) => candidate.id === itemId);
+    if (item && selection.selectedItemIds.has(item.id)) onToggleItem(item);
+  };
+
+  const excludeReviewRoom = (roomId: string) => {
+    onRemoveRoom(roomId);
+  };
 
   if (managedRoom) {
     return (
@@ -784,8 +893,7 @@ function DraftReview({
 
   return (
     <View style={styles.sections}>
-      <SummaryCard property={property} summary={summary} itemsNeedingReviewCount={itemsNeedingReviewCount} colors={colors} />
-      <MissingInfoBanner itemsNeedingReviewCount={itemsNeedingReviewCount} colors={colors} />
+      <SummaryCard property={property} summary={summary} reviewSummary={review.summary} colors={colors} />
       <ClaimDetailsCard
         insurerName={insurerName}
         onChangeInsurerName={onChangeInsurerName}
@@ -863,6 +971,31 @@ function DraftReview({
           ) : null}
         </>
       )}
+
+      <ClaimPackReviewCard
+        reviewSummary={review.summary}
+        issues={unresolvedReviewIssues}
+        expanded={isReviewExpanded}
+        onToggleExpanded={() => setIsReviewExpanded((current) => !current)}
+        onApproveIssue={onApproveReviewIssue}
+        onFixItem={openItemEditor}
+        onRunPriceSearch={openPriceSearch}
+        onExcludeItem={excludeReviewItem}
+        onExcludeRoom={excludeReviewRoom}
+        onEditProperty={openPropertyEditor}
+        colors={colors}
+      />
+
+      <ClaimPackPdfExportCard
+        canGenerate={canGeneratePdf}
+        blockReason={exportBlockReason}
+        isGenerating={isGeneratingPdf}
+        generatedPdf={generatedPdf}
+        errorMessage={generateError}
+        onGenerate={onGeneratePdf}
+        onOpen={onOpenGeneratedPdf}
+        colors={colors}
+      />
     </View>
   );
 }
@@ -870,14 +1003,20 @@ function DraftReview({
 function SummaryCard({
   property,
   summary,
-  itemsNeedingReviewCount,
+  reviewSummary,
   colors,
 }: {
   property: InventoryFile;
   summary: ReturnType<typeof calculateClaimPackSummary>;
-  itemsNeedingReviewCount: number;
+  reviewSummary: ReturnType<typeof buildClaimPackReview>["summary"];
   colors: ReturnType<typeof useColors>;
 }) {
+  const ready = reviewSummary.readyForExport;
+  const readinessCopy = !reviewSummary.hasSelectedItems
+    ? "Select items to start preparing this claim pack."
+    : ready
+      ? "Ready for final export."
+      : `${formatCount(reviewSummary.unresolvedIssues, "issue", "issues")} to check before export.`;
   return (
     <View style={[styles.summaryCard, { backgroundColor: colors.card, borderColor: colors.border, borderRadius: colors.radius }]}>
       <Text style={[styles.kicker, { color: colors.mutedForeground }]}>DRAFT REVIEW</Text>
@@ -891,39 +1030,15 @@ function SummaryCard({
       </View>
       <View style={[styles.readinessRow, { borderTopColor: colors.border }]}>
         <Feather
-          name={itemsNeedingReviewCount === 0 ? "check-circle" : "alert-circle"}
+          name={ready ? "check-circle" : "alert-circle"}
           size={15}
-          color={itemsNeedingReviewCount === 0 ? colors.success : colors.warning}
+          color={ready ? colors.success : colors.warning}
         />
         <Text style={[styles.readinessText, { color: colors.mutedForeground }]}>
-          {itemsNeedingReviewCount > 0 ? formatCount(itemsNeedingReviewCount, "item needs review", "items need review") : "Selected items look claim-pack ready."}
+          {readinessCopy}
         </Text>
       </View>
-      <Text style={[styles.draftStatus, { color: colors.mutedForeground }]}>Draft only · PDF export coming next</Text>
-    </View>
-  );
-}
-
-function MissingInfoBanner({
-  itemsNeedingReviewCount,
-  colors,
-}: {
-  itemsNeedingReviewCount: number;
-  colors: ReturnType<typeof useColors>;
-}) {
-  if (itemsNeedingReviewCount === 0) return null;
-
-  return (
-    <View style={[styles.warningCard, { backgroundColor: colors.card, borderColor: colors.warning, borderRadius: colors.radius }]}>
-      <View style={styles.warningHeader}>
-        <Feather name="alert-circle" size={16} color={colors.warning} />
-        <Text style={[styles.warningTitle, { color: colors.foreground }]}>
-          {formatCount(itemsNeedingReviewCount, "item needs review", "items need review")}
-        </Text>
-      </View>
-      <Text style={[styles.body, { color: colors.mutedForeground }]}>
-        You can still generate the draft later, but checking values, photos and evidence will make the claim pack more useful.
-      </Text>
+      <Text style={[styles.draftStatus, { color: colors.mutedForeground }]}>Draft only · generate the final PDF when ready</Text>
     </View>
   );
 }
@@ -1016,6 +1131,245 @@ function ClaimDetailsCard({
           },
         ]}
       />
+    </View>
+  );
+}
+
+function ClaimPackReviewCard({
+  reviewSummary,
+  issues,
+  expanded,
+  onToggleExpanded,
+  onApproveIssue,
+  onFixItem,
+  onRunPriceSearch,
+  onExcludeItem,
+  onExcludeRoom,
+  onEditProperty,
+  colors,
+}: {
+  reviewSummary: ReturnType<typeof buildClaimPackReview>["summary"];
+  issues: ClaimPackReviewIssue[];
+  expanded: boolean;
+  onToggleExpanded: () => void;
+  onApproveIssue: (issueId: string) => void;
+  onFixItem: (itemId: string) => void;
+  onRunPriceSearch: (itemId: string) => void;
+  onExcludeItem: (itemId: string) => void;
+  onExcludeRoom: (roomId: string) => void;
+  onEditProperty: () => void;
+  colors: ReturnType<typeof useColors>;
+}) {
+  const ready = reviewSummary.readyForExport;
+  const panelState = claimPackReviewPanelState(reviewSummary, expanded);
+
+  return (
+    <View style={[styles.reviewCard, { backgroundColor: colors.card, borderColor: ready ? colors.success : colors.border, borderRadius: colors.radius }]}>
+      <View style={styles.reviewHeader}>
+        <View style={[styles.reviewIcon, { backgroundColor: ready ? colors.success : colors.accent }]}>
+          <Feather name={ready ? "check-circle" : "clipboard"} size={18} color={ready ? colors.primaryForeground : colors.primary} />
+        </View>
+        <View style={styles.reviewHeaderCopy}>
+          <Text style={[styles.reviewTitle, { color: colors.foreground }]}>Claim Pack Review</Text>
+          <Text style={[styles.body, { color: colors.mutedForeground }]}>
+            Review selected items before export.
+          </Text>
+        </View>
+      </View>
+
+      <View style={[styles.reviewSummaryBand, { backgroundColor: ready ? colors.accent : colors.secondary, borderRadius: colors.radius }]}>
+        <Feather
+          name={!reviewSummary.hasSelectedItems ? "list" : ready ? "check" : "alert-circle"}
+          size={15}
+          color={!reviewSummary.hasSelectedItems ? colors.mutedForeground : ready ? colors.primary : colors.warning}
+        />
+        <Text style={[styles.reviewSummaryText, { color: colors.foreground }]}>
+          {panelState.compactMessage}
+        </Text>
+      </View>
+
+      {panelState.actionLabel ? (
+        <Pressable
+          onPress={onToggleExpanded}
+          style={({ pressed }) => [
+            styles.reviewToggleButton,
+            { borderColor: colors.border, borderRadius: colors.radius, backgroundColor: colors.card, opacity: pressed ? 0.76 : 1 },
+          ]}
+        >
+          <Text style={[styles.secondaryButtonText, { color: colors.primary }]}>{panelState.actionLabel}</Text>
+          <Feather name={expanded ? "chevron-up" : "chevron-down"} size={15} color={colors.primary} />
+        </Pressable>
+      ) : null}
+
+      {issues.length === 0 && reviewSummary.hasSelectedItems ? (
+        <Text style={[styles.body, { color: colors.mutedForeground }]}>
+          Your selected rooms and items look ready for the final claim pack.
+        </Text>
+      ) : panelState.shouldShowFullIssueList ? (
+        <View style={styles.reviewIssueList}>
+          {issues.map((issue) => (
+            <ClaimPackReviewIssueRow
+              key={issue.id}
+              issue={issue}
+              onApproveIssue={onApproveIssue}
+              onFixItem={onFixItem}
+              onRunPriceSearch={onRunPriceSearch}
+              onExcludeItem={onExcludeItem}
+              onExcludeRoom={onExcludeRoom}
+              onEditProperty={onEditProperty}
+              colors={colors}
+            />
+          ))}
+        </View>
+      ) : null}
+    </View>
+  );
+}
+
+function ClaimPackReviewIssueRow({
+  issue,
+  onApproveIssue,
+  onFixItem,
+  onRunPriceSearch,
+  onExcludeItem,
+  onExcludeRoom,
+  onEditProperty,
+  colors,
+}: {
+  issue: ClaimPackReviewIssue;
+  onApproveIssue: (issueId: string) => void;
+  onFixItem: (itemId: string) => void;
+  onRunPriceSearch: (itemId: string) => void;
+  onExcludeItem: (itemId: string) => void;
+  onExcludeRoom: (roomId: string) => void;
+  onEditProperty: () => void;
+  colors: ReturnType<typeof useColors>;
+}) {
+  const severityColor = issue.severity === "high" ? colors.warning : issue.severity === "medium" ? colors.primary : colors.mutedForeground;
+  const canActOnItem = Boolean(issue.itemId);
+
+  return (
+    <View style={[styles.reviewIssueRow, { borderTopColor: colors.border }]}>
+      <View style={styles.reviewIssueTop}>
+        <View style={styles.reviewIssueCopy}>
+          <Text style={[styles.reviewIssueTitle, { color: colors.foreground }]}>{issue.title}</Text>
+          <Text style={[styles.reviewIssueSubject, { color: colors.mutedForeground }]}>{issue.subjectName}</Text>
+          <Text style={[styles.body, { color: colors.mutedForeground }]}>{issue.explanation}</Text>
+          <Text style={[styles.reviewActionText, { color: colors.foreground }]}>{issue.suggestedAction}</Text>
+        </View>
+        <Text style={[styles.reviewSeverity, { color: severityColor }]}>{issue.severity.toUpperCase()}</Text>
+      </View>
+
+      <View style={styles.reviewActions}>
+        {issue.type === "missing_value" && issue.itemId ? (
+          <ActionPill label="Run price search" icon="search" variant="primary" onPress={() => onRunPriceSearch(issue.itemId!)} colors={colors} />
+        ) : null}
+        {canActOnItem ? (
+          <ActionPill label="Fix item" icon="edit-3" variant="neutral" onPress={() => onFixItem(issue.itemId!)} colors={colors} />
+        ) : null}
+        {issue.type === "missing_property_metadata" ? (
+          <ActionPill label="Edit property" icon="home" variant="neutral" onPress={onEditProperty} colors={colors} />
+        ) : null}
+        {issue.roomId && issue.type === "empty_room" ? (
+          <ActionPill label="Exclude room" icon="minus-circle" variant="outline" onPress={() => onExcludeRoom(issue.roomId!)} colors={colors} />
+        ) : null}
+        {issue.itemId ? (
+          <ActionPill label="Exclude item" icon="minus-circle" variant="outline" onPress={() => onExcludeItem(issue.itemId!)} colors={colors} />
+        ) : null}
+        <ActionPill label="Approve" icon="check" variant="outline" onPress={() => onApproveIssue(issue.id)} colors={colors} />
+      </View>
+    </View>
+  );
+}
+
+function ClaimPackPdfExportCard({
+  canGenerate,
+  blockReason,
+  isGenerating,
+  generatedPdf,
+  errorMessage,
+  onGenerate,
+  onOpen,
+  colors,
+}: {
+  canGenerate: boolean;
+  blockReason: string | null;
+  isGenerating: boolean;
+  generatedPdf: GenerateClaimPackPdfSuccess | null;
+  errorMessage: string | null;
+  onGenerate: () => void;
+  onOpen: () => void;
+  colors: ReturnType<typeof useColors>;
+}) {
+  const hasGeneratedPdf = Boolean(generatedPdf?.signedUrl);
+
+  return (
+    <View style={[styles.exportCard, { backgroundColor: colors.card, borderColor: colors.border, borderRadius: colors.radius }]}>
+      <View style={styles.reviewHeader}>
+        <View style={[styles.reviewIcon, { backgroundColor: hasGeneratedPdf ? colors.accent : colors.secondary }]}>
+          <Feather name={hasGeneratedPdf ? "check-circle" : "download"} size={18} color={hasGeneratedPdf ? colors.primary : colors.mutedForeground} />
+        </View>
+        <View style={styles.reviewHeaderCopy}>
+          <Text style={[styles.reviewTitle, { color: colors.foreground }]}>Claim Pack PDF</Text>
+          <Text style={[styles.body, { color: colors.mutedForeground }]}>
+            Generate the final insurer-ready PDF from your selected rooms, items and evidence.
+          </Text>
+        </View>
+      </View>
+
+      {hasGeneratedPdf ? (
+        <View style={[styles.exportStatus, { backgroundColor: colors.accent, borderRadius: colors.radius }]}>
+          <Feather name="check" size={15} color={colors.primary} />
+          <Text style={[styles.reviewSummaryText, { color: colors.foreground }]}>
+            {generatedPdf?.emailSent
+              ? "Your claim pack PDF is ready. We've also emailed it to you."
+              : "Your claim pack PDF is ready. We couldn't email it, but you can open it here."}
+          </Text>
+        </View>
+      ) : blockReason ? (
+        <View style={[styles.exportStatus, { backgroundColor: colors.secondary, borderRadius: colors.radius }]}>
+          <Feather name="info" size={15} color={colors.mutedForeground} />
+          <Text style={[styles.reviewSummaryText, { color: colors.foreground }]}>{blockReason}</Text>
+        </View>
+      ) : null}
+
+      {errorMessage ? (
+        <View style={[styles.exportStatus, { backgroundColor: colors.secondary, borderRadius: colors.radius }]}>
+          <Feather name="alert-circle" size={15} color={colors.warning} />
+          <Text style={[styles.reviewSummaryText, { color: colors.foreground }]}>{errorMessage}</Text>
+        </View>
+      ) : null}
+
+      {hasGeneratedPdf ? (
+        <Pressable
+          onPress={onOpen}
+          style={({ pressed }) => [
+            styles.primaryButton,
+            { backgroundColor: colors.primary, borderRadius: colors.radius, opacity: pressed ? 0.76 : 1 },
+          ]}
+        >
+          <Text style={[styles.primaryButtonText, { color: colors.primaryForeground }]}>Open PDF</Text>
+        </Pressable>
+      ) : (
+        <Pressable
+          disabled={!canGenerate || isGenerating}
+          onPress={onGenerate}
+          accessibilityHint={blockReason ?? "Generate the selected claim pack as a PDF."}
+          style={({ pressed }) => [
+            styles.primaryButton,
+            {
+              backgroundColor: canGenerate ? colors.primary : colors.border,
+              borderRadius: colors.radius,
+              opacity: pressed && canGenerate ? 0.76 : 1,
+            },
+          ]}
+        >
+          {isGenerating ? <ActivityIndicator size="small" color={colors.primaryForeground} /> : null}
+          <Text style={[styles.primaryButtonText, { color: canGenerate ? colors.primaryForeground : colors.mutedForeground }]}>
+            {isGenerating ? "Generating PDF..." : errorMessage ? "Retry PDF generation" : "Generate claim pack PDF"}
+          </Text>
+        </Pressable>
+      )}
     </View>
   );
 }
@@ -1374,6 +1728,25 @@ const styles = StyleSheet.create({
   readinessRow: { borderTopWidth: StyleSheet.hairlineWidth, paddingTop: 11, flexDirection: "row", gap: 7, alignItems: "center" },
   readinessText: { flex: 1, fontSize: 12, lineHeight: 17, fontFamily: "Inter_400Regular" },
   draftStatus: { fontSize: 11, fontFamily: "Inter_600SemiBold" },
+  reviewCard: { borderWidth: 1, padding: 13, gap: 12 },
+  reviewHeader: { flexDirection: "row", gap: 10, alignItems: "flex-start" },
+  reviewIcon: { width: 34, height: 34, borderRadius: 11, alignItems: "center", justifyContent: "center" },
+  reviewHeaderCopy: { flex: 1, gap: 4 },
+  reviewTitle: { fontSize: 15, fontFamily: "Inter_700Bold" },
+  reviewSummaryBand: { minHeight: 38, paddingHorizontal: 10, paddingVertical: 8, flexDirection: "row", gap: 7, alignItems: "center" },
+  reviewSummaryText: { flex: 1, fontSize: 12, lineHeight: 17, fontFamily: "Inter_600SemiBold" },
+  reviewToggleButton: { borderWidth: 1, minHeight: 38, paddingHorizontal: 12, paddingVertical: 8, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6 },
+  reviewIssueList: { gap: 0 },
+  reviewIssueRow: { borderTopWidth: StyleSheet.hairlineWidth, paddingTop: 11, paddingBottom: 10, gap: 9 },
+  reviewIssueTop: { flexDirection: "row", alignItems: "flex-start", gap: 10 },
+  reviewIssueCopy: { flex: 1, gap: 3 },
+  reviewIssueTitle: { fontSize: 13, fontFamily: "Inter_700Bold" },
+  reviewIssueSubject: { fontSize: 12, fontFamily: "Inter_600SemiBold" },
+  reviewSeverity: { fontSize: 10, fontFamily: "Inter_700Bold", letterSpacing: 0.4 },
+  reviewActionText: { fontSize: 12, lineHeight: 17, fontFamily: "Inter_500Medium" },
+  reviewActions: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
+  exportCard: { borderWidth: 1, padding: 13, gap: 12 },
+  exportStatus: { minHeight: 38, paddingHorizontal: 10, paddingVertical: 8, flexDirection: "row", gap: 7, alignItems: "center" },
   warningCard: { borderWidth: 1, padding: 13, gap: 9 },
   warningHeader: { flexDirection: "row", alignItems: "center", gap: 7 },
   warningTitle: { fontSize: 13, fontFamily: "Inter_700Bold" },
@@ -1384,7 +1757,7 @@ const styles = StyleSheet.create({
   actionRow: { flexDirection: "row", gap: 9 },
   secondaryButton: { flex: 1, borderWidth: 1, minHeight: 42, paddingHorizontal: 10, paddingVertical: 8, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 5 },
   secondaryButtonText: { fontSize: 12, fontFamily: "Inter_700Bold", textAlign: "center" },
-  primaryButton: { minHeight: 48, alignItems: "center", justifyContent: "center", paddingHorizontal: 14 },
+  primaryButton: { minHeight: 48, flexDirection: "row", gap: 7, alignItems: "center", justifyContent: "center", paddingHorizontal: 14 },
   primaryButtonText: { fontSize: 14, fontFamily: "Inter_700Bold" },
   emptyCard: { borderWidth: 1, padding: 18, gap: 8, alignItems: "center" },
   emptyTitle: { fontSize: 16, fontFamily: "Inter_700Bold" },
@@ -1417,8 +1790,5 @@ const styles = StyleSheet.create({
   itemMeta: { fontSize: 11, fontFamily: "Inter_400Regular" },
   itemWarnings: { fontSize: 11, fontFamily: "Inter_500Medium" },
   selectionBox: { borderWidth: 1.5, alignItems: "center", justifyContent: "center" },
-  footerNotice: { padding: 13, flexDirection: "row", gap: 8, alignItems: "flex-start" },
-  footerNoticeText: { flex: 1, fontSize: 12, lineHeight: 17, fontFamily: "Inter_400Regular" },
-  disabledButton: { minHeight: 48, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 7, opacity: 0.82 },
-  disabledButtonText: { fontSize: 14, fontFamily: "Inter_700Bold" },
+  exportFootnote: { fontSize: 12, lineHeight: 17, fontFamily: "Inter_400Regular", textAlign: "center" },
 });

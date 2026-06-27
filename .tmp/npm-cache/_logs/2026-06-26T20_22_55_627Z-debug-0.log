@@ -1,0 +1,106 @@
+0 verbose cli C:\Program Files\nodejs\node.exe C:\Program Files\nodejs\node_modules\npm\bin\npm-cli.js
+1 info using npm@11.12.1
+2 info using node@v24.15.0
+3 silly config load:file:C:\Program Files\nodejs\node_modules\npm\npmrc
+4 silly config load:file:C:\Users\User\Documents\GitHub\coverly-expo-app\.npmrc
+5 silly config load:file:C:\Users\User\.npmrc
+6 silly config load:file:C:\Users\User\AppData\Roaming\npm\etc\npmrc
+7 verbose title npm exec supabase functions deploy generate-claim-pack --project-ref jqijavrugjidqzbbgpag
+8 verbose argv "exec" "--" "supabase" "functions" "deploy" "generate-claim-pack" "--project-ref" "jqijavrugjidqzbbgpag"
+9 verbose logfile logs-max:10 dir:C:\Users\User\Documents\GitHub\coverly-expo-app\.tmp\npm-cache\_logs\2026-06-26T20_22_55_627Z-
+10 verbose logfile C:\Users\User\Documents\GitHub\coverly-expo-app\.tmp\npm-cache\_logs\2026-06-26T20_22_55_627Z-debug-0.log
+11 warn Unknown project config "auto-install-peers". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.
+12 warn Unknown project config "strict-peer-dependencies". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.
+13 silly logfile done cleaning log files
+14 http fetch GET 200 https://registry.npmjs.org/npm 697ms
+15 silly packumentCache heap:2348810240 maxSize:587202560 maxEntrySize:293601280
+16 http fetch GET 200 https://registry.npmjs.org/supabase 276ms (cache miss)
+17 silly packumentCache heap:2348810240 maxSize:587202560 maxEntrySize:293601280
+18 silly packumentCache heap:2348810240 maxSize:587202560 maxEntrySize:293601280
+19 warn exec The following package was not found and will be installed: supabase@2.108.0
+20 silly idealTree buildDeps
+21 silly fetch manifest supabase@2.108.0
+22 silly packumentCache full:https://registry.npmjs.org/supabase cache-miss
+23 http fetch GET 200 https://registry.npmjs.org/supabase 278ms (cache miss)
+24 silly packumentCache full:https://registry.npmjs.org/supabase set size:undefined disposed:false
+25 silly placeDep ROOT supabase@2.108.0 OK for:  want: 2.108.0
+26 silly fetch manifest jose@^6.2.3
+27 silly packumentCache full:https://registry.npmjs.org/jose cache-miss
+28 silly fetch manifest @supabase/cli-linux-x64@2.108.0
+29 silly packumentCache full:https://registry.npmjs.org/@supabase%2fcli-linux-x64 cache-miss
+30 silly fetch manifest @supabase/cli-darwin-x64@2.108.0
+31 silly packumentCache full:https://registry.npmjs.org/@supabase%2fcli-darwin-x64 cache-miss
+32 http fetch GET 200 https://registry.npmjs.org/jose 216ms (cache miss)
+33 silly packumentCache full:https://registry.npmjs.org/jose set size:undefined disposed:false
+34 silly fetch manifest @supabase/cli-linux-arm64@2.108.0
+35 silly packumentCache full:https://registry.npmjs.org/@supabase%2fcli-linux-arm64 cache-miss
+36 http fetch GET 200 https://registry.npmjs.org/@supabase%2fcli-linux-x64 283ms (cache miss)
+37 silly packumentCache full:https://registry.npmjs.org/@supabase%2fcli-linux-x64 set size:undefined disposed:false
+38 silly fetch manifest @supabase/cli-windows-x64@2.108.0
+39 silly packumentCache full:https://registry.npmjs.org/@supabase%2fcli-windows-x64 cache-miss
+40 http fetch GET 200 https://registry.npmjs.org/@supabase%2fcli-darwin-x64 395ms (cache miss)
+41 silly packumentCache full:https://registry.npmjs.org/@supabase%2fcli-darwin-x64 set size:undefined disposed:false
+42 silly fetch manifest @supabase/cli-darwin-arm64@2.108.0
+43 silly packumentCache full:https://registry.npmjs.org/@supabase%2fcli-darwin-arm64 cache-miss
+44 http fetch GET 200 https://registry.npmjs.org/@supabase%2fcli-linux-arm64 254ms (cache miss)
+45 silly packumentCache full:https://registry.npmjs.org/@supabase%2fcli-linux-arm64 set size:undefined disposed:false
+46 silly fetch manifest @supabase/cli-windows-arm64@2.108.0
+47 silly packumentCache full:https://registry.npmjs.org/@supabase%2fcli-windows-arm64 cache-miss
+48 http fetch GET 200 https://registry.npmjs.org/@supabase%2fcli-windows-x64 346ms (cache miss)
+49 silly packumentCache full:https://registry.npmjs.org/@supabase%2fcli-windows-x64 set size:undefined disposed:false
+50 silly fetch manifest @supabase/cli-linux-x64-musl@2.108.0
+51 silly packumentCache full:https://registry.npmjs.org/@supabase%2fcli-linux-x64-musl cache-miss
+52 http fetch GET 200 https://registry.npmjs.org/@supabase%2fcli-linux-x64-musl 144ms (cache miss)
+53 silly packumentCache full:https://registry.npmjs.org/@supabase%2fcli-linux-x64-musl set size:undefined disposed:false
+54 silly fetch manifest @supabase/cli-linux-arm64-musl@2.108.0
+55 silly packumentCache full:https://registry.npmjs.org/@supabase%2fcli-linux-arm64-musl cache-miss
+56 http fetch GET 200 https://registry.npmjs.org/@supabase%2fcli-windows-arm64 298ms (cache miss)
+57 silly packumentCache full:https://registry.npmjs.org/@supabase%2fcli-windows-arm64 set size:undefined disposed:false
+58 http fetch GET 200 https://registry.npmjs.org/@supabase%2fcli-darwin-arm64 522ms (cache miss)
+59 silly packumentCache full:https://registry.npmjs.org/@supabase%2fcli-darwin-arm64 set size:undefined disposed:false
+60 http fetch GET 200 https://registry.npmjs.org/@supabase%2fcli-linux-arm64-musl 361ms (cache miss)
+61 silly packumentCache full:https://registry.npmjs.org/@supabase%2fcli-linux-arm64-musl set size:undefined disposed:false
+62 silly placeDep ROOT @supabase/cli-darwin-arm64@2.108.0 OK for: supabase@2.108.0 want: 2.108.0
+63 silly placeDep ROOT @supabase/cli-darwin-x64@2.108.0 OK for: supabase@2.108.0 want: 2.108.0
+64 silly placeDep ROOT @supabase/cli-linux-arm64@2.108.0 OK for: supabase@2.108.0 want: 2.108.0
+65 silly placeDep ROOT @supabase/cli-linux-arm64-musl@2.108.0 OK for: supabase@2.108.0 want: 2.108.0
+66 silly placeDep ROOT @supabase/cli-linux-x64@2.108.0 OK for: supabase@2.108.0 want: 2.108.0
+67 silly placeDep ROOT @supabase/cli-linux-x64-musl@2.108.0 OK for: supabase@2.108.0 want: 2.108.0
+68 silly placeDep ROOT @supabase/cli-windows-arm64@2.108.0 OK for: supabase@2.108.0 want: 2.108.0
+69 silly placeDep ROOT @supabase/cli-windows-x64@2.108.0 OK for: supabase@2.108.0 want: 2.108.0
+70 silly placeDep ROOT jose@6.2.3 OK for: supabase@2.108.0 want: ^6.2.3
+71 silly reify moves {}
+72 silly audit bulk request {
+72 silly audit   supabase: [ '2.108.0' ],
+72 silly audit   '@supabase/cli-darwin-arm64': [ '2.108.0' ],
+72 silly audit   '@supabase/cli-darwin-x64': [ '2.108.0' ],
+72 silly audit   '@supabase/cli-linux-arm64': [ '2.108.0' ],
+72 silly audit   '@supabase/cli-linux-arm64-musl': [ '2.108.0' ],
+72 silly audit   '@supabase/cli-linux-x64': [ '2.108.0' ],
+72 silly audit   '@supabase/cli-linux-x64-musl': [ '2.108.0' ],
+72 silly audit   '@supabase/cli-windows-arm64': [ '2.108.0' ],
+72 silly audit   '@supabase/cli-windows-x64': [ '2.108.0' ],
+72 silly audit   jose: [ '6.2.3' ]
+72 silly audit }
+73 http cache jose@https://registry.npmjs.org/jose/-/jose-6.2.3.tgz 1ms (cache hit)
+74 http cache @supabase/cli-windows-x64@https://registry.npmjs.org/@supabase/cli-windows-x64/-/cli-windows-x64-2.108.0.tgz 0ms (cache hit)
+75 http cache supabase@https://registry.npmjs.org/supabase/-/supabase-2.108.0.tgz 0ms (cache hit)
+76 silly tarball no local data for jose@https://registry.npmjs.org/jose/-/jose-6.2.3.tgz. Extracting by manifest.
+77 silly tarball no local data for @supabase/cli-windows-x64@https://registry.npmjs.org/@supabase/cli-windows-x64/-/cli-windows-x64-2.108.0.tgz. Extracting by manifest.
+78 silly tarball no local data for supabase@https://registry.npmjs.org/supabase/-/supabase-2.108.0.tgz. Extracting by manifest.
+79 http fetch POST 200 https://registry.npmjs.org/-/npm/v1/security/advisories/bulk 212ms
+80 silly audit report {}
+81 http fetch GET 200 https://registry.npmjs.org/supabase/-/supabase-2.108.0.tgz 213ms (cache miss)
+82 http fetch GET 200 https://registry.npmjs.org/jose/-/jose-6.2.3.tgz 3295ms (cache miss)
+83 http fetch GET 200 https://registry.npmjs.org/@supabase/cli-windows-x64/-/cli-windows-x64-2.108.0.tgz 26113ms (cache miss)
+84 verbose cwd C:\Users\User\Documents\GitHub\coverly-expo-app
+85 verbose os Windows_NT 10.0.19045
+86 verbose node v24.15.0
+87 verbose npm  v11.12.1
+88 notice
+88 notice New minor version of npm available! 11.12.1 -> 11.17.0
+88 notice Changelog: https://github.com/npm/cli/releases/tag/v11.17.0
+88 notice To update run: npm install -g npm@11.17.0
+88 notice  { force: true, Symbol(proc-log.meta): true }
+89 verbose exit 1
+90 verbose code 1

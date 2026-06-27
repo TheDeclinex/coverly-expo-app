@@ -109,6 +109,8 @@ export default function AccountScreen() {
           </View>
         </View>
 
+        <ClaimPacksSection onOpen={() => router.push("/(tabs)/claim-packs" as Href)} />
+
         {isAdmin && (
           <AccountSection title="Administration">
             <AccountRow
@@ -151,8 +153,6 @@ export default function AccountScreen() {
           isAdmin={isAdmin}
           onUpgrade={() => router.push("/upgrade" as Href)}
         />
-
-        <ClaimPacksSection onOpen={() => router.push("/(tabs)/claim-packs" as Href)} />
 
         <AccountSection title="Referrals">
           <AccountRow

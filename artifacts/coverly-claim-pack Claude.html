@@ -1,0 +1,1524 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Coverly Claim Pack — 14 Hillcrest Avenue, Karori</title>
+<style>
+  /* ─── TOKENS ─────────────────────────────────────────────────── */
+  :root {
+    --teal:       #0B9895;
+    --teal-light: #1ED4D0;
+    --teal-pale:  #E8F9F9;
+    --teal-mid:   #C3EEEE;
+    --ink:        #1A1F2E;
+    --ink-mid:    #3D4456;
+    --ink-light:  #6B7280;
+    --border:     #D1D5DB;
+    --border-light: #E5E7EB;
+    --bg:         #F7F8FA;
+    --white:      #FFFFFF;
+    --warn:       #F59E0B;
+    --warn-pale:  #FFFBEB;
+    --danger:     #EF4444;
+    --danger-pale:#FEF2F2;
+    --ok:         #10B981;
+    --ok-pale:    #ECFDF5;
+    --page-width: 900px;
+  }
+
+  /* ─── RESET & BASE ────────────────────────────────────────────── */
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  html { font-size: 14px; }
+  body {
+    font-family: 'Georgia', 'Times New Roman', serif;
+    background: #DCDFE6;
+    color: var(--ink);
+    line-height: 1.6;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  /* ─── PAGE SHELLS ─────────────────────────────────────────────── */
+  .page {
+    background: var(--white);
+    width: var(--page-width);
+    margin: 24px auto;
+    box-shadow: 0 2px 16px rgba(0,0,0,.12);
+    position: relative;
+    overflow: hidden;
+  }
+  .page-inner { padding: 56px 64px; }
+
+  /* ─── TYPOGRAPHY ──────────────────────────────────────────────── */
+  .sans { font-family: 'Helvetica Neue', Arial, sans-serif; }
+  h1 { font-size: 2rem; font-weight: 700; line-height: 1.2; }
+  h2 { font-size: 1.25rem; font-weight: 700; font-family: 'Helvetica Neue', Arial, sans-serif; letter-spacing: -.01em; }
+  h3 { font-size: 1rem; font-weight: 700; font-family: 'Helvetica Neue', Arial, sans-serif; }
+  h4 { font-size: .875rem; font-weight: 600; font-family: 'Helvetica Neue', Arial, sans-serif; }
+  p { margin-bottom: .75rem; }
+  p:last-child { margin-bottom: 0; }
+  small { font-size: .8rem; }
+
+  /* ─── SECTION HEADER BAR ──────────────────────────────────────── */
+  .section-label {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 24px;
+    padding-bottom: 12px;
+    border-bottom: 2px solid var(--teal);
+  }
+  .section-label .num {
+    background: var(--teal);
+    color: #fff;
+    font-family: 'Helvetica Neue', Arial, sans-serif;
+    font-size: .7rem;
+    font-weight: 700;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    width: 28px; height: 28px;
+    border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+  }
+  .section-label h2 { color: var(--ink); }
+
+  /* ─── DIVIDER ─────────────────────────────────────────────────── */
+  .divider { border: none; border-top: 1px solid var(--border-light); margin: 28px 0; }
+
+  /* ─── CALLOUT BOXES ───────────────────────────────────────────── */
+  .callout {
+    border-left: 4px solid var(--teal);
+    background: var(--teal-pale);
+    padding: 14px 18px;
+    border-radius: 0 6px 6px 0;
+    margin-bottom: 16px;
+  }
+  .callout.warn {
+    border-color: var(--warn);
+    background: var(--warn-pale);
+  }
+  .callout.danger {
+    border-color: var(--danger);
+    background: var(--danger-pale);
+  }
+  .callout.ok {
+    border-color: var(--ok);
+    background: var(--ok-pale);
+  }
+  .callout-title {
+    font-family: 'Helvetica Neue', Arial, sans-serif;
+    font-size: .75rem;
+    font-weight: 700;
+    letter-spacing: .07em;
+    text-transform: uppercase;
+    margin-bottom: 4px;
+    color: var(--teal);
+  }
+  .callout.warn .callout-title { color: #92400E; }
+  .callout.danger .callout-title { color: #991B1B; }
+  .callout.ok .callout-title { color: #065F46; }
+
+  /* ─── TABLES ──────────────────────────────────────────────────── */
+  table { width: 100%; border-collapse: collapse; font-family: 'Helvetica Neue', Arial, sans-serif; font-size: .8rem; margin-bottom: 20px; }
+  th { background: var(--ink); color: #fff; font-weight: 600; text-align: left; padding: 8px 12px; font-size: .72rem; letter-spacing: .04em; text-transform: uppercase; }
+  td { padding: 8px 12px; border-bottom: 1px solid var(--border-light); vertical-align: top; }
+  tr:nth-child(even) td { background: var(--bg); }
+  tr:last-child td { border-bottom: none; }
+  .td-right { text-align: right; }
+  .td-center { text-align: center; }
+  table caption { font-size: .75rem; color: var(--ink-light); text-align: left; margin-bottom: 6px; font-family: 'Helvetica Neue', Arial, sans-serif; }
+
+  /* ─── METRIC CARDS ────────────────────────────────────────────── */
+  .metric-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 24px; }
+  .metric-grid-3 { grid-template-columns: repeat(3, 1fr); }
+  .metric-card {
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 16px 14px;
+    background: var(--white);
+  }
+  .metric-card .mc-value {
+    font-size: 1.6rem;
+    font-weight: 700;
+    font-family: 'Helvetica Neue', Arial, sans-serif;
+    color: var(--teal);
+    line-height: 1.1;
+  }
+  .metric-card .mc-label {
+    font-size: .72rem;
+    color: var(--ink-light);
+    font-family: 'Helvetica Neue', Arial, sans-serif;
+    text-transform: uppercase;
+    letter-spacing: .05em;
+    margin-top: 4px;
+  }
+  .metric-card.accent { background: var(--teal); border-color: var(--teal); }
+  .metric-card.accent .mc-value { color: #fff; }
+  .metric-card.accent .mc-label { color: rgba(255,255,255,.75); }
+
+  /* ─── DETAIL GRID ─────────────────────────────────────────────── */
+  .detail-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0; }
+  .detail-row { display: contents; }
+  .detail-key {
+    font-family: 'Helvetica Neue', Arial, sans-serif;
+    font-size: .78rem;
+    font-weight: 600;
+    color: var(--ink-light);
+    text-transform: uppercase;
+    letter-spacing: .05em;
+    padding: 8px 0;
+    border-bottom: 1px solid var(--border-light);
+  }
+  .detail-val {
+    font-family: 'Helvetica Neue', Arial, sans-serif;
+    font-size: .875rem;
+    padding: 8px 0;
+    border-bottom: 1px solid var(--border-light);
+    color: var(--ink);
+  }
+  .detail-grid .detail-key:last-of-type,
+  .detail-grid .detail-val:last-of-type { border-bottom: none; }
+
+  /* ─── BADGES / PILLS ──────────────────────────────────────────── */
+  .badge {
+    display: inline-block;
+    font-family: 'Helvetica Neue', Arial, sans-serif;
+    font-size: .68rem;
+    font-weight: 700;
+    letter-spacing: .05em;
+    text-transform: uppercase;
+    padding: 3px 8px;
+    border-radius: 4px;
+    white-space: nowrap;
+  }
+  .badge-ok    { background: var(--ok-pale);     color: #065F46; }
+  .badge-warn  { background: var(--warn-pale);   color: #92400E; }
+  .badge-danger{ background: var(--danger-pale); color: #991B1B; }
+  .badge-grey  { background: var(--bg);          color: var(--ink-light); border: 1px solid var(--border); }
+  .badge-teal  { background: var(--teal-pale);   color: var(--teal); }
+
+  /* ─── EVIDENCE THUMBNAIL ──────────────────────────────────────── */
+  .evidence-thumb {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 64px;
+    height: 64px;
+    border: 2px dashed var(--border);
+    border-radius: 6px;
+    background: var(--bg);
+    font-size: .6rem;
+    font-family: 'Helvetica Neue', Arial, sans-serif;
+    color: var(--ink-light);
+    text-align: center;
+    vertical-align: top;
+    margin: 4px;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .evidence-thumb .ev-icon { font-size: 1.2rem; }
+  .evidence-row { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+
+  /* ─── ROOM BLOCK ──────────────────────────────────────────────── */
+  .room-block {
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+    margin-bottom: 20px;
+  }
+  .room-header {
+    background: var(--ink);
+    color: #fff;
+    padding: 12px 18px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .room-header h3 { color: #fff; font-size: .9rem; }
+  .room-meta { font-family: 'Helvetica Neue', Arial, sans-serif; font-size: .75rem; color: rgba(255,255,255,.65); margin-top: 2px; }
+  .room-body { padding: 0; }
+  .room-footer {
+    background: var(--bg);
+    padding: 10px 18px;
+    display: flex;
+    gap: 20px;
+    border-top: 1px solid var(--border-light);
+  }
+  .room-stat { font-family: 'Helvetica Neue', Arial, sans-serif; font-size: .75rem; color: var(--ink-light); }
+  .room-stat strong { color: var(--ink); font-size: .875rem; }
+
+  /* ─── ITEM CARD ───────────────────────────────────────────────── */
+  .item-card {
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    margin-bottom: 16px;
+    overflow: hidden;
+  }
+  .item-card-header {
+    background: var(--teal-pale);
+    border-bottom: 1px solid var(--teal-mid);
+    padding: 12px 18px;
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 12px;
+  }
+  .item-name { font-family: 'Helvetica Neue', Arial, sans-serif; font-weight: 700; font-size: .95rem; color: var(--ink); }
+  .item-cat  { font-family: 'Helvetica Neue', Arial, sans-serif; font-size: .72rem; color: var(--teal); text-transform: uppercase; letter-spacing: .05em; margin-top: 2px; }
+  .item-value { font-family: 'Helvetica Neue', Arial, sans-serif; font-weight: 700; font-size: 1.1rem; color: var(--teal); white-space: nowrap; }
+  .item-body { padding: 16px 18px; display: grid; grid-template-columns: 1fr 1fr; gap: 8px 24px; }
+  .item-field { font-family: 'Helvetica Neue', Arial, sans-serif; font-size: .8rem; }
+  .item-field .if-label { color: var(--ink-light); font-size: .72rem; text-transform: uppercase; letter-spacing: .04em; display: block; margin-bottom: 1px; }
+  .item-footer { padding: 10px 18px; background: var(--bg); border-top: 1px solid var(--border-light); display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+
+  /* ─── EVIDENCE APPENDIX ENTRY ─────────────────────────────────── */
+  .ev-entry { display: flex; gap: 16px; margin-bottom: 20px; align-items: flex-start; }
+  .ev-num {
+    background: var(--teal);
+    color: #fff;
+    font-family: 'Helvetica Neue', Arial, sans-serif;
+    font-size: .7rem;
+    font-weight: 700;
+    min-width: 32px; height: 32px;
+    border-radius: 6px;
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+  }
+  .ev-detail h4 { font-size: .85rem; margin-bottom: 4px; }
+  .ev-detail p { font-size: .78rem; color: var(--ink-mid); margin-bottom: 4px; }
+
+  /* ─── CHECKLIST ───────────────────────────────────────────────── */
+  .checklist { list-style: none; margin-bottom: 16px; }
+  .checklist li {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 8px 0;
+    border-bottom: 1px solid var(--border-light);
+    font-family: 'Helvetica Neue', Arial, sans-serif;
+    font-size: .83rem;
+  }
+  .checklist li:last-child { border-bottom: none; }
+  .check-icon { width: 18px; height: 18px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; font-size: .65rem; font-weight: 700; flex-shrink: 0; margin-top: 1px; }
+  .ci-ok    { background: var(--ok);     color: #fff; }
+  .ci-warn  { background: var(--warn);   color: #fff; }
+  .ci-fail  { background: var(--danger); color: #fff; }
+  .ci-blank { background: var(--border); color: #fff; }
+
+  /* ─── COVER PAGE ──────────────────────────────────────────────── */
+  #cover { padding: 0; min-height: 1100px; display: flex; flex-direction: column; }
+  .cover-band { background: var(--teal); padding: 40px 64px 36px; }
+  .cover-logo { font-family: 'Helvetica Neue', Arial, sans-serif; font-size: 1.6rem; font-weight: 800; color: #fff; letter-spacing: -.03em; display: flex; align-items: center; gap: 8px; }
+  .cover-logo .logo-dot { width: 10px; height: 10px; background: var(--teal-light); border-radius: 50%; display: inline-block; }
+  .cover-tagline { font-family: 'Helvetica Neue', Arial, sans-serif; font-size: .8rem; color: rgba(255,255,255,.65); letter-spacing: .1em; text-transform: uppercase; margin-top: 4px; }
+  .cover-title-block { padding: 48px 64px 36px; flex: 1; }
+  .cover-title-block .doc-type {
+    font-family: 'Helvetica Neue', Arial, sans-serif;
+    font-size: .72rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: .12em;
+    color: var(--teal);
+    margin-bottom: 12px;
+  }
+  .cover-title-block h1 { font-size: 2.6rem; line-height: 1.1; color: var(--ink); margin-bottom: 8px; }
+  .cover-title-block .address { font-family: 'Helvetica Neue', Arial, sans-serif; font-size: 1rem; color: var(--ink-mid); margin-bottom: 32px; }
+  .cover-meta-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; margin-bottom: 32px; }
+  .cover-meta-cell { padding: 14px 18px; border-bottom: 1px solid var(--border); }
+  .cover-meta-cell:nth-child(odd) { border-right: 1px solid var(--border); }
+  .cover-meta-cell:nth-last-child(-n+2) { border-bottom: none; }
+  .cover-meta-cell .cm-label { font-family: 'Helvetica Neue', Arial, sans-serif; font-size: .7rem; text-transform: uppercase; letter-spacing: .07em; color: var(--ink-light); margin-bottom: 3px; }
+  .cover-meta-cell .cm-value { font-family: 'Helvetica Neue', Arial, sans-serif; font-size: .9rem; font-weight: 600; color: var(--ink); }
+  .cover-event-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    background: #FEF3C7;
+    border: 1px solid #FCD34D;
+    border-radius: 6px;
+    padding: 10px 16px;
+    font-family: 'Helvetica Neue', Arial, sans-serif;
+    font-size: .85rem;
+    font-weight: 600;
+    color: #92400E;
+    margin-bottom: 32px;
+  }
+  .cover-event-badge .ev-icon { font-size: 1.1rem; }
+  .cover-description { font-size: .875rem; color: var(--ink-mid); line-height: 1.7; max-width: 560px; }
+  .cover-footer {
+    background: var(--bg);
+    border-top: 1px solid var(--border);
+    padding: 20px 64px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .cover-footer p { font-family: 'Helvetica Neue', Arial, sans-serif; font-size: .72rem; color: var(--ink-light); }
+  .cover-footer .page-num { font-size: .7rem; color: var(--ink-light); font-family: 'Helvetica Neue', Arial, sans-serif; }
+
+  /* ─── PAGE HEADER / FOOTER ────────────────────────────────────── */
+  .page-header {
+    background: var(--teal);
+    padding: 16px 40px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .page-header .ph-logo { font-family: 'Helvetica Neue', Arial, sans-serif; font-weight: 800; font-size: .95rem; color: #fff; letter-spacing: -.02em; }
+  .page-header .ph-ref  { font-family: 'Helvetica Neue', Arial, sans-serif; font-size: .72rem; color: rgba(255,255,255,.75); letter-spacing: .05em; }
+  .page-footer {
+    border-top: 1px solid var(--border);
+    padding: 14px 40px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-top: 24px;
+  }
+  .page-footer p { font-family: 'Helvetica Neue', Arial, sans-serif; font-size: .68rem; color: var(--ink-light); }
+
+  /* ─── MISC ────────────────────────────────────────────────────── */
+  .teal { color: var(--teal); }
+  .note { font-family: 'Helvetica Neue', Arial, sans-serif; font-size: .78rem; color: var(--ink-light); font-style: italic; }
+  .flex-between { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; }
+  .mb-0 { margin-bottom: 0; }
+  .mb-4 { margin-bottom: 4px; }
+  .mb-8 { margin-bottom: 8px; }
+  .mb-16 { margin-bottom: 16px; }
+  .mb-24 { margin-bottom: 24px; }
+  .mt-8  { margin-top: 8px; }
+  .mt-16 { margin-top: 16px; }
+  .mt-24 { margin-top: 24px; }
+  .total-row td { font-weight: 700; background: var(--teal-pale) !important; border-top: 2px solid var(--teal); color: var(--ink); }
+  .photo-placeholder {
+    background: var(--bg);
+    border: 2px dashed var(--border);
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-direction: column;
+    gap: 6px;
+    font-family: 'Helvetica Neue', Arial, sans-serif;
+    font-size: .75rem;
+    color: var(--ink-light);
+    padding: 20px;
+    text-align: center;
+  }
+  .photo-placeholder .ph-icon { font-size: 1.8rem; }
+  .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+  .declaration-box {
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 24px;
+    margin-top: 24px;
+    min-height: 80px;
+  }
+  .sig-line { border-bottom: 1px solid var(--ink); margin-top: 40px; margin-bottom: 6px; }
+
+  /* ─── PRINT ───────────────────────────────────────────────────── */
+  @media print {
+    body { background: white; }
+    .page { box-shadow: none; margin: 0; width: 100%; }
+    .page-break { page-break-before: always; }
+  }
+
+  /* ─── DESIGN NOTES PAGE ───────────────────────────────────────── */
+  .design-notes { background: #1A1F2E; }
+  .design-notes .page-inner { color: #E5E7EB; }
+  .design-notes h2 { color: var(--teal-light); }
+  .design-notes h3 { color: #fff; margin-bottom: 8px; margin-top: 20px; }
+  .design-notes p { color: #D1D5DB; font-family: 'Helvetica Neue', Arial, sans-serif; font-size: .85rem; line-height: 1.7; }
+  .design-notes ul { color: #D1D5DB; font-family: 'Helvetica Neue', Arial, sans-serif; font-size: .83rem; line-height: 1.8; padding-left: 20px; }
+  .design-notes .section-label { border-color: var(--teal-light); }
+  .design-notes .section-label h2 { color: var(--teal-light); }
+  .design-notes .section-label .num { background: var(--teal-light); color: var(--ink); }
+  .dn-chip {
+    display: inline-block;
+    background: rgba(30,212,208,.15);
+    color: var(--teal-light);
+    font-family: 'Helvetica Neue', Arial, sans-serif;
+    font-size: .72rem;
+    font-weight: 700;
+    letter-spacing: .06em;
+    text-transform: uppercase;
+    padding: 3px 8px;
+    border-radius: 4px;
+    margin-right: 6px;
+    margin-bottom: 4px;
+  }
+  .dn-chip.grey { background: rgba(255,255,255,.08); color: #9CA3AF; }
+  .critique-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-top: 16px; }
+  .critique-card {
+    background: rgba(255,255,255,.05);
+    border: 1px solid rgba(255,255,255,.1);
+    border-radius: 8px;
+    padding: 16px;
+  }
+  .critique-card h4 { color: #fff; font-size: .85rem; margin-bottom: 8px; }
+  .critique-card ul { color: #9CA3AF; font-size: .78rem; line-height: 1.7; }
+</style>
+</head>
+<body>
+
+<!-- ══════════════════════════════════════════
+     PAGE 1: COVER
+══════════════════════════════════════════════ -->
+<div class="page" id="cover">
+  <div class="cover-band">
+    <div class="cover-logo">
+      <span class="logo-dot"></span>
+      Coverly
+    </div>
+    <div class="cover-tagline">Know what you own</div>
+  </div>
+
+  <div class="cover-title-block">
+    <div class="doc-type">Contents Claim Pack</div>
+    <h1>Home Contents<br>Claim Documentation</h1>
+    <div class="address">14 Hillcrest Avenue, Karori, Wellington 6012</div>
+
+    <div class="cover-event-badge">
+      <span class="ev-icon">🔥</span>
+      Event type: House fire — kitchen origin
+    </div>
+
+    <div class="cover-meta-grid">
+      <div class="cover-meta-cell">
+        <div class="cm-label">Reference number</div>
+        <div class="cm-value">CVR-2025-08741</div>
+      </div>
+      <div class="cover-meta-cell">
+        <div class="cm-label">Date generated</div>
+        <div class="cm-value">14 August 2025</div>
+      </div>
+      <div class="cover-meta-cell">
+        <div class="cm-label">Prepared for</div>
+        <div class="cm-value">Sarah &amp; James Thornton</div>
+      </div>
+      <div class="cover-meta-cell">
+        <div class="cm-label">Event / loss date</div>
+        <div class="cm-value">9 August 2025</div>
+      </div>
+      <div class="cover-meta-cell">
+        <div class="cm-label">Insurer</div>
+        <div class="cm-value">Southern Cross Insurance NZ</div>
+      </div>
+      <div class="cover-meta-cell">
+        <div class="cm-label">Policy number</div>
+        <div class="cm-value">SCI-HOM-4491027</div>
+      </div>
+    </div>
+
+    <p class="cover-description">
+      This Claim Pack has been prepared using Coverly, a home contents inventory platform. It contains a room-by-room record of household contents at 14 Hillcrest Avenue as documented prior to and immediately after the loss event of 9 August 2025. The pack includes item descriptions, estimated replacement values, available evidence, and a summary of items requiring review.
+    </p>
+    <p class="cover-description mt-8" style="color:#6B7280;font-size:.78rem;">
+      Replacement values are estimates based on current retail pricing in New Zealand. This document is provided as a supporting record to assist your insurance claim and does not constitute a guarantee of claim acceptance or settlement amount. All values are stated in New Zealand dollars (NZD) including GST.
+    </p>
+  </div>
+
+  <div class="cover-footer">
+    <p>Generated by Coverly · coverly.nz · Reference CVR-2025-08741</p>
+    <div class="page-num">Page 1</div>
+  </div>
+</div>
+
+
+<!-- ══════════════════════════════════════════
+     PAGE 2: EXECUTIVE SUMMARY
+══════════════════════════════════════════════ -->
+<div class="page">
+  <div class="page-header">
+    <span class="ph-logo">Coverly</span>
+    <span class="ph-ref">Claim Pack · CVR-2025-08741 · 14 Hillcrest Avenue, Karori</span>
+  </div>
+  <div class="page-inner">
+    <div class="section-label">
+      <div class="num">2</div>
+      <h2>Executive Summary</h2>
+    </div>
+
+    <!-- Key metrics -->
+    <div class="metric-grid">
+      <div class="metric-card accent">
+        <div class="mc-value">$68,450</div>
+        <div class="mc-label">Total claimed value (NZD)</div>
+      </div>
+      <div class="metric-card">
+        <div class="mc-value">6</div>
+        <div class="mc-label">Rooms included</div>
+      </div>
+      <div class="metric-card">
+        <div class="mc-value">94</div>
+        <div class="mc-label">Items documented</div>
+      </div>
+      <div class="metric-card">
+        <div class="mc-value">71</div>
+        <div class="mc-label">Items with photos</div>
+      </div>
+    </div>
+
+    <div class="metric-grid metric-grid-3">
+      <div class="metric-card">
+        <div class="mc-value">12</div>
+        <div class="mc-label">Items needing review</div>
+      </div>
+      <div class="metric-card">
+        <div class="mc-value">$85,000</div>
+        <div class="mc-label">Contents sum insured</div>
+      </div>
+      <div class="metric-card">
+        <div class="mc-value" style="color:var(--ok)">+$16,550</div>
+        <div class="mc-label">Estimated cover surplus</div>
+      </div>
+    </div>
+
+    <div class="callout ok mb-16">
+      <div class="callout-title">Cover Position</div>
+      Based on documented replacement values, this claim of <strong>NZD $68,450</strong> sits within the insured contents sum of <strong>$85,000</strong>. There appears to be a surplus of approximately <strong>$16,550</strong>. This estimate does not account for policy excess, special item limits, or items not yet documented.
+    </div>
+
+    <div class="callout warn">
+      <div class="callout-title">Attention Required</div>
+      <strong>12 items</strong> are missing either a replacement value, supporting photo, or brand/model detail. These items are flagged in Section 8 and may delay processing. We recommend reviewing these before submitting.
+    </div>
+
+    <hr class="divider">
+
+    <h3 class="mb-16">Room Coverage Summary</h3>
+    <table>
+      <thead>
+        <tr>
+          <th>Room</th>
+          <th class="td-center">Items</th>
+          <th class="td-right">Estimated Value</th>
+          <th class="td-center">Photos</th>
+          <th class="td-center">Status</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><strong>Kitchen</strong></td>
+          <td class="td-center">18</td>
+          <td class="td-right">$14,280</td>
+          <td class="td-center">15/18</td>
+          <td class="td-center"><span class="badge badge-warn">Needs review</span></td>
+        </tr>
+        <tr>
+          <td><strong>Living Room</strong></td>
+          <td class="td-center">22</td>
+          <td class="td-right">$19,750</td>
+          <td class="td-center">20/22</td>
+          <td class="td-center"><span class="badge badge-ok">Ready</span></td>
+        </tr>
+        <tr>
+          <td><strong>Master Bedroom</strong></td>
+          <td class="td-center">21</td>
+          <td class="td-right">$15,420</td>
+          <td class="td-center">18/21</td>
+          <td class="td-center"><span class="badge badge-ok">Ready</span></td>
+        </tr>
+        <tr>
+          <td><strong>Bedroom 2</strong></td>
+          <td class="td-center">12</td>
+          <td class="td-right">$6,100</td>
+          <td class="td-center">9/12</td>
+          <td class="td-center"><span class="badge badge-warn">Needs review</span></td>
+        </tr>
+        <tr>
+          <td><strong>Study / Office</strong></td>
+          <td class="td-center">14</td>
+          <td class="td-right">$10,800</td>
+          <td class="td-center">14/14</td>
+          <td class="td-center"><span class="badge badge-ok">Ready</span></td>
+        </tr>
+        <tr>
+          <td><strong>Laundry</strong></td>
+          <td class="td-center">7</td>
+          <td class="td-right">$2,100</td>
+          <td class="td-center">5/7</td>
+          <td class="td-center"><span class="badge badge-grey">Partial</span></td>
+        </tr>
+        <tr class="total-row">
+          <td>Total</td>
+          <td class="td-center">94</td>
+          <td class="td-right">$68,450</td>
+          <td class="td-center">71/94</td>
+          <td class="td-center"></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="page-footer">
+    <p>Coverly Claim Pack · CVR-2025-08741 · Confidential — prepared for Sarah &amp; James Thornton</p>
+    <p>Page 2</p>
+  </div>
+</div>
+
+
+<!-- ══════════════════════════════════════════
+     PAGE 3: POLICYHOLDER & PROPERTY DETAILS
+══════════════════════════════════════════════ -->
+<div class="page">
+  <div class="page-header">
+    <span class="ph-logo">Coverly</span>
+    <span class="ph-ref">Claim Pack · CVR-2025-08741 · 14 Hillcrest Avenue, Karori</span>
+  </div>
+  <div class="page-inner">
+    <div class="section-label">
+      <div class="num">3</div>
+      <h2>Policyholder &amp; Property Details</h2>
+    </div>
+
+    <div class="two-col mb-24">
+      <div>
+        <h3 class="mb-16">Policyholder</h3>
+        <div class="detail-grid">
+          <div class="detail-key">Name(s)</div>
+          <div class="detail-val">Sarah &amp; James Thornton</div>
+          <div class="detail-key">Email</div>
+          <div class="detail-val">sarah.thornton@email.com</div>
+          <div class="detail-key">Phone</div>
+          <div class="detail-val">021 456 7890</div>
+          <div class="detail-key">Occupation</div>
+          <div class="detail-val">Teacher / Engineer</div>
+          <div class="detail-key">Date of birth (primary)</div>
+          <div class="detail-val">12 March 1984</div>
+        </div>
+      </div>
+      <div>
+        <h3 class="mb-16">Property</h3>
+        <div class="detail-grid">
+          <div class="detail-key">Address</div>
+          <div class="detail-val">14 Hillcrest Avenue, Karori, Wellington 6012</div>
+          <div class="detail-key">Property type</div>
+          <div class="detail-val">Freehold house (3 bed, 2 bath)</div>
+          <div class="detail-key">Tenure</div>
+          <div class="detail-val">Owner-occupier</div>
+          <div class="detail-key">Year built</div>
+          <div class="detail-val">1972 (renovated 2019)</div>
+          <div class="detail-key">Occupants</div>
+          <div class="detail-val">2 adults, 2 children</div>
+        </div>
+      </div>
+    </div>
+
+    <hr class="divider">
+
+    <h3 class="mb-16">Insurance Details</h3>
+    <div class="detail-grid mb-24">
+      <div class="detail-key">Insurer</div>
+      <div class="detail-val">Southern Cross Insurance NZ</div>
+      <div class="detail-key">Policy number</div>
+      <div class="detail-val">SCI-HOM-4491027</div>
+      <div class="detail-key">Contents sum insured</div>
+      <div class="detail-val"><strong>NZD $85,000</strong></div>
+      <div class="detail-key">Policy type</div>
+      <div class="detail-val">Standard Contents — Replacement Value</div>
+      <div class="detail-key">Excess</div>
+      <div class="detail-val">$500 (standard)</div>
+      <div class="detail-key">Special item limits</div>
+      <div class="detail-val">Jewellery $5,000 · Electronics $10,000 · Portable items $3,000</div>
+      <div class="detail-key">Policy term</div>
+      <div class="detail-val">1 July 2025 — 30 June 2026</div>
+    </div>
+
+    <hr class="divider">
+
+    <h3 class="mb-16">Claim Event</h3>
+    <div class="detail-grid mb-24">
+      <div class="detail-key">Event type</div>
+      <div class="detail-val">House fire (kitchen origin)</div>
+      <div class="detail-key">Date of event</div>
+      <div class="detail-val">9 August 2025 — approx. 11:40 PM</div>
+      <div class="detail-key">Reported to insurer</div>
+      <div class="detail-val">10 August 2025</div>
+      <div class="detail-key">Fire Service attended</div>
+      <div class="detail-val">Yes — Wellington Fire Station, 3 appliances</div>
+      <div class="detail-key">Police report</div>
+      <div class="detail-val">Not required (accidental cause confirmed)</div>
+      <div class="detail-key">Temporary accommodation</div>
+      <div class="detail-val">Yes — family staying at 8 Boulcott Street, Lower Hutt</div>
+    </div>
+
+    <div class="callout">
+      <div class="callout-title">Notes from policyholder</div>
+      The fire originated from the oven left on overnight. Smoke and heat damage affected the kitchen, living room, and hallway. The study and laundry sustained minimal smoke damage only. Bedroom contents were unaffected by fire but the home is uninhabitable due to structural assessment requirements. Full inventory was documented using Coverly over the 4 days following the event.
+    </div>
+  </div>
+  <div class="page-footer">
+    <p>Coverly Claim Pack · CVR-2025-08741 · Confidential — prepared for Sarah &amp; James Thornton</p>
+    <p>Page 3</p>
+  </div>
+</div>
+
+
+<!-- ══════════════════════════════════════════
+     PAGE 4: CLAIM SUMMARY
+══════════════════════════════════════════════ -->
+<div class="page">
+  <div class="page-header">
+    <span class="ph-logo">Coverly</span>
+    <span class="ph-ref">Claim Pack · CVR-2025-08741 · 14 Hillcrest Avenue, Karori</span>
+  </div>
+  <div class="page-inner">
+    <div class="section-label">
+      <div class="num">4</div>
+      <h2>Claim Summary</h2>
+    </div>
+
+    <p>This claim covers household contents across six rooms at 14 Hillcrest Avenue, Karori. The property sustained fire, smoke, and heat damage following a kitchen fire on the evening of 9 August 2025. The kitchen and living room contents are total losses. The study and laundry received smoke damage that may render some items uncleanable. Bedroom contents are largely intact but the property remains inaccessible pending structural clearance.</p>
+    <p>All items documented below represent the household's contents as recorded in Coverly prior to or immediately following the event. Replacement values are based on current New Zealand retail pricing sourced via AI-assisted lookup and confirmed where possible against retailer listings.</p>
+
+    <hr class="divider">
+
+    <h3 class="mb-16">Rooms Affected</h3>
+    <table class="mb-24">
+      <thead>
+        <tr>
+          <th>Room</th>
+          <th>Damage Level</th>
+          <th>Notes</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr><td>Kitchen</td><td><span class="badge badge-danger">Total loss</span></td><td>Fire origin. All contents destroyed or unsalvageable.</td></tr>
+        <tr><td>Living Room</td><td><span class="badge badge-danger">Total loss</span></td><td>Severe fire and smoke damage. All contents claimed.</td></tr>
+        <tr><td>Hallway</td><td><span class="badge badge-warn">Significant smoke</span></td><td>Smoke damage throughout. No contents listed separately.</td></tr>
+        <tr><td>Master Bedroom</td><td><span class="badge badge-warn">Smoke — inaccessible</span></td><td>No fire damage. Contents not yet accessed for cleaning assessment.</td></tr>
+        <tr><td>Bedroom 2</td><td><span class="badge badge-warn">Smoke — inaccessible</span></td><td>As above. Some children's items may not be cleanable.</td></tr>
+        <tr><td>Study / Office</td><td><span class="badge badge-teal">Minor smoke</span></td><td>Professional cleaning recommended. Electronics may be unaffected.</td></tr>
+        <tr><td>Laundry</td><td><span class="badge badge-teal">Minor smoke</span></td><td>Appliances likely unaffected. Soft goods may need replacement.</td></tr>
+      </tbody>
+    </table>
+
+    <h3 class="mb-16">What Is Being Claimed</h3>
+    <ul style="font-family:'Helvetica Neue',Arial,sans-serif;font-size:.85rem;line-height:1.9;padding-left:18px;margin-bottom:20px;">
+      <li>Replacement cost of all kitchen appliances, cookware, and pantry goods destroyed in the fire.</li>
+      <li>Replacement cost of all living room furniture, electronics, and soft furnishings destroyed in the fire.</li>
+      <li>Replacement or professional cleaning cost for contents of master bedroom and bedroom 2 (pending cleaning assessment).</li>
+      <li>Replacement cost of any study electronics determined uncleanable or damaged by smoke ingress.</li>
+      <li>Replacement cost of laundry soft goods where cleaning is not viable.</li>
+    </ul>
+
+    <h3 class="mb-16">Key Assumptions</h3>
+    <div class="callout mb-16">
+      <div class="callout-title">Valuation basis</div>
+      All replacement values are based on equivalent new item pricing in New Zealand as at August 2025. Where the original brand/model is no longer available, the closest current equivalent has been used. AI-generated values are estimates only and should be verified against current retail listings where a settlement figure is required.
+    </div>
+
+    <div class="callout warn">
+      <div class="callout-title">Incomplete items</div>
+      <strong>12 items</strong> across the claim are missing one or more of: replacement value, photographic evidence, or brand/model identification. These are listed in detail in Section 8. The policyholder is working to provide additional supporting information.
+    </div>
+
+    <hr class="divider">
+
+    <div class="callout">
+      <div class="callout-title">Items not included in this claim</div>
+      The following are not included: structure and fixtures (covered under building insurance), vehicles, cash, and items specifically excluded under the policy terms. Jewellery and portable items are listed separately in the master bedroom section and may be subject to special item limits.
+    </div>
+  </div>
+  <div class="page-footer">
+    <p>Coverly Claim Pack · CVR-2025-08741 · Confidential — prepared for Sarah &amp; James Thornton</p>
+    <p>Page 4</p>
+  </div>
+</div>
+
+
+<!-- ══════════════════════════════════════════
+     PAGE 5: ROOM-BY-ROOM SUMMARY
+══════════════════════════════════════════════ -->
+<div class="page">
+  <div class="page-header">
+    <span class="ph-logo">Coverly</span>
+    <span class="ph-ref">Claim Pack · CVR-2025-08741 · 14 Hillcrest Avenue, Karori</span>
+  </div>
+  <div class="page-inner">
+    <div class="section-label">
+      <div class="num">5</div>
+      <h2>Room-by-Room Inventory Summary</h2>
+    </div>
+
+    <!-- KITCHEN -->
+    <div class="room-block">
+      <div class="room-header">
+        <div>
+          <h3>Kitchen</h3>
+          <div class="room-meta">Fire damage — total loss · 18 items · $14,280 replacement value</div>
+        </div>
+        <span class="badge badge-danger">Needs review (3 items)</span>
+      </div>
+      <div class="room-body">
+        <table style="margin-bottom:0;">
+          <thead>
+            <tr>
+              <th>Item</th>
+              <th>Brand</th>
+              <th class="td-center">Qty</th>
+              <th class="td-right">Est. Value</th>
+              <th class="td-center">Evidence</th>
+              <th class="td-center">Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td>Freestanding oven / cooktop</td><td>Fisher &amp; Paykel</td><td class="td-center">1</td><td class="td-right">$2,199</td><td class="td-center">📷 Photo</td><td class="td-center"><span class="badge badge-ok">Ready</span></td></tr>
+            <tr><td>Rangehood</td><td>Schweigen</td><td class="td-center">1</td><td class="td-right">$890</td><td class="td-center">📷 Photo</td><td class="td-center"><span class="badge badge-ok">Ready</span></td></tr>
+            <tr><td>French door refrigerator</td><td>Haier</td><td class="td-center">1</td><td class="td-right">$1,849</td><td class="td-center">📷 📄 Receipt</td><td class="td-center"><span class="badge badge-ok">Ready</span></td></tr>
+            <tr><td>Microwave oven</td><td>Panasonic</td><td class="td-center">1</td><td class="td-right">$349</td><td class="td-center">📷 Photo</td><td class="td-center"><span class="badge badge-ok">Ready</span></td></tr>
+            <tr><td>Espresso machine</td><td>Breville</td><td class="td-center">1</td><td class="td-right">$749</td><td class="td-center">📷 Photo</td><td class="td-center"><span class="badge badge-ok">Ready</span></td></tr>
+            <tr><td>Toaster (4-slice)</td><td>Breville</td><td class="td-center">1</td><td class="td-right">$129</td><td class="td-center">📷 Photo</td><td class="td-center"><span class="badge badge-ok">Ready</span></td></tr>
+            <tr><td>Kettle</td><td>Breville</td><td class="td-center">1</td><td class="td-right">$99</td><td class="td-center">📷 Photo</td><td class="td-center"><span class="badge badge-ok">Ready</span></td></tr>
+            <tr><td>Stand mixer</td><td>KitchenAid</td><td class="td-center">1</td><td class="td-right">$999</td><td class="td-center">📷 📄 Receipt</td><td class="td-center"><span class="badge badge-ok">Ready</span></td></tr>
+            <tr><td>Food processor</td><td>Unknown</td><td class="td-center">1</td><td class="td-right">$0</td><td class="td-center">—</td><td class="td-center"><span class="badge badge-danger">Missing value</span></td></tr>
+            <tr><td>Cookware set (12-piece)</td><td>Circulon</td><td class="td-center">1</td><td class="td-right">$399</td><td class="td-center">📷 Photo</td><td class="td-center"><span class="badge badge-ok">Ready</span></td></tr>
+            <tr><td>Knife block set</td><td>Global</td><td class="td-center">1</td><td class="td-right">$479</td><td class="td-center">—</td><td class="td-center"><span class="badge badge-warn">No photo</span></td></tr>
+            <tr><td>Cutting boards (set of 3)</td><td>Joseph Joseph</td><td class="td-center">1</td><td class="td-right">$89</td><td class="td-center">📷 Photo</td><td class="td-center"><span class="badge badge-ok">Ready</span></td></tr>
+            <tr><td>Wooden pantry shelf unit</td><td>IKEA</td><td class="td-center">1</td><td class="td-right">$249</td><td class="td-center">📷 Photo</td><td class="td-center"><span class="badge badge-ok">Ready</span></td></tr>
+            <tr><td>Blender</td><td>Vitamix</td><td class="td-center">1</td><td class="td-right">$699</td><td class="td-center">📷 📄 Receipt</td><td class="td-center"><span class="badge badge-ok">Ready</span></td></tr>
+            <tr><td>Dish rack &amp; drainer</td><td>—</td><td class="td-center">1</td><td class="td-right">$59</td><td class="td-center">—</td><td class="td-center"><span class="badge badge-warn">No photo</span></td></tr>
+            <tr><td>Pantry goods / dry food</td><td>—</td><td class="td-center">1</td><td class="td-right">$320</td><td class="td-center">—</td><td class="td-center"><span class="badge badge-grey">Est. only</span></td></tr>
+            <tr><td>Cleaning supplies / chemicals</td><td>—</td><td class="td-center">1</td><td class="td-right">$85</td><td class="td-center">—</td><td class="td-center"><span class="badge badge-grey">Est. only</span></td></tr>
+            <tr><td>Kitchen window blinds</td><td>Warehouse</td><td class="td-center">2</td><td class="td-right">$138</td><td class="td-center">📷 Photo</td><td class="td-center"><span class="badge badge-ok">Ready</span></td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="room-footer">
+        <div class="room-stat"><strong>18</strong><br>Items</div>
+        <div class="room-stat"><strong>$14,280</strong><br>Total value</div>
+        <div class="room-stat"><strong>15/18</strong><br>Have photos</div>
+        <div class="room-stat"><strong>3</strong><br>Need review</div>
+      </div>
+    </div>
+
+    <!-- LIVING ROOM -->
+    <div class="room-block">
+      <div class="room-header">
+        <div>
+          <h3>Living Room</h3>
+          <div class="room-meta">Fire damage — total loss · 22 items · $19,750 replacement value</div>
+        </div>
+        <span class="badge badge-ok">Ready</span>
+      </div>
+      <div class="room-body">
+        <table style="margin-bottom:0;">
+          <thead>
+            <tr>
+              <th>Item</th>
+              <th>Brand</th>
+              <th class="td-center">Qty</th>
+              <th class="td-right">Est. Value</th>
+              <th class="td-center">Evidence</th>
+              <th class="td-center">Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td>3-seater sofa</td><td>Freedom</td><td class="td-center">1</td><td class="td-right">$2,499</td><td class="td-center">📷 Photo</td><td class="td-center"><span class="badge badge-ok">Ready</span></td></tr>
+            <tr><td>2-seater sofa / loveseat</td><td>Freedom</td><td class="td-center">1</td><td class="td-right">$1,699</td><td class="td-center">📷 Photo</td><td class="td-center"><span class="badge badge-ok">Ready</span></td></tr>
+            <tr><td>OLED 65" TV</td><td>LG</td><td class="td-center">1</td><td class="td-right">$2,999</td><td class="td-center">📷 📄 Receipt</td><td class="td-center"><span class="badge badge-ok">Ready</span></td></tr>
+            <tr><td>TV unit / media console</td><td>IKEA Besta</td><td class="td-center">1</td><td class="td-right">$549</td><td class="td-center">📷 Photo</td><td class="td-center"><span class="badge badge-ok">Ready</span></td></tr>
+            <tr><td>Coffee table (oak)</td><td>Mocka</td><td class="td-center">1</td><td class="td-right">$349</td><td class="td-center">📷 Photo</td><td class="td-center"><span class="badge badge-ok">Ready</span></td></tr>
+            <tr><td>Side table x2</td><td>Mocka</td><td class="td-center">2</td><td class="td-right">$198</td><td class="td-center">📷 Photo</td><td class="td-center"><span class="badge badge-ok">Ready</span></td></tr>
+            <tr><td>Sound bar + subwoofer</td><td>Sonos</td><td class="td-center">1</td><td class="td-right">$1,199</td><td class="td-center">📷 📄 Receipt</td><td class="td-center"><span class="badge badge-ok">Ready</span></td></tr>
+            <tr><td>Floor lamp x2</td><td>Kmart</td><td class="td-center">2</td><td class="td-right">$118</td><td class="td-center">📷 Photo</td><td class="td-center"><span class="badge badge-ok">Ready</span></td></tr>
+            <tr><td>Wall art / prints (x4 framed)</td><td>Various</td><td class="td-center">4</td><td class="td-right">$480</td><td class="td-center">📷 Photo</td><td class="td-center"><span class="badge badge-ok">Ready</span></td></tr>
+            <tr><td>Area rug (2.4m x 1.7m)</td><td>Temple &amp; Webster</td><td class="td-center">1</td><td class="td-right">$599</td><td class="td-center">📷 📄 Receipt</td><td class="td-center"><span class="badge badge-ok">Ready</span></td></tr>
+            <tr><td>PlayStation 5 + controllers</td><td>Sony</td><td class="td-center">1</td><td class="td-right">$849</td><td class="td-center">📷 Photo</td><td class="td-center"><span class="badge badge-ok">Ready</span></td></tr>
+            <tr><td>Games (15 titles)</td><td>Various</td><td class="td-center">15</td><td class="td-right">$750</td><td class="td-center">📷 Photo</td><td class="td-center"><span class="badge badge-ok">Ready</span></td></tr>
+            <tr><td>Bookcase (5 shelf)</td><td>IKEA Billy</td><td class="td-center">2</td><td class="td-right">$398</td><td class="td-center">📷 Photo</td><td class="td-center"><span class="badge badge-ok">Ready</span></td></tr>
+            <tr><td>Books (approx. 120)</td><td>Various</td><td class="td-center">120</td><td class="td-right">$960</td><td class="td-center">📷 Photo</td><td class="td-center"><span class="badge badge-ok">Ready</span></td></tr>
+            <tr><td>Curtains + tracks (2 windows)</td><td>Spotlight</td><td class="td-center">1</td><td class="td-right">$680</td><td class="td-center">📷 Photo</td><td class="td-center"><span class="badge badge-ok">Ready</span></td></tr>
+            <tr><td>Throw blankets + cushions</td><td>Various</td><td class="td-center">6</td><td class="td-right">$270</td><td class="td-center">📷 Photo</td><td class="td-center"><span class="badge badge-ok">Ready</span></td></tr>
+            <tr><td>Indoor plants (large, x3)</td><td>—</td><td class="td-center">3</td><td class="td-right">$240</td><td class="td-center">📷 Photo</td><td class="td-center"><span class="badge badge-ok">Ready</span></td></tr>
+            <tr><td>Smart home hub + devices</td><td>Google Nest</td><td class="td-center">1</td><td class="td-right">$399</td><td class="td-center">📷 Photo</td><td class="td-center"><span class="badge badge-ok">Ready</span></td></tr>
+            <tr><td>Streaming devices x2</td><td>Chromecast</td><td class="td-center">2</td><td class="td-right">$198</td><td class="td-center">📷 Photo</td><td class="td-center"><span class="badge badge-ok">Ready</span></td></tr>
+            <tr><td>Board games collection</td><td>Various</td><td class="td-center">14</td><td class="td-right">$560</td><td class="td-center">📷 Photo</td><td class="td-center"><span class="badge badge-ok">Ready</span></td></tr>
+            <tr><td>Toy storage unit + toys</td><td>IKEA Kallax</td><td class="td-center">1</td><td class="td-right">$749</td><td class="td-center">📷 Photo</td><td class="td-center"><span class="badge badge-ok">Ready</span></td></tr>
+            <tr><td>Power boards / extension cords</td><td>Various</td><td class="td-center">4</td><td class="td-right">$158</td><td class="td-center">📷 Photo</td><td class="td-center"><span class="badge badge-ok">Ready</span></td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="room-footer">
+        <div class="room-stat"><strong>22</strong><br>Items</div>
+        <div class="room-stat"><strong>$19,750</strong><br>Total value</div>
+        <div class="room-stat"><strong>22/22</strong><br>Have photos</div>
+        <div class="room-stat"><strong>0</strong><br>Need review</div>
+      </div>
+    </div>
+
+    <p class="note">Sections continue: Master Bedroom ($15,420) · Bedroom 2 ($6,100) · Study/Office ($10,800) · Laundry ($2,100) — included in full document</p>
+  </div>
+  <div class="page-footer">
+    <p>Coverly Claim Pack · CVR-2025-08741 · Confidential — prepared for Sarah &amp; James Thornton</p>
+    <p>Page 5</p>
+  </div>
+</div>
+
+
+<!-- ══════════════════════════════════════════
+     PAGE 6: DETAILED ITEM SCHEDULE (SAMPLE)
+══════════════════════════════════════════════ -->
+<div class="page">
+  <div class="page-header">
+    <span class="ph-logo">Coverly</span>
+    <span class="ph-ref">Claim Pack · CVR-2025-08741 · 14 Hillcrest Avenue, Karori</span>
+  </div>
+  <div class="page-inner">
+    <div class="section-label">
+      <div class="num">6</div>
+      <h2>Detailed Item Schedule</h2>
+    </div>
+    <p class="note mb-16">Sample showing 3 of 94 items. Full schedule lists all items in the same format.</p>
+
+    <!-- ITEM 1 -->
+    <div class="item-card">
+      <div class="item-card-header">
+        <div>
+          <div class="item-name">LG OLED 65" 4K Smart TV</div>
+          <div class="item-cat">Electronics · Living Room · Item #LR-003</div>
+        </div>
+        <div class="item-value">$2,999</div>
+      </div>
+      <div class="item-body">
+        <div class="item-field"><span class="if-label">Brand</span>LG Electronics</div>
+        <div class="item-field"><span class="if-label">Model</span>OLED65C3PSA</div>
+        <div class="item-field"><span class="if-label">Quantity</span>1</div>
+        <div class="item-field"><span class="if-label">Condition (pre-loss)</span>Excellent — 3 years old</div>
+        <div class="item-field"><span class="if-label">Approx. purchase year</span>2022</div>
+        <div class="item-field"><span class="if-label">Original purchase price</span>$3,299 (NZD)</div>
+        <div class="item-field"><span class="if-label">Replacement value</span>$2,999 (current JB Hi-Fi listing)</div>
+        <div class="item-field"><span class="if-label">Valuation basis</span>AI-estimated + confirmed retail listing</div>
+        <div class="item-field"><span class="if-label">Evidence available</span>Photo · Original receipt (PDF)</div>
+        <div class="item-field"><span class="if-label">Evidence ref</span>EV-014, EV-015</div>
+      </div>
+      <div class="item-footer">
+        <span class="badge badge-ok">Ready</span>
+        <span class="badge badge-teal">Receipt available</span>
+        <span class="badge badge-teal">Photo verified</span>
+        <span class="note">AI confidence: high</span>
+      </div>
+    </div>
+
+    <!-- ITEM 2 -->
+    <div class="item-card">
+      <div class="item-card-header">
+        <div>
+          <div class="item-name">KitchenAid Artisan Stand Mixer</div>
+          <div class="item-cat">Kitchen Appliances · Kitchen · Item #KT-008</div>
+        </div>
+        <div class="item-value">$999</div>
+      </div>
+      <div class="item-body">
+        <div class="item-field"><span class="if-label">Brand</span>KitchenAid</div>
+        <div class="item-field"><span class="if-label">Model</span>5KSM175PSBBK (Black)</div>
+        <div class="item-field"><span class="if-label">Quantity</span>1</div>
+        <div class="item-field"><span class="if-label">Condition (pre-loss)</span>Good — 5 years old, well maintained</div>
+        <div class="item-field"><span class="if-label">Approx. purchase year</span>2020</div>
+        <div class="item-field"><span class="if-label">Original purchase price</span>$1,099 (sale price NZD)</div>
+        <div class="item-field"><span class="if-label">Replacement value</span>$999 (current Noel Leeming NZD)</div>
+        <div class="item-field"><span class="if-label">Valuation basis</span>Retailer listing (Noel Leeming, August 2025)</div>
+        <div class="item-field"><span class="if-label">Evidence available</span>Photo · Receipt (email forwarded)</div>
+        <div class="item-field"><span class="if-label">Evidence ref</span>EV-022, EV-023</div>
+      </div>
+      <div class="item-footer">
+        <span class="badge badge-ok">Ready</span>
+        <span class="badge badge-teal">Receipt available</span>
+        <span class="badge badge-teal">Photo verified</span>
+        <span class="note">AI confidence: high</span>
+      </div>
+    </div>
+
+    <!-- ITEM 3 — needs review -->
+    <div class="item-card">
+      <div class="item-card-header" style="background:#FEF2F2;border-color:#FECACA;">
+        <div>
+          <div class="item-name">Food Processor (unknown brand)</div>
+          <div class="item-cat">Kitchen Appliances · Kitchen · Item #KT-009</div>
+        </div>
+        <div class="item-value" style="color:var(--danger)">$0 — missing</div>
+      </div>
+      <div class="item-body">
+        <div class="item-field"><span class="if-label">Brand</span><em style="color:var(--danger)">Not identified</em></div>
+        <div class="item-field"><span class="if-label">Model</span><em style="color:var(--danger)">Not identified</em></div>
+        <div class="item-field"><span class="if-label">Quantity</span>1</div>
+        <div class="item-field"><span class="if-label">Condition (pre-loss)</span>Good — approx. 4 years old</div>
+        <div class="item-field"><span class="if-label">Approx. purchase year</span>~2021</div>
+        <div class="item-field"><span class="if-label">Original purchase price</span>Unknown</div>
+        <div class="item-field"><span class="if-label">Replacement value</span><em style="color:var(--danger)">Not yet estimated</em></div>
+        <div class="item-field"><span class="if-label">Valuation basis</span>Pending</div>
+        <div class="item-field"><span class="if-label">Evidence available</span><em style="color:var(--danger)">None</em></div>
+        <div class="item-field"><span class="if-label">Evidence ref</span>—</div>
+      </div>
+      <div class="item-footer">
+        <span class="badge badge-danger">Missing value</span>
+        <span class="badge badge-danger">No evidence</span>
+        <span class="badge badge-warn">No brand/model</span>
+        <span class="note">Policyholder action required — check bank records or email receipts</span>
+      </div>
+    </div>
+  </div>
+  <div class="page-footer">
+    <p>Coverly Claim Pack · CVR-2025-08741 · Confidential — prepared for Sarah &amp; James Thornton</p>
+    <p>Page 6</p>
+  </div>
+</div>
+
+
+<!-- ══════════════════════════════════════════
+     PAGE 7: EVIDENCE APPENDIX
+══════════════════════════════════════════════ -->
+<div class="page">
+  <div class="page-header">
+    <span class="ph-logo">Coverly</span>
+    <span class="ph-ref">Claim Pack · CVR-2025-08741 · 14 Hillcrest Avenue, Karori</span>
+  </div>
+  <div class="page-inner">
+    <div class="section-label">
+      <div class="num">7</div>
+      <h2>Evidence Appendix</h2>
+    </div>
+
+    <p class="mb-16">All evidence referenced in this pack is listed below. Items are indexed by evidence reference number and cross-referenced to the item schedule in Section 6.</p>
+
+    <div class="callout mb-24">
+      <div class="callout-title">Evidence Summary</div>
+      <div style="display:flex;gap:32px;flex-wrap:wrap;margin-top:6px;">
+        <span class="sans" style="font-size:.85rem;"><strong>48</strong> photos</span>
+        <span class="sans" style="font-size:.85rem;"><strong>11</strong> receipts</span>
+        <span class="sans" style="font-size:.85rem;"><strong>4</strong> warranties</span>
+        <span class="sans" style="font-size:.85rem;"><strong>2</strong> valuations</span>
+        <span class="sans" style="font-size:.85rem;"><strong>3</strong> other documents</span>
+        <span class="sans" style="font-size:.85rem;color:var(--danger);"><strong>23</strong> items with no evidence</span>
+      </div>
+    </div>
+
+    <h3 class="mb-16">Evidence Index (Sample)</h3>
+
+    <div class="ev-entry">
+      <div class="ev-num">EV-014</div>
+      <div class="ev-detail">
+        <h4>Photo — LG OLED 65" TV in living room</h4>
+        <p>Linked to: Item #LR-003 · Living Room</p>
+        <p>Type: Photograph (JPEG) · Captured: 15 June 2025 via Coverly app · File: IMG_2045.jpg</p>
+        <div class="evidence-row">
+          <div class="evidence-thumb">
+            <span class="ev-icon">📷</span>
+            <span>IMG_2045<br>.jpg</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="ev-entry">
+      <div class="ev-num">EV-015</div>
+      <div class="ev-detail">
+        <h4>Receipt — LG OLED TV purchase (JB Hi-Fi)</h4>
+        <p>Linked to: Item #LR-003 · Living Room</p>
+        <p>Type: PDF receipt · Purchased: 14 November 2022 · Amount: NZD $3,299 · Retailer: JB Hi-Fi Auckland</p>
+        <div class="evidence-row">
+          <div class="evidence-thumb">
+            <span class="ev-icon">📄</span>
+            <span>Receipt<br>.pdf</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="ev-entry">
+      <div class="ev-num">EV-022</div>
+      <div class="ev-detail">
+        <h4>Photo — KitchenAid Stand Mixer (black)</h4>
+        <p>Linked to: Item #KT-008 · Kitchen</p>
+        <p>Type: Photograph (JPEG) · Captured: 10 August 2025 via Coverly app · File: IMG_3301.jpg</p>
+        <div class="evidence-row">
+          <div class="evidence-thumb">
+            <span class="ev-icon">📷</span>
+            <span>IMG_3301<br>.jpg</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="ev-entry">
+      <div class="ev-num">EV-023</div>
+      <div class="ev-detail">
+        <h4>Receipt — KitchenAid Stand Mixer (email forward)</h4>
+        <p>Linked to: Item #KT-008 · Kitchen</p>
+        <p>Type: Email receipt (PDF export) · Purchased: 3 March 2020 · Amount: NZD $1,099 · Retailer: Noel Leeming Wellington</p>
+        <div class="evidence-row">
+          <div class="evidence-thumb">
+            <span class="ev-icon">📧</span>
+            <span>Email<br>receipt</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="ev-entry">
+      <div class="ev-num">EV-031</div>
+      <div class="ev-detail">
+        <h4>Warranty card — Breville Barista Express</h4>
+        <p>Linked to: Item #KT-005 · Kitchen</p>
+        <p>Type: Scanned warranty card (JPEG) · Warranty period: 2 years (expired) · Serial: BES870BSS-NZ-12345</p>
+        <div class="evidence-row">
+          <div class="evidence-thumb">
+            <span class="ev-icon">📋</span>
+            <span>Warranty<br>card</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="ev-entry">
+      <div class="ev-num">EV-042</div>
+      <div class="ev-detail">
+        <h4>Independent valuation — diamond engagement ring</h4>
+        <p>Linked to: Item #MB-017 · Master Bedroom</p>
+        <p>Type: Jeweller's valuation certificate (PDF) · Valued: NZD $6,800 · Valuer: Auckland Gem Valuers Ltd · Date: 12 February 2023</p>
+        <div class="evidence-row">
+          <div class="evidence-thumb">
+            <span class="ev-icon">💎</span>
+            <span>Valuation<br>cert.</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <hr class="divider">
+
+    <div class="callout warn">
+      <div class="callout-title">Note to assessor — special item limit</div>
+      Item #MB-017 (Diamond engagement ring, NZD $6,800) may exceed the policy special item limit for jewellery ($5,000). The policyholder is aware and has been advised to confirm cover with their insurer separately.
+    </div>
+  </div>
+  <div class="page-footer">
+    <p>Coverly Claim Pack · CVR-2025-08741 · Confidential — prepared for Sarah &amp; James Thornton</p>
+    <p>Page 7</p>
+  </div>
+</div>
+
+
+<!-- ══════════════════════════════════════════
+     PAGE 8: MISSING INFO / REVIEW CHECKLIST
+══════════════════════════════════════════════ -->
+<div class="page">
+  <div class="page-header">
+    <span class="ph-logo">Coverly</span>
+    <span class="ph-ref">Claim Pack · CVR-2025-08741 · 14 Hillcrest Avenue, Karori</span>
+  </div>
+  <div class="page-inner">
+    <div class="section-label">
+      <div class="num">8</div>
+      <h2>Missing Information &amp; Review Checklist</h2>
+    </div>
+
+    <div class="callout warn mb-24">
+      <div class="callout-title">Action required</div>
+      The following items are flagged for follow-up before this pack is considered complete. Resolving these items may increase the total claim value and improve processing speed.
+    </div>
+
+    <h3 class="mb-8">Items Missing Replacement Value (4 items)</h3>
+    <ul class="checklist mb-24">
+      <li>
+        <span class="check-icon ci-fail">✗</span>
+        <div>
+          <strong>Food processor (unknown brand)</strong> · Kitchen · Item #KT-009<br>
+          <span class="note">No brand, model, or price identified. Check bank records or email for original purchase.</span>
+        </div>
+      </li>
+      <li>
+        <span class="check-icon ci-fail">✗</span>
+        <div>
+          <strong>Bicycle (child's, blue)</strong> · Garage · Item #GR-004<br>
+          <span class="note">Approx. value $300–$500. No brand visible in photo. Check for purchase receipt.</span>
+        </div>
+      </li>
+      <li>
+        <span class="check-icon ci-fail">✗</span>
+        <div>
+          <strong>Sewing machine</strong> · Bedroom 2 · Item #B2-007<br>
+          <span class="note">Brand noted as "Brother" but model unknown. AI estimated $180–$350. Needs confirmation.</span>
+        </div>
+      </li>
+      <li>
+        <span class="check-icon ci-fail">✗</span>
+        <div>
+          <strong>Portable speaker (outdoor)</strong> · Laundry/outdoor · Item #LN-006<br>
+          <span class="note">No brand or model. Described as "dark blue, large." Estimated $150–$400 depending on brand.</span>
+        </div>
+      </li>
+    </ul>
+
+    <h3 class="mb-8">Items Missing Photographic Evidence (8 items)</h3>
+    <ul class="checklist mb-24">
+      <li>
+        <span class="check-icon ci-warn">!</span>
+        <div>
+          <strong>Global knife block set</strong> · Kitchen · Item #KT-011<br>
+          <span class="note">Value $479. No photo. Receipts may be available — check email or bank statement.</span>
+        </div>
+      </li>
+      <li>
+        <span class="check-icon ci-warn">!</span>
+        <div>
+          <strong>Dish rack &amp; drainer</strong> · Kitchen · Item #KT-015<br>
+          <span class="note">Low value ($59). No photo. Not critical but worth including if possible.</span>
+        </div>
+      </li>
+      <li>
+        <span class="check-icon ci-warn">!</span>
+        <div>
+          <strong>Children's wardrobe (white, 2-door)</strong> · Bedroom 2 · Item #B2-002<br>
+          <span class="note">Value $449. No photo pre-loss. Check family photos or real estate listing images.</span>
+        </div>
+      </li>
+      <li>
+        <span class="check-icon ci-warn">!</span>
+        <div>
+          <strong>Winter clothing set (James)</strong> · Master Bedroom · Item #MB-009<br>
+          <span class="note">Estimated $680. Clothing bundles are difficult to evidence — a written itemisation may help.</span>
+        </div>
+      </li>
+      <li>
+        <span class="check-icon ci-warn">!</span>
+        <div>
+          <strong>Laundry drying rack (3 units)</strong> · Laundry · Item #LN-003<br>
+          <span class="note">Low value ($89). No photo. Minor item.</span>
+        </div>
+      </li>
+      <li>
+        <span class="check-icon ci-blank">?</span>
+        <div>
+          <strong>Bookcase contents — office reference books (32)</strong> · Study · Item #ST-009<br>
+          <span class="note">Estimated $960. Photo shows shelves but individual titles not visible. Add close-up if possible.</span>
+        </div>
+      </li>
+      <li>
+        <span class="check-icon ci-blank">?</span>
+        <div>
+          <strong>Printer / scanner (wireless)</strong> · Study · Item #ST-003<br>
+          <span class="note">Estimated $299. Photo exists but model number not visible. Please confirm model for accurate pricing.</span>
+        </div>
+      </li>
+      <li>
+        <span class="check-icon ci-blank">?</span>
+        <div>
+          <strong>Vacuum cleaner (upright)</strong> · Laundry · Item #LN-001<br>
+          <span class="note">Brand noted as Dyson. Model unclear. Large value range ($299–$1,199). Confirm model number.</span>
+        </div>
+      </li>
+    </ul>
+
+    <h3 class="mb-8">Items with Low AI Confidence (3 items)</h3>
+    <ul class="checklist mb-24">
+      <li>
+        <span class="check-icon ci-warn">!</span>
+        <div>
+          <strong>Vintage side table (wooden, antique)</strong> · Living Room · Item #LR-018<br>
+          <span class="note">AI estimated $120. Policyholder believes value is higher (~$400). Consider independent valuation.</span>
+        </div>
+      </li>
+      <li>
+        <span class="check-icon ci-warn">!</span>
+        <div>
+          <strong>Original artwork (oil painting)</strong> · Living Room · Item #LR-019<br>
+          <span class="note">AI cannot value original art. Recommend independent valuation for accurate claim.</span>
+        </div>
+      </li>
+      <li>
+        <span class="check-icon ci-warn">!</span>
+        <div>
+          <strong>Wristwatch (men's)</strong> · Master Bedroom · Item #MB-020<br>
+          <span class="note">Noted as "Seiko" — wide range of values. Confirm exact model for accurate pricing.</span>
+        </div>
+      </li>
+    </ul>
+
+    <h3 class="mb-8">Rooms Status</h3>
+    <ul class="checklist">
+      <li><span class="check-icon ci-warn">!</span><div><strong>Kitchen</strong> — 3 items flagged</div></li>
+      <li><span class="check-icon ci-ok">✓</span><div><strong>Living Room</strong> — complete</div></li>
+      <li><span class="check-icon ci-ok">✓</span><div><strong>Master Bedroom</strong> — complete (special item limit note applies)</div></li>
+      <li><span class="check-icon ci-warn">!</span><div><strong>Bedroom 2</strong> — 3 items flagged</div></li>
+      <li><span class="check-icon ci-ok">✓</span><div><strong>Study / Office</strong> — 2 items with minor review needed</div></li>
+      <li><span class="check-icon ci-warn">!</span><div><strong>Laundry</strong> — 3 items flagged</div></li>
+    </ul>
+  </div>
+  <div class="page-footer">
+    <p>Coverly Claim Pack · CVR-2025-08741 · Confidential — prepared for Sarah &amp; James Thornton</p>
+    <p>Page 8</p>
+  </div>
+</div>
+
+
+<!-- ══════════════════════════════════════════
+     PAGE 9: DECLARATION
+══════════════════════════════════════════════ -->
+<div class="page">
+  <div class="page-header">
+    <span class="ph-logo">Coverly</span>
+    <span class="ph-ref">Claim Pack · CVR-2025-08741 · 14 Hillcrest Avenue, Karori</span>
+  </div>
+  <div class="page-inner">
+    <div class="section-label">
+      <div class="num">9</div>
+      <h2>Declaration &amp; Notes</h2>
+    </div>
+
+    <h3 class="mb-16">Policyholder Declaration</h3>
+
+    <div class="callout mb-24">
+      <div class="callout-title">Declaration</div>
+      <p style="font-size:.875rem;line-height:1.8;">I/We, the undersigned, confirm that the contents listed in this Claim Pack represent, to the best of my/our knowledge and belief, an accurate record of household contents at the above property at the time of the loss event described. The estimated replacement values are based on current market pricing and, where noted, retailer listings sourced in August 2025.</p>
+      <p style="font-size:.875rem;line-height:1.8;margin-top:12px;">I/We understand that this document is a supporting record only and does not constitute a formal insurance claim in itself. Final claim values will be agreed with the insurer based on the terms and conditions of the applicable policy. I/We have not knowingly included any items that were not present at the property at the time of the loss.</p>
+    </div>
+
+    <div class="two-col mb-24">
+      <div>
+        <p class="sans" style="font-size:.8rem;font-weight:600;margin-bottom:4px;">Policyholder 1 signature</p>
+        <div class="sig-line"></div>
+        <p class="note">Sarah Thornton — Date: ____ / ____ / ______</p>
+      </div>
+      <div>
+        <p class="sans" style="font-size:.8rem;font-weight:600;margin-bottom:4px;">Policyholder 2 signature</p>
+        <div class="sig-line"></div>
+        <p class="note">James Thornton — Date: ____ / ____ / ______</p>
+      </div>
+    </div>
+
+    <hr class="divider">
+
+    <h3 class="mb-16">Insurer / Assessor Notes</h3>
+    <p class="note mb-8">For insurer or loss adjuster use only. Space provided for reference annotations during assessment.</p>
+    <div class="declaration-box">
+      <p class="note" style="color:var(--border);">[ Assessor notes — internal use ]</p>
+    </div>
+    <div class="two-col mt-16">
+      <div>
+        <p class="sans" style="font-size:.8rem;font-weight:600;margin-bottom:4px;">Assessor name</p>
+        <div class="sig-line"></div>
+        <p class="note">Company: ________________________</p>
+      </div>
+      <div>
+        <p class="sans" style="font-size:.8rem;font-weight:600;margin-bottom:4px;">Assessor signature</p>
+        <div class="sig-line"></div>
+        <p class="note">Date: ____ / ____ / ______</p>
+      </div>
+    </div>
+
+    <hr class="divider">
+
+    <div class="callout">
+      <div class="callout-title">Important notice</div>
+      <p style="font-size:.8rem;line-height:1.8;">This Claim Pack was generated using Coverly (coverly.nz), a home contents inventory platform. Replacement values shown are estimates based on AI-assisted price lookup and publicly available retail pricing in New Zealand as at August 2025. They are provided as a good-faith starting point for the claims assessment process and do not represent a final settlement offer or guarantee of payment. Coverly Limited accepts no liability for errors, omissions, or changes in market pricing after the date of generation. The insurer retains the right to verify, adjust, or decline any individual item as per the applicable policy terms.</p>
+    </div>
+  </div>
+  <div class="page-footer">
+    <p>Coverly Claim Pack · CVR-2025-08741 · Confidential — prepared for Sarah &amp; James Thornton</p>
+    <p>Page 9</p>
+  </div>
+</div>
+
+
+<!-- ══════════════════════════════════════════
+     PAGE 10: DESIGN NOTES & CRITIQUE
+══════════════════════════════════════════════ -->
+<div class="page design-notes">
+  <div class="page-inner">
+    <div class="section-label">
+      <div class="num">10</div>
+      <h2>Design Recommendations &amp; Critique</h2>
+    </div>
+
+    <h3>What to put on page 1</h3>
+    <p>The cover must answer three questions in under 5 seconds: <em>Who is this for? What happened? What is the total?</em> The current mockup achieves this — property address, event type badge, and reference number are all above the fold. The total claim value should optionally appear on the cover for quick assessor triage. Consider adding a QR code linking to a digital version.</p>
+
+    <h3>Room vs item grouping</h3>
+    <p>Room-level summary first, item detail on demand is the right hierarchy. Assessors navigate by room (they visit the property that way). Items within rooms should be sortable by value descending in a digital version — most expensive items deserve the most scrutiny. Move pantry goods, cleaning supplies, and other consumables to a "minor items" sub-table inside each room to reduce visual noise.</p>
+
+    <h3>Summary metrics</h3>
+    <p>The 4-card + 3-card metric layout works well. Key additions for V1: <strong>% of items with evidence</strong> (not just count), and a <strong>cover position indicator</strong> (under / over insured) as a traffic-light. These two metrics are the first things an assessor needs to know.</p>
+
+    <div class="critique-grid">
+      <div class="critique-card">
+        <h4>✅ Must print cleanly</h4>
+        <ul>
+          <li>Cover page (full colour with teal band)</li>
+          <li>Executive summary metrics</li>
+          <li>Room-by-room tables</li>
+          <li>Item schedule (all items)</li>
+          <li>Missing info checklist</li>
+          <li>Declaration page (with signature lines)</li>
+        </ul>
+      </div>
+      <div class="critique-card">
+        <h4>🔗 Clickable in digital PDF</h4>
+        <ul>
+          <li>Evidence reference numbers → jump to appendix</li>
+          <li>Item #IDs in tables → jump to item card</li>
+          <li>Room names in summary → jump to room section</li>
+          <li>Table of contents (add in V1)</li>
+          <li>Coverly URL on footer</li>
+        </ul>
+      </div>
+      <div class="critique-card">
+        <h4>📦 Move to appendix</h4>
+        <ul>
+          <li>Individual evidence thumbnails (bulk photos)</li>
+          <li>Full receipt PDFs</li>
+          <li>Warranty documents</li>
+          <li>Valuation certificates</li>
+          <li>Notes / internal fields</li>
+        </ul>
+      </div>
+      <div class="critique-card">
+        <h4>🗂 V1 essential fields</h4>
+        <ul>
+          <li>Item name, category, room</li>
+          <li>Brand, model (where known)</li>
+          <li>Quantity</li>
+          <li>Replacement value + basis</li>
+          <li>Evidence type (photo / receipt / none)</li>
+          <li>Review status (ready / flagged)</li>
+        </ul>
+      </div>
+      <div class="critique-card">
+        <h4>⏳ Add post-V1</h4>
+        <ul>
+          <li>Serial numbers</li>
+          <li>Independent valuation flag</li>
+          <li>Depreciation notes</li>
+          <li>Assessor override fields</li>
+          <li>Multi-property support</li>
+          <li>Barcode / product ID links</li>
+        </ul>
+      </div>
+      <div class="critique-card">
+        <h4>⚠️ Top design risks</h4>
+        <ul>
+          <li>Item tables go wide — cap at 6 columns for print</li>
+          <li>Badges lose meaning if overused — max 3 variants</li>
+          <li>Evidence thumbnails must be real photos in production</li>
+          <li>AI confidence labels need plain-English framing</li>
+          <li>Declaration wording needs NZ lawyer sign-off</li>
+        </ul>
+      </div>
+    </div>
+
+    <h3 style="margin-top:24px;">Critique of this mockup</h3>
+    <p>The teal brand application is strong and consistent. The page header / footer system creates good visual rhythm across a long document. The item card format is the right pattern — compact, scannable, badge-driven — but in production the two-column grid inside each card may need to collapse to single column for narrower items or print.</p>
+    <p>The biggest V1 gap in this mockup: <span style="color:var(--teal-light);">there is no table of contents.</span> A 10+ page document without TOC is a significant UX failure for assessors. Add a TOC as page 2 (push executive summary to page 3) with page numbers and clickable anchors. Second gap: the missing evidence placeholders (dashed boxes) should in production show actual photo thumbnails — the value of Coverly's claim pack lives entirely in the quality of the visual evidence.</p>
+
+    <h3>Formatting recommendations</h3>
+    <p>Use A4 paper size as the production target (not US Letter). Font stack: Inter or DM Sans for UI/labels, Georgia or Lora for body paragraphs. Keep teal to structural elements (header bands, section numbers, metric card accent) — not inline text — to preserve readability at low contrast on printed copies. Minimum body font 11pt for print; 13–14px for screen.</p>
+
+    <div style="margin-top:28px;padding-top:20px;border-top:1px solid rgba(255,255,255,.1);">
+      <p style="font-size:.75rem;color:#6B7280;">Generated by Coverly · coverly.nz · This is a design mockup for internal review only. Not for submission to insurers. All data is fictional.</p>
+    </div>
+  </div>
+</div>
+
+</body>
+</html>

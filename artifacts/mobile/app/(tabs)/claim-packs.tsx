@@ -2,13 +2,14 @@ import { Feather } from "@expo/vector-icons";
 import { useQuery } from "@tanstack/react-query";
 import { Stack, router, type Href, useFocusEffect } from "expo-router";
 import React, { useCallback } from "react";
-import { ScrollView, StyleSheet, Text, View } from "react-native";
+import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { AccountRow, AccountSection } from "@/components/AccountMenu";
 import { useAuth } from "@/context/AuthContext";
 import { useColors } from "@/hooks/useColors";
 import {
+  deleteClaimPackDraft,
   listClaimPackDrafts,
   type StoredClaimPackDraft,
 } from "@/lib/claim-pack-draft-storage";
@@ -25,6 +26,7 @@ type ClaimPackHistoryRow = {
   totals?: {
     selectedItemsCount?: number;
     selectedEstimatedValue?: number;
+    totalEstimatedValue?: number;
   } | null;
 };
 
@@ -74,6 +76,7 @@ export default function ClaimPacksScreen() {
   useFocusEffect(
     useCallback(() => {
       if (session?.user.id) void draftsQuery.refetch();
+      if (session?.user.id) void historyQuery.refetch();
     }, [session?.user.id]),
   );
 
@@ -89,6 +92,24 @@ export default function ClaimPacksScreen() {
       pathname: "/(tabs)/claim-pack/[fileId]",
       params: { fileId: draft.fileId, claimDraftId: draft.id },
     } as Href);
+  };
+  const confirmDeleteDraft = (draft: StoredClaimPackDraft) => {
+    Alert.alert(
+      "Delete draft claim pack?",
+      "This removes the draft selection and notes only. Your inventory items, rooms, photos, evidence, and generated claim packs will not be deleted.",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Delete draft",
+          style: "destructive",
+          onPress: async () => {
+            if (!session?.user.id) return;
+            await deleteClaimPackDraft(session.user.id, draft.id);
+            await draftsQuery.refetch();
+          },
+        },
+      ],
+    );
   };
 
   return (
@@ -122,13 +143,12 @@ export default function ClaimPacksScreen() {
             <AccountRow icon="loader" title="Loading drafts" subtitle="Checking saved claim-pack drafts." value="Loading…" last />
           ) : draftsQuery.data?.length ? (
             draftsQuery.data.map((draft, index) => (
-              <AccountRow
+              <DraftClaimPackRow
                 key={draft.id}
-                icon="edit-3"
-                title={draft.propertyName}
+                draft={draft}
                 subtitle={claimPackDraftSubtitle(draft)}
-                value="Continue"
-                onPress={() => continueDraft(draft)}
+                onContinue={() => continueDraft(draft)}
+                onDelete={() => confirmDeleteDraft(draft)}
                 last={index === (draftsQuery.data?.length ?? 0) - 1}
               />
             ))
@@ -216,13 +236,64 @@ export default function ClaimPacksScreen() {
   );
 }
 
+function DraftClaimPackRow({
+  draft,
+  subtitle,
+  onContinue,
+  onDelete,
+  last,
+}: {
+  draft: StoredClaimPackDraft;
+  subtitle: string;
+  onContinue: () => void;
+  onDelete: () => void;
+  last: boolean;
+}) {
+  const colors = useColors();
+  return (
+    <View
+      style={[
+        styles.draftRow,
+        !last && { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border },
+      ]}
+    >
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={`Continue ${draft.propertyName}`}
+        onPress={onContinue}
+        style={({ pressed }) => [styles.draftMain, { opacity: pressed ? 0.72 : 1 }]}
+      >
+        <View style={[styles.draftIcon, { backgroundColor: colors.secondary }]}>
+          <Feather name="edit-3" size={17} color={colors.primary} />
+        </View>
+        <View style={styles.draftCopy}>
+          <Text style={[styles.draftTitle, { color: colors.foreground }]}>{draft.propertyName}</Text>
+          <Text style={[styles.draftSubtitle, { color: colors.mutedForeground }]}>{subtitle}</Text>
+        </View>
+        <Text style={[styles.draftValue, { color: colors.mutedForeground }]}>Continue</Text>
+        <Feather name="chevron-right" size={17} color={colors.mutedForeground} />
+      </Pressable>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={`Delete draft for ${draft.propertyName}`}
+        onPress={onDelete}
+        hitSlop={8}
+        style={({ pressed }) => [styles.deleteButton, { backgroundColor: colors.secondary, opacity: pressed ? 0.72 : 1 }]}
+      >
+        <Feather name="trash-2" size={17} color="#DC2626" />
+      </Pressable>
+    </View>
+  );
+}
+
 function claimPackHistorySubtitle(pack: ClaimPackHistoryRow): string {
   const generatedDate = pack.generated_at ? new Date(pack.generated_at) : null;
   const dateLabel = generatedDate && !Number.isNaN(generatedDate.getTime())
     ? generatedDate.toLocaleDateString("en-NZ", { day: "numeric", month: "short", year: "numeric" })
     : "Draft metadata";
   const items = pack.totals?.selectedItemsCount ? `${pack.totals.selectedItemsCount} items` : null;
-  const value = pack.totals?.selectedEstimatedValue ? formatCurrency(pack.totals.selectedEstimatedValue) : null;
+  const totalValue = pack.totals?.selectedEstimatedValue ?? pack.totals?.totalEstimatedValue;
+  const value = totalValue ? formatCurrency(totalValue) : null;
   return [items, value, dateLabel].filter(Boolean).join(" · ");
 }
 
@@ -251,4 +322,12 @@ const styles = StyleSheet.create({
   heroCopy: { flex: 1, gap: 5 },
   heroTitle: { fontSize: 20, fontFamily: "Inter_700Bold" },
   heroText: { fontSize: 13, lineHeight: 19, fontFamily: "Inter_400Regular" },
+  draftRow: { minHeight: 64, paddingLeft: 14, paddingRight: 10, flexDirection: "row", alignItems: "center", gap: 8 },
+  draftMain: { flex: 1, paddingVertical: 10, flexDirection: "row", alignItems: "center", gap: 11 },
+  draftIcon: { width: 34, height: 34, borderRadius: 17, alignItems: "center", justifyContent: "center" },
+  draftCopy: { flex: 1, gap: 2 },
+  draftTitle: { fontSize: 14, fontFamily: "Inter_600SemiBold" },
+  draftSubtitle: { fontSize: 11, lineHeight: 16, fontFamily: "Inter_400Regular" },
+  draftValue: { maxWidth: 80, textAlign: "right", fontSize: 12, fontFamily: "Inter_500Medium" },
+  deleteButton: { width: 38, height: 38, borderRadius: 19, alignItems: "center", justifyContent: "center" },
 });

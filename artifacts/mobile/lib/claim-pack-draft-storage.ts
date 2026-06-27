@@ -71,3 +71,9 @@ export async function saveClaimPackDraft(userId: string, draft: StoredClaimPackD
     .slice(0, 20);
   await AsyncStorage.setItem(storageKey(userId), JSON.stringify(next));
 }
+
+export async function deleteClaimPackDraft(userId: string, draftId: string): Promise<void> {
+  const drafts = await listClaimPackDrafts(userId);
+  const next = drafts.filter((draft) => draft.id !== draftId);
+  await AsyncStorage.setItem(storageKey(userId), JSON.stringify(next));
+}
