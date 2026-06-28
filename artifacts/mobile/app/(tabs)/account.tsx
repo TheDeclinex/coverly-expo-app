@@ -111,6 +111,16 @@ export default function AccountScreen() {
 
         <ClaimPacksSection onOpen={() => router.push("/(tabs)/claim-packs" as Href)} />
 
+        <AccountSection title="Support">
+          <AccountRow
+            icon="message-square"
+            title="Feedback & support"
+            subtitle="Report an issue or send a suggestion"
+            onPress={() => router.push("/feedback" as Href)}
+            last
+          />
+        </AccountSection>
+
         {isAdmin && (
           <AccountSection title="Administration">
             <AccountRow

@@ -1,5 +1,6 @@
 import { Feather } from "@expo/vector-icons";
-import { Redirect, Stack, type Href } from "expo-router";
+import { useQuery } from "@tanstack/react-query";
+import { Redirect, Stack, router, type Href } from "expo-router";
 import React from "react";
 import { ScrollView, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -9,8 +10,13 @@ import { LoadingState } from "@/components/LoadingState";
 import { useAuth } from "@/context/AuthContext";
 import { useAccountProfile } from "@/hooks/useAccountProfile";
 import { useColors } from "@/hooks/useColors";
+import {
+  loadRecentFeedbackReports,
+  type FeedbackReportRow,
+} from "@/lib/feedback-service";
 
 const metrics = ["Total users", "Active testers", "AI scans", "Replacement lookups", "Claim packs", "Recent errors"];
+const openStatuses = new Set(["new", "under_investigation", "bug", "development", "testing", "feature"]);
 
 function environmentLabel(value: string | undefined): string {
   const environment = value?.trim().toLowerCase();
@@ -21,11 +27,25 @@ function environmentLabel(value: string | undefined): string {
   return __DEV__ ? "Local" : "Production";
 }
 
+function supportCountLabel(reports: FeedbackReportRow[] | undefined, isLoading: boolean, isError: boolean): string | undefined {
+  if (isLoading) return "Loading";
+  if (isError) return "Unavailable";
+  const openCount = (reports ?? []).filter((report) => openStatuses.has(report.status ?? "new")).length;
+  return openCount > 0 ? String(openCount) : undefined;
+}
+
 export default function AdminScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const { session } = useAuth();
   const { isAdmin, isLoading } = useAccountProfile();
+  const feedbackQuery = useQuery({
+    queryKey: ["admin-feedback-reports", session?.user.id],
+    queryFn: () => loadRecentFeedbackReports(50),
+    enabled: !!session && isAdmin,
+    staleTime: 30_000,
+    retry: 1,
+  });
 
   if (isLoading) return <LoadingState />;
   if (!isAdmin) return <Redirect href={"/account" as Href} />;
@@ -47,11 +67,22 @@ export default function AdminScreen() {
         <View style={styles.metricGrid}>
           {metrics.map((metric) => (
             <View key={metric} style={[styles.metric, { backgroundColor: colors.card, borderColor: colors.border, borderRadius: colors.radius }]}>
-              <Text style={[styles.metricValue, { color: colors.mutedForeground }]}>—</Text>
+              <Text style={[styles.metricValue, { color: colors.mutedForeground }]}>-</Text>
               <Text style={[styles.metricLabel, { color: colors.mutedForeground }]}>{metric}</Text>
             </View>
           ))}
         </View>
+
+        <AccountSection title="Support">
+          <AccountRow
+            icon="message-square"
+            title="Support inbox"
+            subtitle="Review feedback, issues, and enhancement requests"
+            value={supportCountLabel(feedbackQuery.data, feedbackQuery.isLoading, feedbackQuery.isError)}
+            onPress={() => router.push("/admin-support" as Href)}
+            last
+          />
+        </AccountSection>
 
         <AccountSection title="Users">
           <AccountRow icon="search" title="User lookup" subtitle="Email, user ID, inventory and usage" value="Not connected" />
@@ -72,10 +103,6 @@ export default function AdminScreen() {
           <AccountRow icon="camera" title="AI scan logs & errors" value="Not connected" />
           <AccountRow icon="search" title="Replacement pricing searches" value="Not connected" />
           <AccountRow icon="bar-chart-2" title="Barcode lookup results" value="Not connected" last />
-        </AccountSection>
-
-        <AccountSection title="Tester support">
-          <AccountRow icon="message-square" title="Feedback inbox" subtitle="Future device, app version and screen context" value="Not connected" last />
         </AccountSection>
 
         <AccountSection title="System health">
