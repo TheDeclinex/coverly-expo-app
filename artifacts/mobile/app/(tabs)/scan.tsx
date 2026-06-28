@@ -165,6 +165,7 @@ export default function ScanScreen() {
   const [images, setImages] = useState<ScanEncodedImage[]>([]);
   const [scanStatus, setScanStatus] = useState<ScanStatus>("idle");
   const [detectedItems, setDetectedItems] = useState<ScanDetectedItem[]>([]);
+  const [selectedReviewIndices, setSelectedReviewIndices] = useState<Set<number>>(new Set());
   const [scanError, setScanError] = useState<string | null>(null);
   const [limitModal, setLimitModal] = useState<NormalizedLimitError | null>(null);
   const [savingIds, setSavingIds] = useState<Set<number>>(new Set());
@@ -624,6 +625,7 @@ export default function ScanScreen() {
     setActiveSourcePhotoIdx(0);
     setActivePinIndex(null);
     setDetectedItems(itemsWithThumbs);
+    setSelectedReviewIndices(new Set(itemsWithThumbs.map((_, index) => index)));
     setScanStatus("reviewing");
     void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
   };
@@ -631,6 +633,29 @@ export default function ScanScreen() {
   const handleDiscardItem = (index: number) => {
     void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     setDetectedItems((prev) => prev.filter((_, i) => i !== index));
+    setSelectedReviewIndices((prev) => {
+      const next = new Set<number>();
+      prev.forEach((value) => {
+        if (value < index) next.add(value);
+        else if (value > index) next.add(value - 1);
+      });
+      return next;
+    });
+    setActivePinIndex((current) => {
+      if (current == null) return current;
+      if (current === index) return null;
+      return current > index ? current - 1 : current;
+    });
+  };
+
+  const handleToggleReviewItem = (index: number) => {
+    void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    setSelectedReviewIndices((prev) => {
+      const next = new Set(prev);
+      if (next.has(index)) next.delete(index);
+      else next.add(index);
+      return next;
+    });
   };
 
   const handleSaveItem = async (item: ScanDetectedItem, index: number) => {
@@ -702,6 +727,16 @@ export default function ScanScreen() {
       return;
     }
 
+    const selectedEntries = detectedItems
+      .map((item, index) => ({ item, index }))
+      .filter(({ index }) => selectedReviewIndices.has(index));
+
+    if (selectedEntries.length === 0) {
+      setScanStatus("reviewing");
+      setScanSaveError("Select at least one detected item to save.");
+      return;
+    }
+
     // Phase 1: Upload each unique source photo once.
     // Track successful uploads (photoIdx → URL) and failures (photoIdx in failedPhotoIndices).
     // Items whose photo failed to upload are treated as partial failures and never inserted.
@@ -710,7 +745,7 @@ export default function ScanScreen() {
     const failedPhotoIndices = new Set<number>();
     const uploadFailureByPhotoIndex = new Map<number, UploadFailure>();
 
-    for (const item of detectedItems) {
+    for (const { item } of selectedEntries) {
       const photoIdx = item.sourcePhotoIndex ?? 0;
       if (photoUrlByIndex.has(photoIdx) || failedPhotoIndices.has(photoIdx)) continue;
       const uri = item.sourceImageUri ?? images[photoIdx]?.uri ?? null;
@@ -733,8 +768,7 @@ export default function ScanScreen() {
     const savedItemIds: string[] = [];
 
     // Phase 2: Sequential insert — skip items whose source photo failed to upload.
-    for (let i = 0; i < detectedItems.length; i++) {
-      const item = detectedItems[i];
+    for (const { item, index: i } of selectedEntries) {
       const photoIdx = item.sourcePhotoIndex ?? 0;
 
       if (failedPhotoIndices.has(photoIdx)) {
@@ -771,6 +805,15 @@ export default function ScanScreen() {
         showToast(`${savedItemIds.length} item${savedItemIds.length === 1 ? "" : "s"} saved`);
       }
       setDetectedItems((prev) => prev.filter((_, i) => !savedIndices.includes(i)));
+      setSelectedReviewIndices((prev) => {
+        const next = new Set<number>();
+        prev.forEach((value) => {
+          if (savedIndices.includes(value)) return;
+          const shift = savedIndices.filter((savedIndex) => savedIndex < value).length;
+          next.add(value - shift);
+        });
+        return next;
+      });
       setPartialFailures(failures);
       setScanStatus("reviewing");
       return;
@@ -781,6 +824,7 @@ export default function ScanScreen() {
     showToast(`${savedItemIds.length} item${savedItemIds.length === 1 ? "" : "s"} added to ${getDestRoomName() ?? "room"}`);
     setScanStatus("done");
     setDetectedItems([]);
+    setSelectedReviewIndices(new Set());
 
     const roomName = getDestRoomName() ?? "Room";
     router.replace({
@@ -802,6 +846,7 @@ export default function ScanScreen() {
     setSelectedMode(null);
     setImages([]);
     setDetectedItems([]);
+    setSelectedReviewIndices(new Set());
     setScanStatus("idle");
     setScanError(null);
     setLimitModal(null);
@@ -811,6 +856,22 @@ export default function ScanScreen() {
     setActiveSourcePhotoIdx(0);
     aiScanEntitlementCheckedRef.current = false;
     clearScanPhotoUploadCache();
+  };
+
+  const goBackToRoom = () => {
+    if (!selectedRoomId) {
+      router.back();
+      return;
+    }
+    router.replace({
+      pathname: "/(tabs)/room/[id]",
+      params: {
+        id: selectedRoomId,
+        name: getDestRoomName() ?? "Room",
+        fileId: selectedFileId,
+        fileName: paramFileName ?? "Property",
+      },
+    });
   };
 
   // ── Confidence badge helpers ─────────────────────────────────────────────────
@@ -825,7 +886,48 @@ export default function ScanScreen() {
 
   // ── Review screen ────────────────────────────────────────────────────────────
 
+  if ((scanStatus === "reviewing" || scanStatus === "saving") && detectedItems.length === 0) {
+    return (
+      <>
+        <Stack.Screen
+          options={{
+            title: "Review detected items",
+            headerLeft: () => (
+              <Pressable onPress={goBackToRoom} hitSlop={8} style={{ padding: 4 }}>
+                <Feather name="x" size={20} color={colors.mutedForeground} />
+              </Pressable>
+            ),
+          }}
+        />
+        <View style={[styles.preparingScreen, { backgroundColor: colors.background }]}>
+          <EmptyState
+            icon="check-square"
+            title="No items selected"
+            subtitle="Scan again to capture another photo, or go back to the room."
+          />
+          <View style={{ flexDirection: "row", gap: 10, marginTop: 8 }}>
+            <Pressable
+              onPress={resetScan}
+              style={[styles.photoBtn, { borderColor: colors.border, backgroundColor: colors.card, borderRadius: colors.radius }]}
+            >
+              <Feather name="camera" size={17} color={colors.primary} />
+              <Text style={[styles.photoBtnText, { color: colors.primary }]}>Scan again</Text>
+            </Pressable>
+            <Pressable
+              onPress={goBackToRoom}
+              style={[styles.photoBtn, { borderColor: colors.primary, backgroundColor: colors.primary, borderRadius: colors.radius }]}
+            >
+              <Feather name="arrow-left" size={17} color={colors.primaryForeground} />
+              <Text style={[styles.photoBtnText, { color: colors.primaryForeground }]}>Back to room</Text>
+            </Pressable>
+          </View>
+        </View>
+      </>
+    );
+  }
+
   if ((scanStatus === "reviewing" || scanStatus === "saving") && detectedItems.length > 0) {
+    const selectedCount = detectedItems.filter((_, index) => selectedReviewIndices.has(index)).length;
     // Pin map layout — computed once per render of the review screen
     const PHOTO_W = Dimensions.get("window").width - 32;
     const PHOTO_H = Math.round(PHOTO_W * 0.72);
@@ -969,6 +1071,7 @@ export default function ScanScreen() {
               const isSaving = savingIds.has(index);
               const badge = confidenceBadgeStyle(item.confidence);
               const isActive = activePinIndex === index;
+              const isSelectedForSave = selectedReviewIndices.has(index);
 
               return (
                 <Pressable
@@ -1071,18 +1174,26 @@ export default function ScanScreen() {
                       <Feather name="x" size={15} color={colors.mutedForeground} />
                     </Pressable>
                     <Pressable
-                      onPress={() => void handleSaveItem(item, index)}
+                      onPress={() => handleToggleReviewItem(index)}
                       disabled={isSaving}
                       hitSlop={4}
                       style={({ pressed }) => [
                         revStyles.actionBtn,
-                        { backgroundColor: colors.primary, borderRadius: 8, opacity: pressed || isSaving ? 0.7 : 1 },
+                        {
+                          backgroundColor: isSelectedForSave ? colors.primary : colors.secondary,
+                          borderRadius: 8,
+                          opacity: pressed || isSaving ? 0.7 : 1,
+                        },
                       ]}
                     >
                       {isSaving ? (
                         <ActivityIndicator size="small" color={colors.primaryForeground} />
                       ) : (
-                        <Feather name="check" size={15} color={colors.primaryForeground} />
+                        <Feather
+                          name="check"
+                          size={15}
+                          color={isSelectedForSave ? colors.primaryForeground : colors.mutedForeground}
+                        />
                       )}
                     </Pressable>
                   </View>
@@ -1100,11 +1211,11 @@ export default function ScanScreen() {
           >
             <Pressable
               onPress={() => void handleSaveAll()}
-              disabled={scanStatus === "saving"}
+              disabled={scanStatus === "saving" || selectedCount === 0}
               style={({ pressed }) => [
                 revStyles.saveAllBtn,
                 {
-                  backgroundColor: scanStatus === "saving" ? colors.muted : colors.primary,
+                  backgroundColor: scanStatus === "saving" || selectedCount === 0 ? colors.muted : colors.primary,
                   borderRadius: colors.radius,
                   opacity: pressed ? 0.85 : 1,
                 },
@@ -1118,9 +1229,11 @@ export default function ScanScreen() {
               <Text style={[revStyles.saveAllText, { color: colors.primaryForeground }]}>
                 {scanStatus === "saving"
                   ? "Saving…"
-                  : detectedItems.length === 1
+                  : selectedCount === 0
+                    ? "No items selected"
+                    : selectedCount === 1
                     ? "Save 1 item"
-                    : `Save all ${detectedItems.length} items`}
+                    : `Save ${selectedCount} items`}
               </Text>
             </Pressable>
           </View>
