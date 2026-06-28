@@ -162,14 +162,14 @@ export async function searchReplacementPrices(
   };
 
   if (__DEV__) {
-    console.info("[replacement-pricing] function request", safeRequestLogBody(requestBody));
+    if (__DEV__) console.info("[replacement-pricing] function request", safeRequestLogBody(requestBody));
   }
 
   const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
   const accessToken = sessionData.session?.access_token;
   if (sessionError || !accessToken) {
     if (__DEV__) {
-      console.error("[replacement-pricing] missing auth session", {
+      if (__DEV__) console.error("[replacement-pricing] missing auth session", {
         hasSessionError: !!sessionError,
         sessionErrorMessage: sessionError?.message,
         hasAccessToken: !!accessToken,
@@ -197,7 +197,7 @@ export async function searchReplacementPrices(
     data = responseText ? (JSON.parse(responseText) as ReplacementPriceSearchResponse) : null;
   } catch {
     if (__DEV__) {
-      console.error("[replacement-pricing] function invalid response", {
+      if (__DEV__) console.error("[replacement-pricing] function invalid response", {
         status: httpResponse.status,
         ok: httpResponse.ok,
         responseBody: responseText.slice(0, 1000),
@@ -210,7 +210,7 @@ export async function searchReplacementPrices(
   }
 
   if (__DEV__) {
-    console.info("[replacement-pricing] function response", {
+    if (__DEV__) console.info("[replacement-pricing] function response", {
       status: httpResponse.status,
       ok: httpResponse.ok,
       errorCode: data?.success === false ? data.errorCode : undefined,

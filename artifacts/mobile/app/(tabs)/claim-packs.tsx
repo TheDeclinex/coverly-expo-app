@@ -139,14 +139,14 @@ export default function ClaimPacksScreen() {
         const file = await File.downloadFileAsync(data.signedUrl, new File(Paths.cache, filename), { idempotent: true });
         await WebBrowser.openBrowserAsync(file.uri);
       } catch (localOpenError) {
-        console.warn("[claim-packs] Local claim pack open fallback", {
+        if (__DEV__) console.warn("[claim-packs] Local claim pack open fallback", {
           packId: pack.id,
           message: localOpenError instanceof Error ? localOpenError.message : "Unknown error",
         });
         await WebBrowser.openBrowserAsync(data.signedUrl);
       }
     } catch (openError) {
-      console.warn("[claim-packs] Could not open previous claim pack", {
+      if (__DEV__) console.warn("[claim-packs] Could not open previous claim pack", {
         packId: pack.id,
         status: pack.status ?? null,
         hasStoragePath: Boolean(pack.storage_path),

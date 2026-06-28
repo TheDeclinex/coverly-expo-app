@@ -78,41 +78,41 @@ export async function getSignedDisplayUrl(
   // Legacy full URL or local device URI — pass through.
   if (!isStoragePath(pathOrUrl)) {
     if (pathOrUrl.startsWith("http")) {
-      console.log("[storage] legacy URL (pass-through):", pathOrUrl.slice(0, 70));
+      if (__DEV__) console.log("[storage] legacy URL (pass-through):", pathOrUrl.slice(0, 70));
     } else {
-      console.log("[storage] local device URI (pass-through):", pathOrUrl.slice(0, 50));
+      if (__DEV__) console.log("[storage] local device URI (pass-through):", pathOrUrl.slice(0, 50));
     }
     return pathOrUrl;
   }
 
   // Storage path — generate signed URL.
-  console.log("[storage] creating signed URL for path:", pathOrUrl.slice(0, 70));
+  if (__DEV__) console.log("[storage] creating signed URL for path:", pathOrUrl.slice(0, 70));
   const { data, error } = await supabase.storage
     .from(bucket)
     .createSignedUrl(pathOrUrl, SIGNED_URL_EXPIRY_SECS);
 
   if (error || !data?.signedUrl) {
-    console.warn("[storage] createSignedUrl FAILED | path:", pathOrUrl, "| error:", error?.message);
+    if (__DEV__) console.warn("[storage] createSignedUrl FAILED | path:", pathOrUrl, "| error:", error?.message);
     return null;
   }
 
-  console.log("[storage] signed URL OK | path:", pathOrUrl.slice(0, 60));
+  if (__DEV__) console.log("[storage] signed URL OK | path:", pathOrUrl.slice(0, 60));
 
   // DEV-only: HEAD-fetch the signed URL to verify the object actually exists in storage.
   if (__DEV__) {
     fetch(data.signedUrl, { method: "HEAD" })
       .then((r) => {
         if (r.ok) {
-          console.log(`[storage] HEAD verify ✓ ${r.status} | path: ${pathOrUrl.slice(0, 50)}`);
+          if (__DEV__) console.log(`[storage] HEAD verify ✓ ${r.status} | path: ${pathOrUrl.slice(0, 50)}`);
         } else {
-          console.warn(
+          if (__DEV__) console.warn(
             `[storage] HEAD verify ✗ ${r.status} — object may not exist | path: ${pathOrUrl.slice(0, 50)}`,
           );
         }
       })
-      .catch((e: unknown) =>
-        console.warn("[storage] HEAD check error:", e instanceof Error ? e.message : String(e)),
-      );
+      .catch((e: unknown) => {
+        console.warn("[storage] HEAD check error:", e instanceof Error ? e.message : String(e));
+      });
   }
 
   return data.signedUrl;

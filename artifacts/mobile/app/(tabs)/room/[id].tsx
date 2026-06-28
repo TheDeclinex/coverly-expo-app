@@ -183,7 +183,7 @@ function ItemCard({
   // Structured diagnostic log: item id, raw DB values, detected type, resolved URL status.
   useEffect(() => {
     if (__DEV__) {
-      console.log("[ItemCard]", {
+      if (__DEV__) console.log("[ItemCard]", {
         id: item.id.slice(-8),
         raw_image_url: item.image_url ? item.image_url.slice(0, 60) : null,
         raw_photo_url: item.photo_url ? item.photo_url.slice(0, 60) : null,
@@ -776,11 +776,12 @@ function ItemCard({
 }
 
 export default function ItemsScreen() {
-  const { id, name, fileId, fileName } = useLocalSearchParams<{
+  const { id, name, fileId, fileName, addedCount } = useLocalSearchParams<{
     id: string;
     name: string;
     fileId?: string;
     fileName?: string;
+    addedCount?: string;
   }>();
   const { session } = useAuth();
   const colors = useColors();
@@ -789,6 +790,7 @@ export default function ItemsScreen() {
   const { showToast } = useToast();
 
   const [coverUploading, setCoverUploading] = useState(false);
+  const [archivingRoom, setArchivingRoom] = useState(false);
   const [recentTick, setRecentTick] = useState(0);
   const [activeEdit, setActiveEdit] = useState<{
     itemId: string;
@@ -859,6 +861,10 @@ export default function ItemsScreen() {
   });
   const resolvedPropertyName = fileName ?? parentProperty?.name ?? "Property";
   const resolvedRoomName = room?.name ?? name ?? "Room";
+  const scanAddedCount = Number.parseInt(addedCount ?? "", 10);
+  const scanSuccessMessage = Number.isFinite(scanAddedCount) && scanAddedCount > 0
+    ? `${scanAddedCount} item${scanAddedCount === 1 ? "" : "s"} added`
+    : null;
 
   const roomItemIds = React.useMemo(() => (items ?? []).map((item) => item.id), [items]);
   const roomItemIdsKey = React.useMemo(
@@ -876,7 +882,7 @@ export default function ItemsScreen() {
         .in("item_id", roomItemIds);
 
       if (countError) {
-        console.warn("[roomEvidenceCounts] unable to load", {
+        if (__DEV__) console.warn("[roomEvidenceCounts] unable to load", {
           roomId: id,
           message: countError.message,
           code: countError.code,
@@ -1006,6 +1012,61 @@ export default function ItemsScreen() {
     resolvedRoomName,
   ]);
 
+
+  const navigateToProperty = React.useCallback(() => {
+    if (resolvedFileId) {
+      router.replace({
+        pathname: "/(tabs)/property/[id]",
+        params: { id: resolvedFileId, name: resolvedPropertyName },
+      } as Href);
+      return;
+    }
+    router.replace("/(tabs)");
+  }, [resolvedFileId, resolvedPropertyName]);
+
+  const archiveRoom = React.useCallback(async () => {
+    if (!id || archivingRoom) return;
+    setArchivingRoom(true);
+    try {
+      const { error: archiveError } = await supabase
+        .from("inventory_rooms")
+        .update({ archived_at: new Date().toISOString() })
+        .eq("id", id);
+      if (archiveError) throw archiveError;
+
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["room", id] }),
+        queryClient.invalidateQueries({ queryKey: ["items", id] }),
+        queryClient.invalidateQueries({ queryKey: ["rooms", resolvedFileId] }),
+        queryClient.invalidateQueries({ queryKey: ["rooms", resolvedFileId, session?.user.id] }),
+        queryClient.invalidateQueries({ queryKey: ["property", resolvedFileId] }),
+        queryClient.invalidateQueries({ queryKey: ["property-items", resolvedFileId] }),
+        queryClient.invalidateQueries({ queryKey: ["all-items"] }),
+      ]);
+      showToast("Room removed from active rooms");
+      navigateToProperty();
+    } catch (archiveFailure) {
+      Alert.alert(
+        "Couldn't remove room",
+        archiveFailure instanceof Error ? archiveFailure.message : "Please try again.",
+      );
+    } finally {
+      setArchivingRoom(false);
+    }
+  }, [archivingRoom, id, navigateToProperty, queryClient, resolvedFileId, session?.user.id, showToast]);
+
+  const handleArchiveRoom = React.useCallback(() => {
+    if (archivingRoom) return;
+    Alert.alert(
+      "Remove room?",
+      `${resolvedRoomName} will be removed from your active room list. Its items are not immediately deleted from inventory records, but there is not yet a visible restore option in the app.`,
+      [
+        { text: "Cancel", style: "cancel" },
+        { text: "Remove room", style: "destructive", onPress: () => void archiveRoom() },
+      ],
+    );
+  }, [archiveRoom, archivingRoom, resolvedRoomName]);
+
   const handlePickRoomCover = async () => {
     if (coverUploading) return;
     if (Platform.OS !== "web") {
@@ -1038,7 +1099,7 @@ export default function ItemsScreen() {
       );
       if (!uploaded.ok) {
         const diagnostic = formatUploadFailure(uploaded);
-        console.error("[roomCover] Upload diagnostic\n" + diagnostic);
+        if (__DEV__) console.error("[roomCover] Upload diagnostic\n" + diagnostic);
         Alert.alert("Room cover upload failed", diagnostic);
         return;
       }
@@ -1049,12 +1110,12 @@ export default function ItemsScreen() {
         .eq("id", id)
         .select("id");
       if (updateError) {
-        console.error("[roomCover] DB update error:", updateError);
+        if (__DEV__) console.error("[roomCover] DB update error:", updateError);
         Alert.alert("Save failed", updateError.message);
         return;
       }
       if (!updatedRows || updatedRows.length === 0) {
-        console.error("[roomCover] DB update matched 0 rows — possible missing UPDATE RLS policy. Run supabase/migrations/add_update_policies.sql.");
+        if (__DEV__) console.error("[roomCover] DB update matched 0 rows — possible missing UPDATE RLS policy. Run supabase/migrations/add_update_policies.sql.");
         Alert.alert("Save failed", "Cover photo could not be saved. Please check your connection and try again.");
         return;
       }
@@ -1116,6 +1177,12 @@ export default function ItemsScreen() {
         )}
       </Pressable>
     </View>
+    {scanSuccessMessage ? (
+      <View style={[styles.scanSuccessBanner, { backgroundColor: "#E8F8F2", borderColor: "rgba(29,158,117,0.22)" }]}>
+        <Feather name="check-circle" size={15} color={TEAL} />
+        <Text style={[styles.scanSuccessText, { color: "#085041" }]}>{scanSuccessMessage}</Text>
+      </View>
+    ) : null}
     {roomRecommendedAction ? (
       <View style={styles.recommendedActionWrap}>
         <RecommendedActionCard {...roomRecommendedAction} />
@@ -1134,12 +1201,7 @@ export default function ItemsScreen() {
           headerLeft: () => (
             <ContextBackButton
               label={resolvedPropertyName}
-              onPress={() =>
-                router.replace({
-                  pathname: "/(tabs)/property/[id]",
-                  params: { id: resolvedFileId ?? "", name: resolvedPropertyName },
-                })
-              }
+              onPress={navigateToProperty}
             />
           ),
           headerRight: () => (
@@ -1149,6 +1211,13 @@ export default function ItemsScreen() {
               </Pressable>
               <Pressable onPress={handleAddManually} style={{ padding: 4 }} hitSlop={8}>
                 <Feather name="plus" size={22} color={colors.primary} />
+              </Pressable>
+              <Pressable onPress={handleArchiveRoom} disabled={archivingRoom} style={{ padding: 4 }} hitSlop={8}>
+                {archivingRoom ? (
+                  <ActivityIndicator size="small" color="#B91C1C" />
+                ) : (
+                  <Feather name="trash-2" size={19} color="#B91C1C" />
+                )}
               </Pressable>
             </View>
           ),
@@ -1282,6 +1351,19 @@ const styles = StyleSheet.create({
     paddingTop: 12,
     paddingBottom: 4,
   },
+  scanSuccessBanner: {
+    marginHorizontal: 16,
+    marginTop: 12,
+    marginBottom: 2,
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingHorizontal: 11,
+    paddingVertical: 9,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  scanSuccessText: { fontSize: 13, fontFamily: "Inter_600SemiBold" },
   cameraBtn: {
     position: "absolute",
     bottom: 12,

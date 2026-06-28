@@ -76,10 +76,10 @@ export async function verifyBarcode(
     sessionError: sessionError?.message ?? null,
   };
 
-  console.info("[barcodeVerify] request", diagnostic);
+  if (__DEV__) console.info("[barcodeVerify] request", diagnostic);
 
   if (!session) {
-    console.error("[barcodeVerify] request blocked: no authenticated session", diagnostic);
+    if (__DEV__) console.error("[barcodeVerify] request blocked: no authenticated session", diagnostic);
     throw new Error("No authenticated session is available for barcode verification.");
   }
 
@@ -93,7 +93,7 @@ export async function verifyBarcode(
 
   if (error) {
     const errorWithContext = error as typeof error & { context?: unknown };
-    console.error("[barcodeVerify] request failed", {
+    if (__DEV__) console.error("[barcodeVerify] request failed", {
       ...diagnostic,
       errorName: error.name,
       errorMessage: error.message,
@@ -102,10 +102,10 @@ export async function verifyBarcode(
     throw new Error(error.message || "Barcode lookup failed.");
   }
   if (!data) {
-    console.error("[barcodeVerify] empty response", diagnostic);
+    if (__DEV__) console.error("[barcodeVerify] empty response", diagnostic);
     throw new Error("Barcode lookup returned no response.");
   }
-  console.info("[barcodeVerify] response", {
+  if (__DEV__) console.info("[barcodeVerify] response", {
     ...diagnostic,
     success: data.success,
     errorCode: data.success ? null : data.errorCode,

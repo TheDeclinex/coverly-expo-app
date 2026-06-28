@@ -2004,7 +2004,7 @@ export default function PropertyDetailScreen() {
       );
       if (!uploaded.ok) {
         const diagnostic = formatUploadFailure(uploaded);
-        console.error("[propertyCover] Upload diagnostic\n" + diagnostic);
+        if (__DEV__) console.error("[propertyCover] Upload diagnostic\n" + diagnostic);
         setLocalCoverUrl(null);
         Alert.alert("Property cover upload failed", diagnostic);
         return;
@@ -2018,13 +2018,13 @@ export default function PropertyDetailScreen() {
         .eq("user_id", session.user.id)
         .select("id");
       if (updateError) {
-        console.error("[propertyCover] DB update error:", updateError);
+        if (__DEV__) console.error("[propertyCover] DB update error:", updateError);
         setLocalCoverUrl(null);
         Alert.alert("Save failed", updateError.message);
         return;
       }
       if (!updatedRows || updatedRows.length === 0) {
-        console.error("[propertyCover] DB update matched 0 rows — possible missing UPDATE RLS policy. Run supabase/migrations/add_update_policies.sql.");
+        if (__DEV__) console.error("[propertyCover] DB update matched 0 rows — possible missing UPDATE RLS policy. Run supabase/migrations/add_update_policies.sql.");
         setLocalCoverUrl(null);
         Alert.alert("Save failed", "Cover photo could not be saved. Please check your connection and try again.");
         return;

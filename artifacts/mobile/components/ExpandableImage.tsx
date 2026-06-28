@@ -73,7 +73,7 @@ export function ExpandableImage({
 
   if (!canDisplay) {
     if (uri && !isDisplayableUri(uri)) {
-      console.warn(
+      if (__DEV__) console.warn(
         "[ExpandableImage] received non-displayable URI (raw storage path?), showing placeholder:",
         uri.slice(0, 60),
       );
@@ -143,10 +143,10 @@ export function ExpandableImage({
           style={{ width: "100%", height: "100%" }}
           contentFit={contentFit}
           onLoad={() => {
-            console.log("[ExpandableImage] ✓ loaded:", safeUri.slice(0, 70));
+            if (__DEV__) console.log("[ExpandableImage] ✓ loaded:", safeUri.slice(0, 70));
           }}
           onError={(e) => {
-            console.warn(
+            if (__DEV__) console.warn(
               "[ExpandableImage] ✗ error loading:",
               safeUri.slice(0, 70),
               (e as { error?: unknown }).error,

@@ -54,7 +54,7 @@ function logEvidenceAttempt(
   context: EvidenceDiagnosticContext,
   payload: Record<string, unknown>,
 ) {
-  console.info("[evidence] operation attempt", {
+  if (__DEV__) console.info("[evidence] operation attempt", {
     operation,
     target,
     ...context,
@@ -77,7 +77,7 @@ function evidenceOperationError(
     payload,
     error: metadata,
   };
-  console.error("[evidence] operation failed", diagnostic);
+  if (__DEV__) console.error("[evidence] operation failed", diagnostic);
   const extras = [
     metadata.code ? `code=${metadata.code}` : null,
     metadata.status ? `status=${metadata.status}` : null,

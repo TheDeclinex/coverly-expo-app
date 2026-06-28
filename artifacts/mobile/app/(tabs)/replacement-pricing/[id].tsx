@@ -327,7 +327,7 @@ export default function ReplacementPricingScreen() {
       if (normalizedLimit) {
         setLimitModal(normalizedLimit);
       } else {
-        console.error("[replacement-pricing] Search failed", searchFailure);
+        if (__DEV__) console.error("[replacement-pricing] Search failed", searchFailure);
         setSearchError("Replacement price search failed. Your item value is unchanged.");
       }
     } finally {
@@ -392,21 +392,63 @@ export default function ReplacementPricingScreen() {
     void resetVoiceRecording();
   }, [resetVoiceRecording]);
 
+  const returnRoomId = roomId ?? item?.room_id ?? "";
+  const returnFileId = fileId ?? item?.file_id ?? "";
+  const returnRoomName = roomName ?? item?.room ?? "Room";
+  const returnFileName = fileName ?? "Property";
+
+  const dismissToRoomOrProperty = React.useCallback(() => {
+    if (returnRoomId) {
+      router.dismissTo({
+        pathname: "/(tabs)/room/[id]",
+        params: {
+          id: returnRoomId,
+          name: returnRoomName,
+          fileId: returnFileId,
+          fileName: returnFileName,
+        },
+      } as Href);
+      return;
+    }
+    if (returnFileId) {
+      router.dismissTo({
+        pathname: "/(tabs)/property/[id]",
+        params: { id: returnFileId, name: returnFileName },
+      } as Href);
+      return;
+    }
+    router.back();
+  }, [returnFileId, returnFileName, returnRoomId, returnRoomName]);
+
+  const replaceToRoomOrProperty = React.useCallback(() => {
+    if (returnRoomId) {
+      router.replace({
+        pathname: "/(tabs)/room/[id]",
+        params: {
+          id: returnRoomId,
+          name: returnRoomName,
+          fileId: returnFileId,
+          fileName: returnFileName,
+        },
+      } as Href);
+      return;
+    }
+    if (returnFileId) {
+      router.replace({
+        pathname: "/(tabs)/property/[id]",
+        params: { id: returnFileId, name: returnFileName },
+      } as Href);
+      return;
+    }
+    router.back();
+  }, [returnFileId, returnFileName, returnRoomId, returnRoomName]);
   const goBackToItem = React.useCallback(() => {
     if (!item) {
       setLimitModal(null);
       return;
     }
     if (origin === "room") {
-      router.dismissTo({
-        pathname: "/(tabs)/room/[id]",
-        params: {
-          id: roomId ?? item.room_id ?? "",
-          name: roomName ?? item.room ?? "Room",
-          fileId: fileId ?? item.file_id,
-          fileName: fileName ?? "Property",
-        },
-      } as Href);
+      dismissToRoomOrProperty();
     } else {
       router.dismissTo({
         pathname: "/(tabs)/item/[id]",
@@ -420,7 +462,7 @@ export default function ReplacementPricingScreen() {
         },
       } as Href);
     }
-  }, [fileId, fileName, item, origin, roomId, roomName]);
+  }, [dismissToRoomOrProperty, fileId, fileName, item, origin, roomId, roomName]);
 
   React.useEffect(() => {
     if (!item || autoSearchedItemId.current === item.id) return;
@@ -465,16 +507,8 @@ export default function ReplacementPricingScreen() {
       ]);
       showToast("Replacement price updated");
       if (origin === "room") {
-        router.dismissTo({
-          pathname: "/(tabs)/room/[id]",
-          params: {
-            id: roomId ?? item.room_id ?? "",
-            name: roomName ?? item.room ?? "Room",
-            fileId: fileId ?? item.file_id,
-            fileName: fileName ?? "Property",
-          },
-        } as Href);
-      } else {
+      dismissToRoomOrProperty();
+    } else {
         router.dismissTo({
           pathname: "/(tabs)/item/[id]",
           params: {
@@ -488,7 +522,7 @@ export default function ReplacementPricingScreen() {
         } as Href);
       }
     } catch (updateFailure) {
-      console.error("[replacement-pricing] Listing save failed", updateFailure);
+      if (__DEV__) console.error("[replacement-pricing] Listing save failed", updateFailure);
       Alert.alert(
         "Couldn’t update item",
         updateFailure instanceof Error ? updateFailure.message : "Please try again.",
@@ -509,15 +543,7 @@ export default function ReplacementPricingScreen() {
               label={origin === "room" ? roomName ?? item?.room ?? "Room" : itemName ?? item?.name ?? "Item"}
               onPress={() => {
                 if (origin === "room") {
-                  router.replace({
-                    pathname: "/(tabs)/room/[id]",
-                    params: {
-                      id: roomId ?? item?.room_id ?? "",
-                      name: roomName ?? item?.room ?? "Room",
-                      fileId: fileId ?? item?.file_id ?? "",
-                      fileName: fileName ?? "Property",
-                    },
-                  });
+                  replaceToRoomOrProperty();
                 } else {
                   router.replace({
                     pathname: "/(tabs)/item/[id]",

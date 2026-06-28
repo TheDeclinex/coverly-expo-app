@@ -379,14 +379,14 @@ export default function AddItemScreen() {
     const diagStr = Object.entries(diag)
       .map(([k, v]) => `${k}: ${v}`)
       .join("\n");
-    console.log("[AddItem RLS debug]\n" + diagStr);
+    if (__DEV__) console.log("[AddItem RLS debug]\n" + diagStr);
 
     const { error } = await supabase.from("inventory_items").insert(payload);
 
     setSaving(false);
 
     if (error) {
-      console.error("[AddItem] Insert failed:", error.message, error.code);
+      if (__DEV__) console.error("[AddItem] Insert failed:", error.message, error.code);
       const diagText = Object.entries(diag)
         .map(([k, v]) => `${k}: ${v}`)
         .join("\n");
@@ -399,7 +399,7 @@ export default function AddItemScreen() {
       return;
     }
 
-    console.log("[AddItem] Insert succeeded — navigating to room", selectedRoomId);
+    if (__DEV__) console.log("[AddItem] Insert succeeded — navigating to room", selectedRoomId);
     markRecentItem(payload.id);
     showToast(`Item added to ${destRoomName ?? "room"}`);
 

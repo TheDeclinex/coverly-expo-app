@@ -127,7 +127,7 @@ async function uploadInventoryPhoto(
     const rand = Math.random().toString(36).slice(2, 7);
     uploadPath = `${userId}/${context.fileId}/${uploadPrefix(context.source)}-${timestamp}-${rand}.${file.extension}`;
 
-    console.info("[storageUpload] prepared", {
+    if (__DEV__) console.info("[storageUpload] prepared", {
       bucket: INVENTORY_PHOTOS_BUCKET,
       uploadPath,
       source: context.source,
@@ -148,7 +148,7 @@ async function uploadInventoryPhoto(
       .from(INVENTORY_PHOTOS_BUCKET)
       .createSignedUrl(uploadData.path, SIGNED_URL_EXPIRY_SECS);
     if (signedError) {
-      console.warn("[photoUpload] signed URL error:", signedError.message);
+      if (__DEV__) console.warn("[photoUpload] signed URL error:", signedError.message);
     }
 
     return {
@@ -218,7 +218,7 @@ function createUploadFailure(
     fileSize: file?.fileSize,
     source: context.source,
   };
-  console.error("[storageUpload] failed", failure);
+  if (__DEV__) console.error("[storageUpload] failed", failure);
   return failure;
 }
 

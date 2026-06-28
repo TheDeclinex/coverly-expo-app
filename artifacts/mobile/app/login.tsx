@@ -229,6 +229,10 @@ export default function LoginScreen() {
     }
     setLoading(true);
     setError(null);
+    // TODO(auth): Wire a confirmed Coverly-owned password recovery completion
+    // route here (web reset page or native deep link) via redirectTo once it is
+    // allowlisted in Supabase Auth redirect settings. Until then, keep mobile
+    // copy explicit that the reset is completed from the email link.
     const { error: authError } = await supabase.auth.resetPasswordForEmail(
       email.trim()
     );
@@ -320,7 +324,7 @@ export default function LoginScreen() {
             ) : resetSent ? (
               <InboxState
                 title="Reset link sent"
-                body={`We sent a password reset link to\n${email.trim()}\n\nCheck your inbox and follow the link to set a new password.`}
+                body={`We sent a password reset link to\n${email.trim()}\n\nOpen the link from your email to set a new password, then return to Coverly and sign in.`}
                 onBack={() => switchMode("signin")}
                 backLabel="Back to Sign In"
                 colors={colors}
@@ -336,7 +340,7 @@ export default function LoginScreen() {
                   {isSignUp
                     ? "Start building your home inventory"
                     : isForgot
-                    ? "Enter your email and we'll send a reset link"
+                    ? "We'll email you a reset link. Complete the reset from that link, then return here to sign in."
                     : "Sign in to view your home inventory"}
                 </Text>
 

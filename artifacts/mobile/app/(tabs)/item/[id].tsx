@@ -270,6 +270,7 @@ export default function ItemDetailScreen() {
   const [barcodeScanOpen, setBarcodeScanOpen] = React.useState(false);
   const [voiceInputOpen, setVoiceInputOpen] = React.useState(false);
   const [voiceTargetField, setVoiceTargetField] = React.useState<VoiceItemField | undefined>();
+  const [deletingItem, setDeletingItem] = React.useState(false);
 
   const {
     data: item,
@@ -341,6 +342,82 @@ export default function ItemDetailScreen() {
       },
     } as Href);
   };
+
+
+  const navigateToItemParent = React.useCallback(() => {
+    const targetRoomId = roomId ?? item?.room_id ?? "";
+    const targetFileId = fileId ?? item?.file_id ?? "";
+
+    if (targetRoomId) {
+      router.replace({
+        pathname: "/(tabs)/room/[id]",
+        params: {
+          id: targetRoomId,
+          name: roomName ?? item?.room ?? "Room",
+          fileId: targetFileId,
+          fileName: fileName ?? "Property",
+        },
+      } as Href);
+      return;
+    }
+
+    if (targetFileId) {
+      router.replace({
+        pathname: "/(tabs)/property/[id]",
+        params: { id: targetFileId, name: fileName ?? "Property" },
+      } as Href);
+      return;
+    }
+
+    router.back();
+  }, [fileId, fileName, item?.file_id, item?.room, item?.room_id, roomId, roomName]);
+
+  const invalidateItemCollections = React.useCallback(async (target: InventoryItem) => {
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ["items", target.room_id] }),
+      queryClient.invalidateQueries({ queryKey: ["all-items"] }),
+      queryClient.invalidateQueries({ queryKey: ["property-items", target.file_id] }),
+      queryClient.invalidateQueries({ queryKey: ["room", target.room_id] }),
+      queryClient.invalidateQueries({ queryKey: ["rooms", target.file_id] }),
+      queryClient.invalidateQueries({ queryKey: ["property", target.file_id] }),
+    ]);
+  }, [queryClient]);
+
+  const deleteItem = React.useCallback(async () => {
+    if (!item || deletingItem) return;
+    setDeletingItem(true);
+    try {
+      const { error: deleteError } = await supabase
+        .from("inventory_items")
+        .delete()
+        .eq("id", item.id);
+      if (deleteError) throw deleteError;
+
+      queryClient.removeQueries({ queryKey: ["item", item.id] });
+      await invalidateItemCollections(item);
+      showToast("Item deleted");
+      navigateToItemParent();
+    } catch (deleteFailure) {
+      Alert.alert(
+        "Couldn't delete item",
+        deleteFailure instanceof Error ? deleteFailure.message : "Please try again.",
+      );
+    } finally {
+      setDeletingItem(false);
+    }
+  }, [deletingItem, invalidateItemCollections, item, navigateToItemParent, queryClient, showToast]);
+
+  const handleDeleteItem = React.useCallback(() => {
+    if (!item || deletingItem) return;
+    Alert.alert(
+      "Delete item?",
+      `This will remove ${item.name} from your inventory. Evidence files and storage cleanup are not changed by this action.`,
+      [
+        { text: "Cancel", style: "cancel" },
+        { text: "Delete", style: "destructive", onPress: () => void deleteItem() },
+      ],
+    );
+  }, [deleteItem, deletingItem, item]);
 
   const handleApplyBarcode = async (values: BarcodeApplyValues) => {
     if (!item) throw new Error("Item not loaded.");
@@ -503,17 +580,7 @@ export default function ItemDetailScreen() {
           headerLeft: () => (
             <ContextBackButton
               label={roomName ?? item?.room ?? "Room"}
-              onPress={() =>
-                router.replace({
-                  pathname: "/(tabs)/room/[id]",
-                  params: {
-                    id: roomId ?? item?.room_id ?? "",
-                    name: roomName ?? item?.room ?? "Room",
-                    fileId: fileId ?? item?.file_id ?? "",
-                    fileName: fileName ?? "Property",
-                  },
-                })
-              }
+              onPress={navigateToItemParent}
             />
           ),
         }}
@@ -678,6 +745,26 @@ export default function ItemDetailScreen() {
                       <Text style={[styles.advancedEditHint, { color: colors.mutedForeground }]}>Manage photos, category, room and additional details</Text>
                     </View>
                     <Feather name="chevron-right" size={15} color={colors.mutedForeground} />
+                  </Pressable>
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel="Delete item"
+                    onPress={handleDeleteItem}
+                    disabled={deletingItem}
+                    style={({ pressed }) => [
+                      styles.destructiveAction,
+                      { borderTopColor: colors.border, opacity: deletingItem || pressed ? 0.65 : 1 },
+                    ]}
+                  >
+                    {deletingItem ? (
+                      <ActivityIndicator size="small" color="#B91C1C" />
+                    ) : (
+                      <Feather name="trash-2" size={15} color="#B91C1C" />
+                    )}
+                    <View style={styles.nextActionCopy}>
+                      <Text style={styles.destructiveTitle}>Delete item</Text>
+                      <Text style={[styles.advancedEditHint, { color: colors.mutedForeground }]}>Remove this item from the inventory</Text>
+                    </View>
                   </Pressable>
                 </Section>
               </>
@@ -1009,6 +1096,27 @@ const styles = StyleSheet.create({
   },
   advancedEditTitle: { fontSize: 13, fontFamily: "Inter_500Medium" },
   advancedEditHint: { fontSize: 11, fontFamily: "Inter_400Regular" },
+  destructiveAction: {
+    minHeight: 52,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    marginTop: 10,
+    paddingTop: 10,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
+  destructiveTitle: { fontSize: 13, fontFamily: "Inter_500Medium", color: "#B91C1C" },
+  deleteBtn: {
+    minHeight: 44,
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+  },
+  deleteBtnText: { fontSize: 14, fontFamily: "Inter_500Medium", color: "#B91C1C" },
   section: {
     borderWidth: 1,
     padding: 16,

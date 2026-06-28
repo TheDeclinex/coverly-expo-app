@@ -87,7 +87,7 @@ export default function FeedbackScreen() {
       });
     } catch (error) {
       if (__DEV__) {
-        console.warn("[feedback] screenshot picker failed", { error: serializeError(error) });
+        if (__DEV__) console.warn("[feedback] screenshot picker failed", { error: serializeError(error) });
       }
       setInlineError("Could not attach that screenshot. Try again or send without it.");
     } finally {
@@ -126,7 +126,7 @@ export default function FeedbackScreen() {
       );
     } catch (error) {
       if (__DEV__) {
-        console.warn("[feedback] submit failed", { error: serializeError(error) });
+        if (__DEV__) console.warn("[feedback] submit failed", { error: serializeError(error) });
       }
       setInlineError("Could not send feedback. Please try again.");
     } finally {

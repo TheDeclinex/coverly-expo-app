@@ -375,7 +375,7 @@ export default function EditItemScreen() {
         photos: photosForUpdate,
       });
 
-      console.log("[EditItem] Update payload keys:", Object.keys(updates));
+      if (__DEV__) console.log("[EditItem] Update payload keys:", Object.keys(updates));
 
       const { error } = await supabase
         .from("inventory_items")
@@ -383,7 +383,7 @@ export default function EditItemScreen() {
         .eq("id", id);
 
       if (error) {
-        console.error("[EditItem] Update failed:", error.message);
+        if (__DEV__) console.error("[EditItem] Update failed:", error.message);
         setErrorMsg(
           `Save failed: ${error.message}` +
             (error.code ? ` (${error.code})` : "")
@@ -391,7 +391,7 @@ export default function EditItemScreen() {
         return;
       }
 
-      console.log("[EditItem] Update succeeded — navigating back");
+      if (__DEV__) console.log("[EditItem] Update succeeded — navigating back");
 
       queryClient.invalidateQueries({ queryKey: ["item", id] });
       queryClient.invalidateQueries({ queryKey: ["items", item?.room_id] });
@@ -404,7 +404,7 @@ export default function EditItemScreen() {
       showToast("Item updated");
       router.back();
     } catch (err) {
-      console.error("[EditItem] Unexpected error:", err);
+      if (__DEV__) console.error("[EditItem] Unexpected error:", err);
       setErrorMsg(
         err instanceof Error ? err.message : "Could not save changes."
       );

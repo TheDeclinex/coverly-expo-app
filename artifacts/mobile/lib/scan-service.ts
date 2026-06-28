@@ -92,9 +92,9 @@ function primarySingleItem(items: ScanDetectedItem[]): ScanDetectedItem[] {
 
 function scanLog(message: string, details?: Record<string, unknown>) {
   if (details) {
-    console.info(`[Scan] ${message}`, details);
+    if (__DEV__) console.info(`[Scan] ${message}`, details);
   } else {
-    console.info(`[Scan] ${message}`);
+    if (__DEV__) console.info(`[Scan] ${message}`);
   }
 }
 
@@ -102,11 +102,9 @@ function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): 
   let timer: ReturnType<typeof setTimeout> | undefined;
   const timeout = new Promise<never>((_, reject) => {
     timer = setTimeout(() => {
-      console.error("[Scan] timeout fired", {
-        label,
-        timeoutMs,
-      });
-      reject(new Error(`${label} timed out after ${Math.round(timeoutMs / 1000)} seconds.`));
+      const error = new Error(`${label} timed out after ${Math.round(timeoutMs / 1000)} seconds.`);
+      error.name = "ScanTimeoutError";
+      reject(error);
     }, timeoutMs);
   });
 
@@ -115,6 +113,23 @@ function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): 
   });
 }
 
+
+function expectedScanNetworkMessage(error: unknown): string | null {
+  const message = error instanceof Error ? error.message : String(error);
+  const normalized = message.toLowerCase();
+  if (error instanceof Error && error.name === "ScanTimeoutError") {
+    return "Scan timed out. Please try again.";
+  }
+  if (
+    normalized.includes("network request timed out") ||
+    normalized.includes("network request failed") ||
+    normalized.includes("failed to fetch") ||
+    normalized.includes("timed out")
+  ) {
+    return "We couldn't complete the scan. Check your connection and try again.";
+  }
+  return null;
+}
 function createUsageIdempotencyKey(): string {
   const randomUuid =
     typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
@@ -188,7 +203,7 @@ export async function runAiScan(input: ScanInput): Promise<ScanResult> {
     });
 
     if (!usesExpectedProject) {
-      console.warn("[Scan] Supabase project ref mismatch", {
+      if (__DEV__) console.warn("[Scan] Supabase project ref mismatch", {
         expectedProjectRef: EXPECTED_SCAN_PROJECT_REF,
         supabaseHost,
       });
@@ -201,7 +216,7 @@ export async function runAiScan(input: ScanInput): Promise<ScanResult> {
       hasSessionError: !!sessionError,
     });
     if (sessionError || !accessToken) {
-      console.error("[Scan] function invoke failed", {
+      if (__DEV__) console.error("[Scan] function invoke failed", {
         message: sessionError?.message ?? "Missing Supabase session token",
       });
       return {
@@ -249,7 +264,7 @@ export async function runAiScan(input: ScanInput): Promise<ScanResult> {
     try {
       data = responseText ? JSON.parse(responseText) as ScanFunctionResponse : null;
     } catch {
-      console.error("[Scan] function invoke failed", {
+      if (__DEV__) console.error("[Scan] function invoke failed", {
         status: response.status,
         responsePreview: responseText.slice(0, 500),
       });
@@ -263,7 +278,7 @@ export async function runAiScan(input: ScanInput): Promise<ScanResult> {
     }
 
     if (!response.ok) {
-      console.error("[Scan] function invoke failed", {
+      if (__DEV__) console.error("[Scan] function invoke failed", {
         status: response.status,
         errorCode: data?.errorCode,
         message: data?.message,
@@ -355,7 +370,19 @@ export async function runAiScan(input: ScanInput): Promise<ScanResult> {
 
     return { status: "success", items: input.mode === "single_item" ? primarySingleItem(items) : items };
   } catch (err) {
-    console.error("[Scan] function invoke failed", err);
+    const expectedMessage = expectedScanNetworkMessage(err);
+    if (expectedMessage) {
+      scanLog("function invoke ended with expected network failure", {
+        message: err instanceof Error ? err.message : String(err),
+      });
+      return {
+        status: "error",
+        items: [],
+        errorMessage: expectedMessage,
+      };
+    }
+
+    if (__DEV__) console.error("[Scan] function invoke failed", err);
     return {
       status: "error",
       items: [],

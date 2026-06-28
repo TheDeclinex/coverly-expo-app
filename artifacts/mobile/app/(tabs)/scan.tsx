@@ -110,6 +110,7 @@ interface PartialFailure {
 type ScanLaunchStep = "property" | "room" | "type";
 
 function scanLog(message: string, details?: Record<string, unknown>) {
+  if (!__DEV__) return;
   if (details) {
     console.info(`[Scan] ${message}`, details);
   } else {
@@ -421,7 +422,7 @@ export default function ScanScreen() {
       setImages(frames);
       await handleStartScan("video_room", frames);
     } catch (error) {
-      console.error("[Scan] video frame extraction failed", error);
+      if (__DEV__) console.error("[Scan] video frame extraction failed", error);
       setScanStatus("idle");
       setScanError(error instanceof Error ? error.message : "Could not prepare video frames. Try a shorter or clearer video.");
     }
@@ -576,9 +577,11 @@ export default function ScanScreen() {
     try {
       result = await runAiScan(input);
     } catch (error) {
-      console.error("[Scan] unexpected scan failure", error);
+      const message = error instanceof Error ? error.message : "Scan failed. Please try again.";
+      const expectedNetworkFailure = /timed out|network request failed|network request timed out|failed to fetch/i.test(message);
+      if (__DEV__ && !expectedNetworkFailure) console.error("[Scan] unexpected scan failure", error);
       setScanStatus("error");
-      setScanError(error instanceof Error ? error.message : "Scan failed. Please try again.");
+      setScanError(expectedNetworkFailure ? "We couldn't complete the scan. Check your connection and try again." : message);
       return;
     }
 
@@ -601,7 +604,7 @@ export default function ScanScreen() {
         return;
       }
       setScanStatus("error");
-      setScanError("AI scan failed. No items were saved. Please try again.");
+      setScanError(result.errorMessage ?? "AI scan failed. No items were saved. Please try again.");
       return;
     }
 
@@ -685,7 +688,7 @@ export default function ScanScreen() {
     });
     if (!uploaded.ok) {
       const diagnostic = formatUploadFailure(uploaded);
-      console.error("[Scan] Photo upload diagnostic\n" + diagnostic);
+      if (__DEV__) console.error("[Scan] Photo upload diagnostic\n" + diagnostic);
       setScanSaveError(diagnostic);
       setSavingIds((prev) => { const n = new Set(prev); n.delete(index); return n; });
       return;
@@ -702,7 +705,7 @@ export default function ScanScreen() {
     });
 
     if (error) {
-      console.error("[Scan] Save item failed:", error.message);
+      if (__DEV__) console.error("[Scan] Save item failed:", error.message);
       setScanSaveError(`Failed to save "${item.name}": ${error.message}`);
     } else {
       void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
@@ -759,7 +762,7 @@ export default function ScanScreen() {
       else {
         failedPhotoIndices.add(photoIdx);
         uploadFailureByPhotoIndex.set(photoIdx, uploaded);
-        console.error("[Scan] Photo upload diagnostic\n" + formatUploadFailure(uploaded));
+        if (__DEV__) console.error("[Scan] Photo upload diagnostic\n" + formatUploadFailure(uploaded));
       }
     }
 
@@ -786,7 +789,7 @@ export default function ScanScreen() {
       const payload = buildPayload(item, uploadedUrl);
       const { error } = await supabase.from("inventory_items").insert(payload);
       if (error) {
-        console.error("[Scan] Save all — item failed:", item.name, error.message);
+        if (__DEV__) console.error("[Scan] Save all — item failed:", error.message);
         failures.push({ itemName: item.name, error: error.message });
       } else {
         savedIndices.push(i);
@@ -834,6 +837,7 @@ export default function ScanScreen() {
         name: roomName,
         fileId: selectedFileId,
         fileName: paramFileName ?? "Property",
+        addedCount: String(savedItemIds.length),
       },
     });
   };
@@ -860,6 +864,13 @@ export default function ScanScreen() {
 
   const goBackToRoom = () => {
     if (!selectedRoomId) {
+      if (selectedFileId) {
+        router.replace({
+          pathname: "/(tabs)/property/[id]",
+          params: { id: selectedFileId, name: paramFileName ?? "Property" },
+        });
+        return;
+      }
       router.back();
       return;
     }

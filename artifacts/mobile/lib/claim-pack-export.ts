@@ -80,7 +80,7 @@ async function readFunctionErrorBody(error: unknown): Promise<unknown> {
 
 function logClaimPackExport(stage: string, details: Record<string, unknown>): void {
   if (!isDevelopment()) return;
-  console.info("[claim-pack-export]", stage, details);
+  if (__DEV__) console.info("[claim-pack-export]", stage, details);
 }
 
 export async function generateClaimPackPdf(
