@@ -277,7 +277,7 @@ export default function ClaimPacksScreen() {
             <AccountRow
               icon="archive"
               title="No previous packs"
-              subtitle="Generated PDFs will appear here once export is built."
+              subtitle="Generated PDFs will appear here after you export a claim pack."
               value="Empty"
               last
             />

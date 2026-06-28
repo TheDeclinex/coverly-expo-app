@@ -2676,7 +2676,7 @@ export default function PropertyDetailScreen() {
               <EmptyState
                 icon="layers"
                 title="No rooms found"
-                subtitle="Rooms will appear here once added"
+                subtitle="Tap Add room to start organizing this property."
               />
             </View>
           }

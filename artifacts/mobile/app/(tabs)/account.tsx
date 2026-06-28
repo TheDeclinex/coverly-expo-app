@@ -46,7 +46,7 @@ export default function AccountScreen() {
     ? `Renews or expires ${new Date(subscriptionPeriodEnd).toLocaleDateString("en-NZ")}`
     : profile?.plan === "Free"
       ? "Free plan"
-      : "Managed through your Apple or Google account";
+      : "Tester or store-managed access";
   const planStatusDetail = planStatusLabel === planLabel ? planStatusHelper : `${planStatusLabel} · ${planStatusHelper}`;
   const initialsSource = displayName ?? (email === "Email unavailable" ? "?" : email);
   const initials = initialsSource.slice(0, 1).toUpperCase();
@@ -133,13 +133,13 @@ export default function AccountScreen() {
           </AccountSection>
         )}
 
-        <AccountSection title="Plan & billing">
+        <AccountSection title="Plan access">
           <AccountRow icon="credit-card" title="Your plan" subtitle={planStatusDetail} value={planLabel} />
-          <AccountRow icon="arrow-up-circle" title="Upgrade Coverly" subtitle="View Apple or Google subscription options" onPress={() => router.push("/upgrade" as Href)} />
+          <AccountRow icon="arrow-up-circle" title="Plan options" subtitle="View access options for this tester build." onPress={() => router.push("/upgrade" as Href)} />
           <AccountRow
             icon="refresh-cw"
             title="Restore purchases"
-            subtitle="Use after reinstalling, changing devices, or signing in again."
+            subtitle="Use after reinstalling or signing in again if store purchases are enabled."
             value={purchaseLoading ? "Restoring…" : undefined}
             disabled={purchaseLoading}
             onPress={() => void restore()}
@@ -149,7 +149,7 @@ export default function AccountScreen() {
             <AccountRow
               icon="list"
               title="Access level"
-              subtitle={profile?.plan === "Free" ? "Free plan limits are visible in the app" : "AI features included · Fair use applies"}
+              subtitle={profile?.plan === "Free" ? "Free plan limits are visible in the app" : "AI features included - fair use applies"}
               value={gatesEnabled ? "Standard" : "Preview"}
               last
             />
@@ -168,8 +168,8 @@ export default function AccountScreen() {
           <AccountRow
             icon="gift"
             title="Invite a friend"
-            subtitle="Give a friend bonus AI scan credits and earn 7 days of Coverly Plus after they complete their first room scan."
-            value="Coming soon"
+            subtitle="Referral rewards are not part of this tester build."
+            value="Not in test"
           />
           <AccountRow icon="users" title="Referral status" value="Not active" last />
         </AccountSection>
@@ -252,7 +252,7 @@ function UsageAllowanceCard({
   if (isError) helper = "Usage allowance could not be loaded. Your account access is unchanged.";
   else if (!isLoading && allowances.length === 0) helper = "Usage allowance is not available yet.";
   else if (!isLimited || isAdmin) helper = "AI scans and replacement pricing are included with your plan. Fair use applies.";
-  else if (hasEmptyAllowance) helper = "One of your Free monthly allowances is used up. Upgrade to keep using premium AI features.";
+  else if (hasEmptyAllowance) helper = "One of your Free monthly allowances is used up. Manual inventory tools are still available.";
   else if (hasLowAllowance) helper = "You are getting close to one of your Free monthly limits.";
   else helper = `Free allowances reset on ${formatResetDate(resetAt)}.`;
 
@@ -300,7 +300,7 @@ function UsageAllowanceCard({
 
       {isLimited && hasEmptyAllowance ? (
         <Text onPress={onUpgrade} style={[styles.usageUpgrade, { color: colors.primary }]}>
-          Upgrade Coverly
+          View plan options
         </Text>
       ) : null}
     </View>

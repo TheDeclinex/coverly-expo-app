@@ -47,16 +47,16 @@ export function extractUsageLimitDetails(value: unknown): UsageLimitDetails | un
 
 function replacementBody(usage?: UsageLimitDetails): string {
   if (usage?.usedUnits != null && usage.limitUnits != null) {
-    return `You've used ${usage.usedUnits} of ${usage.limitUnits} replacement price searches this month. Upgrade to Plus to keep checking current replacement prices. You can still enter an item value manually, and your current item value was not changed.`;
+    return `You've used ${usage.usedUnits} of ${usage.limitUnits} replacement price searches this month. You can still enter an item value manually, and your current item value was not changed.`;
   }
-  return "You've reached your free replacement search limit for this month. Upgrade to Plus to keep checking current replacement prices. You can still enter an item value manually, and your current item value was not changed.";
+  return "You've reached your free replacement search limit for this month. You can still enter an item value manually, and your current item value was not changed.";
 }
 
 function aiScanBody(usage?: UsageLimitDetails): string {
   if (usage?.usedUnits != null && usage.limitUnits != null) {
-    return `You've used ${usage.usedUnits} of ${usage.limitUnits} AI scan credits this month. Upgrade to Plus to keep scanning items with AI. You can still add items manually for free, and no scan results were saved.`;
+    return `You've used ${usage.usedUnits} of ${usage.limitUnits} AI scan credits this month. You can still add items manually for free, and no scan results were saved.`;
   }
-  return "You've used your free AI scan credits for this month. Upgrade to Plus to keep scanning items with AI. You can still add items manually for free, and no scan results were saved.";
+  return "You've used your free AI scan credits for this month. You can still add items manually for free, and no scan results were saved.";
 }
 
 export function normalizeLimitError(input: LimitErrorInput): NormalizedLimitError | null {
@@ -69,7 +69,7 @@ export function normalizeLimitError(input: LimitErrorInput): NormalizedLimitErro
       title: "You've used your free replacement searches",
       body: replacementBody(usage),
       benefit: "Plus includes ongoing replacement pricing checks, AI scans, and claim-ready exports.",
-      primaryCta: "Upgrade to Plus",
+      primaryCta: "View plan options",
       secondaryCta: "Back to item",
       dismissCta: "Not now",
       usage,
@@ -82,7 +82,7 @@ export function normalizeLimitError(input: LimitErrorInput): NormalizedLimitErro
       title: "You've used your free AI scan credits",
       body: aiScanBody(usage),
       benefit: "Plus includes AI scanning, replacement pricing, and claim-ready exports.",
-      primaryCta: "Upgrade to Plus",
+      primaryCta: "View plan options",
       secondaryCta: "Add item manually",
       dismissCta: "Not now",
       usage,
@@ -93,9 +93,9 @@ export function normalizeLimitError(input: LimitErrorInput): NormalizedLimitErro
     return {
       feature: "property",
       title: "You've used your free property",
-      body: "You've reached the free property limit. Upgrade to Plus to add more properties and keep building your inventory.",
+      body: "You've reached the free property limit. You can keep building this property, or view plan options for more property space.",
       benefit: "Plus unlocks more household inventory space, AI features, and claim-ready exports.",
-      primaryCta: "Upgrade to Plus",
+      primaryCta: "View plan options",
       secondaryCta: "Not now",
       usage,
     };
@@ -105,9 +105,9 @@ export function normalizeLimitError(input: LimitErrorInput): NormalizedLimitErro
     return {
       feature: "replacement_pricing",
       title: "You've reached this month's free limit",
-      body: "You've reached a free monthly limit. Upgrade to Plus to keep using Coverly's AI features. Your current item or action was not changed.",
+      body: "You've reached a free monthly limit. Your current item or action was not changed, and manual inventory tools are still available.",
       benefit: "Plus includes AI scanning, replacement pricing, and claim-ready exports.",
-      primaryCta: "Upgrade to Plus",
+      primaryCta: "View plan options",
       secondaryCta: "Not now",
       usage,
     };

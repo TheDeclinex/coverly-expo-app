@@ -27,19 +27,19 @@ export default function UpgradeScreen() {
   const restore = async () => { const result = await restorePurchases(); Alert.alert(result.ok ? "Purchases restored" : "Restore complete", result.message); };
 
   return <>
-    <Stack.Screen options={{ headerShown: true, title: "Upgrade Coverly", presentation: "modal" }} />
+    <Stack.Screen options={{ headerShown: true, title: "Plan options", presentation: "modal" }} />
     <ScrollView contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + 24, backgroundColor: colors.background }]}>
       <View style={[styles.hero, { backgroundColor: colors.card, borderColor: colors.border }]}>
         <Feather name="shield" size={28} color={colors.primary} />
         <Text style={[styles.title, { color: colors.foreground }]}>Know what you own, with more room to grow.</Text>
-        <Text style={[styles.body, { color: colors.mutedForeground }]}>AI scans, replacement pricing and claim-ready exports are included for subscribers. Fair use applies.</Text>
+        <Text style={[styles.body, { color: colors.mutedForeground }]}>AI scans, replacement pricing and claim-ready exports are included on paid plans. Tester access may be managed separately while store purchases are being prepared.</Text>
         <Text style={[styles.current, { color: colors.primary }]}>Current plan: {effectivePlan === "free" ? "Free" : effectivePlan === "coverly_family" ? "Coverly Family" : "Coverly Plus"}</Text>
       </View>
 
-      {!gatesEnabled && <View style={[styles.notice, { backgroundColor: colors.accent }]}><Text style={{ color: colors.accentForeground }}>Test mode: locked actions are visible but not blocked.</Text></View>}
+      {!gatesEnabled && <View style={[styles.notice, { backgroundColor: colors.accent }]}><Text style={{ color: colors.accentForeground }}>Tester mode: limits may be visible without blocking access.</Text></View>}
       {packages.length === 0 ? <View style={[styles.empty, { borderColor: colors.border }]}>
-        <Text style={[styles.optionTitle, { color: colors.foreground }]}>Subscription options unavailable</Text>
-        <Text style={[styles.body, { color: colors.mutedForeground }]}>{error ?? "Store products are still being prepared. You can try again in a development or store build."}</Text>
+        <Text style={[styles.optionTitle, { color: colors.foreground }]}>Plan options are not available in this build</Text>
+        <Text style={[styles.body, { color: colors.mutedForeground }]}>{error ?? "Store products are still being prepared for tester builds. You can continue using available Free features."}</Text>
       </View> : packages.map((pkg) => <View key={pkg.identifier} style={[styles.option, { backgroundColor: colors.card, borderColor: colors.border }]}>
         <View style={styles.optionCopy}><Text style={[styles.optionTitle, { color: colors.foreground }]}>{packagePlan(pkg)}</Text><Text style={[styles.body, { color: colors.mutedForeground }]}>{pkg.product.description || "AI features included · Fair use applies"}</Text></View>
         <Text style={[styles.price, { color: colors.foreground }]}>{pkg.product.priceString}</Text>
@@ -48,7 +48,7 @@ export default function UpgradeScreen() {
 
       {(purchaseLoading || isRefreshing) && <View style={styles.loading}><ActivityIndicator color={colors.primary} /><Text style={[styles.body, { color: colors.mutedForeground }]}>{isRefreshing ? "Purchase received, refreshing access…" : "Contacting the store…"}</Text></View>}
       <Pressable disabled={purchaseLoading} onPress={() => void restore()} style={styles.restore}><Text style={[styles.restoreText, { color: colors.primary }]}>Restore purchases</Text></Pressable>
-      <Text style={[styles.legal, { color: colors.mutedForeground }]}>Payment is charged to your Apple or Google account. Subscriptions renew automatically unless cancelled through your store account before renewal.</Text>
+      <Text style={[styles.legal, { color: colors.mutedForeground }]}>When store purchases are available, payment is charged to your Apple or Google account and managed through your store subscription settings.</Text>
     </ScrollView>
   </>;
 }

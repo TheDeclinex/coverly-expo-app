@@ -943,8 +943,13 @@ export default function ScanScreen() {
           options={{
             title: "Review detected items",
             headerLeft: () => (
+              <Pressable onPress={goBackToRoom} hitSlop={8} style={{ padding: 4 }}>
+                <Feather name="arrow-left" size={20} color={colors.mutedForeground} />
+              </Pressable>
+            ),
+            headerRight: () => (
               <Pressable onPress={resetScan} hitSlop={8} style={{ padding: 4 }}>
-                <Feather name="x" size={20} color={colors.mutedForeground} />
+                <Text style={{ color: colors.primary, fontFamily: "Inter_600SemiBold", fontSize: 13 }}>Scan again</Text>
               </Pressable>
             ),
           }}
@@ -1768,7 +1773,7 @@ export default function ScanScreen() {
           <EmptyState
             icon="zap"
             title="Choose a scan type above"
-            subtitle="AI scan will detect and value your items automatically once connected"
+            subtitle="Choose how you want to capture items, then add a photo to start scanning."
           />
         )}
       </ScrollView>
