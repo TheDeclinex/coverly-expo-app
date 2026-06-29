@@ -41,7 +41,7 @@ import type { VoiceItemField, VoiceItemPatch } from "@/types/voice";
 // One-line rollback for the item review/edit trial.
 const ITEM_REVIEW_EDIT_TRIAL = true;
 
-type InlineField = "name" | "quantity" | "brand_maker";
+type InlineField = "name" | "quantity" | "unit_estimated_price" | "brand_maker";
 
 function DetailRow({
   label,
@@ -135,6 +135,13 @@ function isWebUrl(value: string | null | undefined): value is string {
   return typeof value === "string" && /^https?:\/\//i.test(value);
 }
 
+function parseMoneyDraft(value: string): number | null {
+  const cleaned = value.replace(/[^0-9.]/g, "").trim();
+  if (!cleaned) return null;
+  const parsed = Number.parseFloat(cleaned);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
+}
+
 function QuickEditRow({
   label,
   value,
@@ -154,7 +161,7 @@ function QuickEditRow({
   value: string | number | null | undefined;
   editing: boolean;
   draft: string;
-  keyboardType?: "default" | "numeric";
+  keyboardType?: "default" | "numeric" | "decimal-pad";
   quantityStepper?: boolean;
   saving: boolean;
   colors: ReturnType<typeof import("@/hooks/useColors").useColors>;
@@ -462,7 +469,18 @@ export default function ItemDetailScreen() {
     if (!item || !editingField || savingInline) return;
 
     const trimmed = inlineDraft.trim();
-    let updates: Partial<Pick<InventoryItem, "name" | "quantity" | "brand_maker">>;
+    let updates: Partial<
+      Pick<
+        InventoryItem,
+        | "name"
+        | "quantity"
+        | "unit_estimated_price"
+        | "estimated_price"
+        | "brand_maker"
+        | "price_source_type"
+        | "valuation_basis"
+      >
+    >;
 
     if (editingField === "name") {
       if (!trimmed) {
@@ -477,6 +495,19 @@ export default function ItemDetailScreen() {
         return;
       }
       updates = { quantity };
+    } else if (editingField === "unit_estimated_price") {
+      const price = parseMoneyDraft(trimmed);
+      if (price === null) {
+        Alert.alert("Check price", "Enter a valid price of zero or more.");
+        return;
+      }
+      const roundedPrice = Math.round(price * 100) / 100;
+      updates = {
+        estimated_price: roundedPrice,
+        unit_estimated_price: roundedPrice,
+        price_source_type: "user_entered",
+        valuation_basis: "manual",
+      };
     } else {
       updates = { brand_maker: trimmed || null };
     }
@@ -701,6 +732,40 @@ export default function ItemDetailScreen() {
                     onVoice={() => openVoiceInput("quantity")}
                   />
                   <QuickEditRow
+                    label={(item.quantity ?? 1) > 1 ? "Each price" : "Price"}
+                    value={
+                      item.unit_estimated_price != null || item.estimated_price != null
+                        ? formatCurrencyFull(getItemUnitPrice(item))
+                        : null
+                    }
+                    editing={editingField === "unit_estimated_price"}
+                    draft={inlineDraft}
+                    keyboardType="decimal-pad"
+                    saving={savingInline}
+                    colors={colors}
+                    onStart={() =>
+                      startInlineEdit(
+                        "unit_estimated_price",
+                        item.unit_estimated_price ?? item.estimated_price,
+                      )
+                    }
+                    onChange={setInlineDraft}
+                    onSave={() => void saveInlineEdit()}
+                    onCancel={cancelInlineEdit}
+                    onVoice={() => openVoiceInput("replacement_price")}
+                  />
+                  {(item.quantity ?? 1) > 1 &&
+                  (item.unit_estimated_price != null || item.estimated_price != null) ? (
+                    <View style={[styles.quickSummaryRow, { borderBottomColor: colors.border }]}>
+                      <Text style={[styles.quickSummaryLabel, { color: colors.mutedForeground }]}>
+                        Total value
+                      </Text>
+                      <Text style={[styles.quickSummaryValue, { color: colors.foreground }]}>
+                        {formatCurrencyFull(getItemUnitPrice(item) * (item.quantity ?? 1))}
+                      </Text>
+                    </View>
+                  ) : null}
+                  <QuickEditRow
                     label="Brand / Maker"
                     value={item.brand_maker}
                     editing={editingField === "brand_maker"}
@@ -802,16 +867,10 @@ export default function ItemDetailScreen() {
               </>
             )}
 
-            <Section title="VALUATION" colors={colors}>
-              <DetailRow
-                label={(item.quantity ?? 1) > 1 ? "Each price" : "Price"}
-                value={formatCurrencyFull(getItemUnitPrice(item))}
-                colors={colors}
-              />
-              <DetailRow label="Quantity" value={item.quantity} colors={colors} />
-              {(item.quantity ?? 1) > 1 ? (
+            <Section title="VALUATION CONTEXT" colors={colors}>
+              {item.unit_estimated_price != null || item.estimated_price != null ? (
                 <DetailRow
-                  label="Total price"
+                  label="Recorded total"
                   value={formatCurrencyFull(getItemUnitPrice(item) * (item.quantity ?? 1))}
                   colors={colors}
                 />
@@ -872,7 +931,6 @@ export default function ItemDetailScreen() {
                   {item.barcode || item.barcode_verified ? "Update barcode" : "Scan barcode"}
                 </Text>
               </Pressable>
-              <DetailRow label="Brand / Maker" value={item.brand_maker} colors={colors} />
               <DetailRow label="Model / Series" value={item.model_series} colors={colors} />
               <DetailRow label="Condition" value={item.condition_label} colors={colors} />
             </Section>
@@ -1060,6 +1118,17 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontFamily: "Inter_400Regular",
   },
+  quickSummaryRow: {
+    minHeight: 42,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    paddingVertical: 8,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+  },
+  quickSummaryLabel: { fontSize: 12, fontFamily: "Inter_400Regular" },
+  quickSummaryValue: { fontSize: 14, fontFamily: "Inter_600SemiBold", textAlign: "right" },
   iconButton: { width: 34, height: 34, borderRadius: 8, alignItems: "center", justifyContent: "center" },
   voiceEditAction: {
     minHeight: 52,

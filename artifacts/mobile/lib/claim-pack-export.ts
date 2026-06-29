@@ -1,3 +1,4 @@
+import { friendlyNetworkErrorMessage } from "@/lib/network-errors";
 import { supabase } from "@/lib/supabase";
 import type { ClaimPackGenerateDraftPayload } from "@/lib/claim-pack-selection-model";
 
@@ -95,10 +96,19 @@ export async function generateClaimPackPdf(
     claimNotePresent: Boolean(payload.claimNote),
   });
 
-  const { data, error } = await supabase.functions.invoke<GenerateClaimPackPdfResponse>(
-    "generate-claim-pack",
-    { body: payload },
-  );
+  let invokeResult: { data: GenerateClaimPackPdfResponse | null; error: Error | null };
+  try {
+    invokeResult = await supabase.functions.invoke<GenerateClaimPackPdfResponse>(
+      "generate-claim-pack",
+      { body: payload },
+    );
+  } catch (error) {
+    const friendlyMessage = friendlyNetworkErrorMessage(error);
+    if (friendlyMessage) throw new ClaimPackExportError(friendlyMessage, { errorCode: "NETWORK_UNAVAILABLE" });
+    throw error;
+  }
+
+  const { data, error } = invokeResult;
 
   if (error) {
     const body = await readFunctionErrorBody(error);

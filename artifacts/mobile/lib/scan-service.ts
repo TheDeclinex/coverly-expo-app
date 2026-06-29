@@ -16,6 +16,7 @@
  *   3. After deployment, SCAN_EDGE_FUNCTION_NAME below is already set correctly.
  */
 
+import { friendlyNetworkErrorMessage } from "@/lib/network-errors";
 import { anonKey, debugSupabaseUrl, supabase } from "@/lib/supabase";
 import type { ScanDetectedItem, ScanInput, ScanResult } from "@/types/scan";
 
@@ -115,20 +116,10 @@ function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): 
 
 
 function expectedScanNetworkMessage(error: unknown): string | null {
-  const message = error instanceof Error ? error.message : String(error);
-  const normalized = message.toLowerCase();
   if (error instanceof Error && error.name === "ScanTimeoutError") {
     return "Scan timed out. Please try again.";
   }
-  if (
-    normalized.includes("network request timed out") ||
-    normalized.includes("network request failed") ||
-    normalized.includes("failed to fetch") ||
-    normalized.includes("timed out")
-  ) {
-    return "We couldn't complete the scan. Check your connection and try again.";
-  }
-  return null;
+  return friendlyNetworkErrorMessage(error);
 }
 function createUsageIdempotencyKey(): string {
   const randomUuid =

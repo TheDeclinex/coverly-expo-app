@@ -5,6 +5,10 @@ import { Stack, router, type Href, useLocalSearchParams } from "expo-router";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
+  AccessibilityInfo,
+  Alert,
+  Animated,
+  Easing,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -18,6 +22,7 @@ import { EmptyState } from "@/components/EmptyState";
 import { ErrorState } from "@/components/ErrorState";
 import { LoadingState } from "@/components/LoadingState";
 import { useAuth } from "@/context/AuthContext";
+import { useEntitlements } from "@/context/EntitlementsContext";
 import { useColors } from "@/hooks/useColors";
 import {
   deleteClaimPackDraft,
@@ -25,6 +30,7 @@ import {
   saveClaimPackDraft,
 } from "@/lib/claim-pack-draft-storage";
 import {
+  ClaimPackExportError,
   generateClaimPackPdf,
   type GenerateClaimPackPdfSuccess,
 } from "@/lib/claim-pack-export";
@@ -87,6 +93,15 @@ function safeClaimPackExportError(error: unknown): string {
   if (/at least one selected item/i.test(message)) {
     return "Select at least one item before generating your claim pack PDF.";
   }
+  if (/entitlement|payment|required|subscription|plan|402|claim.pack.*limit/i.test(message)) {
+    return "Claim pack PDF export is included with paid access. You can keep editing this draft, or view plan options when you are ready to export.";
+  }
+  if (error instanceof ClaimPackExportError && error.diagnostics.errorCode === "NETWORK_UNAVAILABLE") {
+    return message;
+  }
+  if (/offline|network|connection|timed out|try again/i.test(message)) {
+    return message;
+  }
   if (/storage|upload|signed url/i.test(message)) {
     return "We couldn't prepare the PDF download link. Please try again.";
   }
@@ -109,6 +124,7 @@ export default function ClaimPackDraftScreen() {
     claimDraftId?: string;
   }>();
   const { session } = useAuth();
+  const { canExportClaimPack } = useEntitlements();
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const queryClient = useQueryClient();
@@ -454,6 +470,15 @@ export default function ClaimPackDraftScreen() {
 
   const generatePdf = async () => {
     if (!futureGeneratePayload || isGeneratingPdf) return;
+    if (!canExportClaimPack) {
+      const message = "Claim pack PDF export is included with paid access. You can keep editing this draft, or view plan options when you are ready to export.";
+      setGenerateError(message);
+      Alert.alert("Claim pack export", message, [
+        { text: "Not now", style: "cancel" },
+        { text: "View plan options", onPress: () => router.push({ pathname: "/upgrade", params: { feature: "claim_pack" } } as Href) },
+      ]);
+      return;
+    }
     setIsGeneratingPdf(true);
     setGenerateError(null);
     try {
@@ -1349,6 +1374,8 @@ function ClaimPackPdfExportCard({
         </View>
       ) : null}
 
+      {isGenerating ? <ClaimPackGenerationProgress colors={colors} /> : null}
+
       {hasGeneratedPdf ? (
         <Pressable
           onPress={onOpen}
@@ -1379,6 +1406,117 @@ function ClaimPackPdfExportCard({
           </Text>
         </Pressable>
       )}
+    </View>
+  );
+}
+
+function ClaimPackGenerationProgress({
+  colors,
+}: {
+  colors: ReturnType<typeof useColors>;
+}) {
+  const steps = [
+    "Collecting items",
+    "Adding photos & evidence",
+    "Building PDF",
+    "Emailing copy",
+  ];
+  const [activeStep, setActiveStep] = useState(0);
+  const fill = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    let cancelled = false;
+    let animation: Animated.CompositeAnimation | null = null;
+    const timers: ReturnType<typeof setTimeout>[] = [];
+
+    void AccessibilityInfo.isReduceMotionEnabled().then((reduceMotion) => {
+      if (cancelled) return;
+      if (reduceMotion) {
+        fill.setValue(0.86);
+        setActiveStep(2);
+        return;
+      }
+
+      fill.setValue(0.08);
+      animation = Animated.timing(fill, {
+        toValue: 0.92,
+        duration: 5600,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: false,
+      });
+      animation.start();
+
+      [1200, 2700, 4300].forEach((delay, index) => {
+        timers.push(setTimeout(() => setActiveStep(index + 1), delay));
+      });
+    });
+
+    return () => {
+      cancelled = true;
+      animation?.stop();
+      timers.forEach(clearTimeout);
+    };
+  }, [fill]);
+
+  const width = fill.interpolate({
+    inputRange: [0, 1],
+    outputRange: ["0%", "100%"],
+  });
+
+  return (
+    <View style={[styles.generationPanel, { backgroundColor: colors.secondary, borderRadius: colors.radius }]}>
+      <View style={styles.generationHeader}>
+        <ActivityIndicator size="small" color={colors.primary} />
+        <View style={styles.generationCopy}>
+          <Text style={[styles.generationTitle, { color: colors.foreground }]}>Preparing your claim pack</Text>
+          <Text style={[styles.body, { color: colors.mutedForeground }]}>
+            This usually takes a moment while photos and evidence are gathered.
+          </Text>
+        </View>
+      </View>
+      <View style={[styles.generationTrack, { backgroundColor: colors.border }]}>
+        <Animated.View style={[styles.generationFill, { width, backgroundColor: colors.primary }]} />
+      </View>
+      <View style={styles.generationSteps}>
+        {steps.map((step, index) => {
+          const done = index < activeStep;
+          const current = index === activeStep;
+          return (
+            <View key={step} style={styles.generationStep}>
+              <View
+                style={[
+                  styles.generationStepIcon,
+                  {
+                    backgroundColor: done || current ? colors.primary : colors.card,
+                    borderColor: done || current ? colors.primary : colors.border,
+                  },
+                ]}
+              >
+                {done ? (
+                  <Feather name="check" size={10} color={colors.primaryForeground} />
+                ) : (
+                  <Text
+                    style={[
+                      styles.generationStepNumber,
+                      { color: current ? colors.primaryForeground : colors.mutedForeground },
+                    ]}
+                  >
+                    {index + 1}
+                  </Text>
+                )}
+              </View>
+              <Text
+                style={[
+                  styles.generationStepText,
+                  { color: current ? colors.foreground : colors.mutedForeground },
+                ]}
+              >
+                {step}
+              </Text>
+            </View>
+          );
+        })}
+      </View>
     </View>
   );
 }
@@ -1756,6 +1894,24 @@ const styles = StyleSheet.create({
   reviewActions: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
   exportCard: { borderWidth: 1, padding: 13, gap: 12 },
   exportStatus: { minHeight: 38, paddingHorizontal: 10, paddingVertical: 8, flexDirection: "row", gap: 7, alignItems: "center" },
+  generationPanel: { padding: 12, gap: 10 },
+  generationHeader: { flexDirection: "row", gap: 10, alignItems: "flex-start" },
+  generationCopy: { flex: 1, gap: 3 },
+  generationTitle: { fontSize: 13, fontFamily: "Inter_700Bold" },
+  generationTrack: { height: 5, borderRadius: 999, overflow: "hidden" },
+  generationFill: { height: "100%", borderRadius: 999 },
+  generationSteps: { gap: 7 },
+  generationStep: { flexDirection: "row", alignItems: "center", gap: 8 },
+  generationStepIcon: {
+    width: 19,
+    height: 19,
+    borderRadius: 10,
+    borderWidth: 1,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  generationStepNumber: { fontSize: 9, fontFamily: "Inter_700Bold" },
+  generationStepText: { fontSize: 12, fontFamily: "Inter_600SemiBold" },
   warningCard: { borderWidth: 1, padding: 13, gap: 9 },
   warningHeader: { flexDirection: "row", alignItems: "center", gap: 7 },
   warningTitle: { fontSize: 13, fontFamily: "Inter_700Bold" },

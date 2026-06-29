@@ -102,7 +102,16 @@ export function EntitlementsProvider({ children }: { children: React.ReactNode }
   }, [refreshEntitlements]);
 
   const canCreateProperty = useCallback((count: number) => isPaid || count < 1, [isPaid]);
-  const shouldShowUpgradeFor = useCallback((feature: GatedFeature, count = 0) => feature === "property" ? !canCreateProperty(count) : !isPaid, [canCreateProperty, isPaid]);
+  const canUseMeteredAiFeatures = true;
+  const canExportClaimPack = isPaid;
+  const shouldShowUpgradeFor = useCallback((feature: GatedFeature, count = 0) => {
+    if (feature === "property") return !canCreateProperty(count);
+    // AI scans and replacement pricing are usage-metered. Free users should be
+    // allowed to attempt their included allowance; the server remains the source
+    // of truth for monthly limit enforcement.
+    if (feature === "ai_scan" || feature === "replacement_pricing") return false;
+    return !isPaid;
+  }, [canCreateProperty, isPaid]);
   const enforce = useCallback((feature: GatedFeature, count = 0) => {
     const blocked = shouldShowUpgradeFor(feature, count);
     if (!blocked) return true;
@@ -115,10 +124,10 @@ export function EntitlementsProvider({ children }: { children: React.ReactNode }
     subscriptionPeriodEnd: profileQuery.profile?.subscriptionPeriodEnd ?? null,
     isFree: !isPaid, isPlus: plan === "coverly_plus", isFamily: plan === "coverly_family", isPaid,
     gatesEnabled: billingGatesEnabled, isLoading: profileQuery.isLoading, isRefreshing, purchaseLoading,
-    offering, customerInfo, error, canCreateProperty, canUseAiScan: isPaid,
-    canUseReplacementPricing: isPaid, canExportClaimPack: isPaid, shouldShowUpgradeFor, enforce,
+    offering, customerInfo, error, canCreateProperty, canUseAiScan: canUseMeteredAiFeatures,
+    canUseReplacementPricing: canUseMeteredAiFeatures, canExportClaimPack, shouldShowUpgradeFor, enforce,
     refreshEntitlements, purchasePackage, restorePurchases,
-  }), [plan, profileQuery.profile, profileQuery.isLoading, isRefreshing, purchaseLoading, offering, customerInfo, error, canCreateProperty, isPaid, shouldShowUpgradeFor, enforce, refreshEntitlements, purchasePackage, restorePurchases]);
+  }), [plan, profileQuery.profile, profileQuery.isLoading, isRefreshing, purchaseLoading, offering, customerInfo, error, canCreateProperty, canExportClaimPack, shouldShowUpgradeFor, enforce, refreshEntitlements, purchasePackage, restorePurchases]);
   return <Context.Provider value={value}>{children}</Context.Provider>;
 }
 

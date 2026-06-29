@@ -2,6 +2,7 @@
 import { File } from "expo-file-system";
 import { Platform } from "react-native";
 
+import { friendlyNetworkErrorMessage } from "@/lib/network-errors";
 import {
   INVENTORY_PHOTOS_BUCKET,
   SIGNED_URL_EXPIRY_SECS,
@@ -223,6 +224,13 @@ function createUploadFailure(
 }
 
 export function formatUploadFailure(failure: UploadFailure): string {
+  const networkMessage = friendlyNetworkErrorMessage(failure.error);
+  if (networkMessage) return networkMessage;
+
+  if (!__DEV__) {
+    return "We couldn't upload the photo. Check your connection and try again.";
+  }
+
   const user = failure.authenticatedUserIdPresent
     ? `present (${failure.userId ?? "unknown"})`
     : "missing";

@@ -1,6 +1,7 @@
 import { File } from "expo-file-system";
 import { Platform } from "react-native";
 
+import { friendlyNetworkErrorMessage } from "@/lib/network-errors";
 import {
   CLAIM_EVIDENCE_BUCKET,
   getSignedDisplayUrl,
@@ -69,6 +70,9 @@ function evidenceOperationError(
   payload: Record<string, unknown>,
   error: unknown,
 ): Error {
+  const networkMessage = friendlyNetworkErrorMessage(error);
+  if (networkMessage) return new Error(networkMessage);
+
   const metadata = errorMetadata(error);
   const diagnostic = {
     operation,

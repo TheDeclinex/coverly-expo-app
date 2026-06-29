@@ -1,7 +1,7 @@
 import { Feather } from "@expo/vector-icons";
 import { Image } from "expo-image";
 import * as ImagePicker from "expo-image-picker";
-import { Stack, router, usePathname } from "expo-router";
+import { Stack, router, useLocalSearchParams, usePathname } from "expo-router";
 import React from "react";
 import {
   ActivityIndicator,
@@ -42,10 +42,16 @@ export default function FeedbackScreen() {
   const insets = useSafeAreaInsets();
   const { session } = useAuth();
   const pathname = usePathname();
-  const [type, setType] = React.useState<FeedbackType>("issue");
-  const [category, setCategory] = React.useState<FeedbackCategory>("general");
-  const [priority, setPriority] = React.useState<FeedbackPriority>("normal");
-  const [message, setMessage] = React.useState("");
+  const params = useLocalSearchParams<{
+    type?: FeedbackType;
+    category?: FeedbackCategory;
+    priority?: FeedbackPriority;
+    message?: string;
+  }>();
+  const [type, setType] = React.useState<FeedbackType>(typeOptions.includes(params.type as FeedbackType) ? params.type as FeedbackType : "issue");
+  const [category, setCategory] = React.useState<FeedbackCategory>(categoryOptions.includes(params.category as FeedbackCategory) ? params.category as FeedbackCategory : "general");
+  const [priority, setPriority] = React.useState<FeedbackPriority>(priorityOptions.includes(params.priority as FeedbackPriority) ? params.priority as FeedbackPriority : "normal");
+  const [message, setMessage] = React.useState(typeof params.message === "string" ? params.message : "");
   const [screenshot, setScreenshot] = React.useState<FeedbackScreenshotInput | null>(null);
   const [isPicking, setIsPicking] = React.useState(false);
   const [isSubmitting, setIsSubmitting] = React.useState(false);

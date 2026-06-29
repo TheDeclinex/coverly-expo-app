@@ -88,6 +88,7 @@ export function ItemEvidenceSection({
   const [selectedFile, setSelectedFile] = useState<EvidenceFileInput | null>(null);
   const [caption, setCaption] = useState("");
   const [saving, setSaving] = useState(false);
+  const [evidenceSavedTick, setEvidenceSavedTick] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const didAutoOpenRef = React.useRef(false);
@@ -187,8 +188,10 @@ export function ItemEvidenceSection({
         queryClient.invalidateQueries({ queryKey }),
         queryClient.invalidateQueries({ queryKey: ["room-evidence-counts"] }),
       ]);
+      setEvidenceSavedTick(true);
       setModalVisible(false);
       resetDraft();
+      setTimeout(() => setEvidenceSavedTick(false), 1800);
     } catch (saveError) {
       setActionError(saveError instanceof Error ? saveError.message : "Could not add evidence.");
     } finally {
@@ -312,6 +315,14 @@ export function ItemEvidenceSection({
           </View>
         )}
         {actionError ? <Text style={styles.errorText}>{actionError}</Text> : null}
+        {evidenceSavedTick ? (
+          <View style={[styles.successRow, { backgroundColor: colors.accent, borderColor: colors.primary }]}>
+            <Feather name="check-circle" size={15} color={colors.primary} />
+            <Text style={[styles.successText, { color: colors.accentForeground }]}>
+              Evidence uploaded
+            </Text>
+          </View>
+        ) : null}
       </View>
 
       <Modal visible={modalVisible} transparent animationType="slide" onRequestClose={closeModal}>
@@ -434,6 +445,8 @@ const styles = StyleSheet.create({
   dateText: { fontSize: 10, fontFamily: "Inter_400Regular", marginTop: 2 },
   caption: { fontSize: 11, fontFamily: "Inter_400Regular", marginTop: 3, lineHeight: 15 },
   errorText: { color: "#B91C1C", fontSize: 11, fontFamily: "Inter_400Regular", lineHeight: 16 },
+  successRow: { borderWidth: 1, borderRadius: 9, paddingHorizontal: 10, paddingVertical: 8, flexDirection: "row", alignItems: "center", gap: 7 },
+  successText: { flex: 1, fontSize: 12, fontFamily: "Inter_600SemiBold" },
   backdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.42)", justifyContent: "flex-end" },
   sheet: { borderTopLeftRadius: 20, borderTopRightRadius: 20, paddingHorizontal: 18, gap: 10, maxHeight: "88%" },
   handleWrap: { alignItems: "center", paddingTop: 11, paddingBottom: 3 },

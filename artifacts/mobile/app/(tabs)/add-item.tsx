@@ -497,7 +497,7 @@ export default function AddItemScreen() {
         <ScrollView
           contentContainerStyle={[
             styles.scroll,
-            { paddingBottom: insets.bottom + 32 },
+            { paddingBottom: insets.bottom + 112 },
           ]}
           keyboardShouldPersistTaps="handled"
         >
@@ -901,43 +901,55 @@ export default function AddItemScreen() {
             </View>
           ) : null}
 
-          {/* SAVE BUTTON */}
-          <Pressable
-            onPress={handleSave}
-            disabled={saving}
-            style={({ pressed }) => [
-              styles.saveBtn,
-              {
-                backgroundColor: saving ? colors.muted : colors.primary,
-                borderRadius: colors.radius,
-                opacity: pressed ? 0.85 : 1,
-              },
-            ]}
-          >
-            {saving ? (
-              <ActivityIndicator color={colors.primaryForeground} />
-            ) : (
-              <>
-                <Feather
-                  name="check"
-                  size={18}
-                  color={colors.primaryForeground}
-                />
-                <Text
-                  style={{
-                    fontSize: 16,
-                    fontFamily: "Inter_600SemiBold",
-                    color: colors.primaryForeground,
-                  }}
-                >
-                  Save item
-                </Text>
-              </>
-            )}
-          </Pressable>
             </>
           ) : null}
         </ScrollView>
+        {launchStep === "details" ? (
+          <View
+            style={[
+              styles.stickySaveBar,
+              {
+                backgroundColor: colors.card,
+                borderTopColor: colors.border,
+                paddingBottom: insets.bottom + 12,
+              },
+            ]}
+          >
+            <Pressable
+              onPress={handleSave}
+              disabled={saving}
+              style={({ pressed }) => [
+                styles.saveBtn,
+                {
+                  backgroundColor: saving ? colors.muted : colors.primary,
+                  borderRadius: colors.radius,
+                  opacity: pressed ? 0.85 : 1,
+                },
+              ]}
+            >
+              {saving ? (
+                <ActivityIndicator color={colors.primaryForeground} />
+              ) : (
+                <>
+                  <Feather
+                    name="check"
+                    size={18}
+                    color={colors.primaryForeground}
+                  />
+                  <Text
+                    style={{
+                      fontSize: 16,
+                      fontFamily: "Inter_600SemiBold",
+                      color: colors.primaryForeground,
+                    }}
+                  >
+                    Save item
+                  </Text>
+                </>
+              )}
+            </Pressable>
+          </View>
+        ) : null}
       </KeyboardAvoidingView>
       <VoiceInputSheet
         visible={voiceVisible}
@@ -1055,5 +1067,19 @@ const styles = StyleSheet.create({
     gap: 8,
     paddingVertical: 15,
     marginTop: 4,
+  },
+  stickySaveBar: {
+    position: "absolute",
+    bottom: 0,
+    left: 0,
+    right: 0,
+    paddingHorizontal: 16,
+    paddingTop: 10,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    shadowColor: "#0F172A",
+    shadowOffset: { width: 0, height: -3 },
+    shadowOpacity: 0.08,
+    shadowRadius: 8,
+    elevation: 8,
   },
 });

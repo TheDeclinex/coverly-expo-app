@@ -84,6 +84,27 @@ export default function AccountScreen() {
     const result = await restorePurchases();
     Alert.alert(result.ok ? "Purchases restored" : "Restore complete", result.message);
   };
+  const requestAccountDeletion = () => {
+    Alert.alert(
+      "Request account deletion?",
+      "This will open a support request so Coverly can review and process account deletion. It does not delete your account immediately.",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Continue",
+          onPress: () => router.push({
+            pathname: "/feedback",
+            params: {
+              type: "issue",
+              category: "account",
+              priority: "normal",
+              message: "I would like to request deletion of my Coverly account and associated data. Please confirm the next steps.",
+            },
+          } as Href),
+        },
+      ],
+    );
+  };
 
   return (
     <>
@@ -185,9 +206,9 @@ export default function AccountScreen() {
           <AccountRow icon="file-text" title="Terms" value={termsUrl ? undefined : "Not configured"} disabled={!termsUrl} onPress={() => void openLegal(termsUrl, "terms")} />
           <AccountRow
             icon="trash-2"
-            title="Account deletion"
-            subtitle="Secure account deletion is being prepared."
-            value="Unavailable"
+            title="Request account deletion"
+            subtitle="Start a support request to delete your account and associated data."
+            onPress={requestAccountDeletion}
           />
           <AccountRow icon="log-out" title="Sign out" onPress={confirmSignOut} last />
         </AccountSection>

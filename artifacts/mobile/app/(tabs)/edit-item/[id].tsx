@@ -441,7 +441,7 @@ export default function EditItemScreen() {
         <ScrollView
           contentContainerStyle={[
             styles.scroll,
-            { paddingBottom: insets.bottom + 32 },
+            { paddingBottom: insets.bottom + 112 },
           ]}
           keyboardShouldPersistTaps="handled"
         >
@@ -713,7 +713,17 @@ export default function EditItemScreen() {
             </View>
           ) : null}
 
-          {/* SAVE BUTTON */}
+        </ScrollView>
+        <View
+          style={[
+            styles.stickySaveBar,
+            {
+              backgroundColor: colors.card,
+              borderTopColor: colors.border,
+              paddingBottom: insets.bottom + 12,
+            },
+          ]}
+        >
           <Pressable
             onPress={handleSave}
             disabled={saving}
@@ -747,7 +757,7 @@ export default function EditItemScreen() {
               </>
             )}
           </Pressable>
-        </ScrollView>
+        </View>
       </KeyboardAvoidingView>
       <VoiceInputSheet
         visible={voiceVisible}
@@ -835,5 +845,19 @@ const styles = StyleSheet.create({
     gap: 8,
     paddingVertical: 15,
     marginTop: 4,
+  },
+  stickySaveBar: {
+    position: "absolute",
+    bottom: 0,
+    left: 0,
+    right: 0,
+    paddingHorizontal: 16,
+    paddingTop: 10,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    shadowColor: "#0F172A",
+    shadowOffset: { width: 0, height: -3 },
+    shadowOpacity: 0.08,
+    shadowRadius: 8,
+    elevation: 8,
   },
 });

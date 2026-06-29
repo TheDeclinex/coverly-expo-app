@@ -327,8 +327,10 @@ export default function ReplacementPricingScreen() {
       if (normalizedLimit) {
         setLimitModal(normalizedLimit);
       } else {
-        if (__DEV__) console.error("[replacement-pricing] Search failed", searchFailure);
-        setSearchError("Replacement price search failed. Your item value is unchanged.");
+        const message = searchFailure instanceof Error ? searchFailure.message : "Replacement price search failed. Your item value is unchanged.";
+        const expectedNetworkFailure = /offline|connection|network|timed out|try again/i.test(message);
+        if (__DEV__ && !expectedNetworkFailure) console.error("[replacement-pricing] Search failed", searchFailure);
+        setSearchError(searchFailure instanceof ReplacementPriceSearchError ? message : "Replacement price search failed. Your item value is unchanged.");
       }
     } finally {
       setSearching(false);

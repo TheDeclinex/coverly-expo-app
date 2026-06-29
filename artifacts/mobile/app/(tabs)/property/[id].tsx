@@ -31,7 +31,6 @@ import { EmptyState } from "@/components/EmptyState";
 import { ErrorState } from "@/components/ErrorState";
 import { LoadingState } from "@/components/LoadingState";
 import { ContextBackButton } from "@/components/ContextBackButton";
-import { RecommendedActionCard } from "@/components/RecommendedActionCard";
 import { useToast } from "@/components/Toast";
 import { getCategoryColor, getCategoryLegendEntry } from "@/constants/categoryColors";
 import { ENABLE_RECOMMENDED_ACTIONS } from "@/constants/recommendedActions";
@@ -788,6 +787,38 @@ function CoverageBar({
   const clamped = Math.min(percent, 100);
   const fill = getCoverageColor(percent);
   const label = getCoverageStatusLabel(percent);
+  const progress = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    let cancelled = false;
+    let animation: Animated.CompositeAnimation | null = null;
+
+    void AccessibilityInfo.isReduceMotionEnabled().then((reduceMotion) => {
+      if (cancelled) return;
+      if (reduceMotion) {
+        progress.setValue(clamped);
+        return;
+      }
+      animation = Animated.timing(progress, {
+        toValue: clamped,
+        duration: 650,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: false,
+      });
+      animation.start();
+    });
+
+    return () => {
+      cancelled = true;
+      animation?.stop();
+    };
+  }, [clamped, progress]);
+
+  const overlayLeft = progress.interpolate({
+    inputRange: [0, 100],
+    outputRange: ["0%", "100%"],
+    extrapolate: "clamp",
+  });
 
   return (
     <View style={{ gap: 6 }}>
@@ -828,12 +859,12 @@ function CoverageBar({
           style={StyleSheet.absoluteFill}
         />
         {/* Overlay hides the unfilled right portion with the track colour */}
-        <View
+        <Animated.View
           style={{
             position: "absolute",
             top: 0,
             bottom: 0,
-            left: `${clamped}%` as any,
+            left: overlayLeft,
             right: 0,
             backgroundColor: colors.border,
           }}
@@ -1182,6 +1213,7 @@ function RoomCard({
   totalValue,
   categoryValues,
   completedCount,
+  completionPulse,
   colors,
   resolvedCoverUrl,
 }: {
@@ -1191,6 +1223,7 @@ function RoomCard({
   totalValue: number;
   categoryValues: RoomStat["categoryValues"];
   completedCount: number;
+  completionPulse?: boolean;
   colors: ReturnType<typeof import("@/hooks/useColors").useColors>;
   /** Pre-resolved signed URL from the parent's batch useSignedUrls() call. */
   resolvedCoverUrl?: string | null;
@@ -1209,6 +1242,7 @@ function RoomCard({
   const ringProgress = useRef(new Animated.Value(0)).current;
   const [renderedRingProgress, setRenderedRingProgress] = useState(0);
   const [categoryLegendVisible, setCategoryLegendVisible] = useState(false);
+  const completePulse = useRef(new Animated.Value(0)).current;
   const completionLabel =
     completionPct >= 1 ? "Complete" : `${Math.round(completionPct * 100)}% complete`;
   const renderedRingOffset = RING_CIRC * (1 - completionPct * renderedRingProgress);
@@ -1242,8 +1276,50 @@ function RoomCard({
     };
   }, [completionPct, ringProgress]);
 
+  useEffect(() => {
+    if (!completionPulse) return;
+    let cancelled = false;
+    let animation: Animated.CompositeAnimation | null = null;
+
+    void AccessibilityInfo.isReduceMotionEnabled().then((reduceMotion) => {
+      if (cancelled || reduceMotion) return;
+      completePulse.setValue(0);
+      animation = Animated.sequence([
+        Animated.timing(completePulse, {
+          toValue: 1,
+          duration: 180,
+          easing: Easing.out(Easing.cubic),
+          useNativeDriver: true,
+        }),
+        Animated.timing(completePulse, {
+          toValue: 0,
+          duration: 420,
+          easing: Easing.out(Easing.cubic),
+          useNativeDriver: true,
+        }),
+      ]);
+      animation.start();
+    });
+
+    return () => {
+      cancelled = true;
+      animation?.stop();
+    };
+  }, [completePulse, completionPulse]);
+
+  const pulseStyle = {
+    transform: [
+      {
+        scale: completePulse.interpolate({
+          inputRange: [0, 1],
+          outputRange: [1, 1.025],
+        }),
+      },
+    ],
+  };
+
   return (
-    <View>
+    <Animated.View style={pulseStyle}>
       <Pressable
         onPress={handlePress}
         style={({ pressed }) => [
@@ -1439,7 +1515,7 @@ function RoomCard({
           </View>
         </View>
       </Modal>
-    </View>
+    </Animated.View>
   );
 }
 
@@ -1742,6 +1818,7 @@ const QUICK_ROOM_NAMES = [
 
 export default function PropertyDetailScreen() {
   const { id, name } = useLocalSearchParams<{ id: string; name: string }>();
+  const routePropertyName = typeof name === "string" && name.trim() ? name : "Property";
   const { session } = useAuth();
   const colors = useColors();
   const insets = useSafeAreaInsets();
@@ -1750,6 +1827,10 @@ export default function PropertyDetailScreen() {
   const [coverModalVisible, setCoverModalVisible] = useState(false);
   const [reviewItemsVisible, setReviewItemsVisible] = useState(false);
   const [coverPhotoUploading, setCoverPhotoUploading] = useState(false);
+  const [coverSavedTick, setCoverSavedTick] = useState(false);
+  const [completedPulseRoomIds, setCompletedPulseRoomIds] = useState<Set<string>>(new Set());
+  const previousCompletionByRoomRef = useRef<Map<string, boolean>>(new Map());
+  const completedPulseTimersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
 
   // Add-room sheet state
   const [addRoomVisible, setAddRoomVisible] = useState(false);
@@ -1893,6 +1974,42 @@ export default function PropertyDetailScreen() {
 
     return Array.from(grouped.values());
   }, [items, rooms]);
+
+  useEffect(() => {
+    if (!stats) return;
+    const previous = previousCompletionByRoomRef.current;
+    const next = new Map<string, boolean>();
+    const newlyCompleted: string[] = [];
+
+    for (const roomStat of stats.roomStats) {
+      const isComplete =
+        roomStat.itemCount > 0 &&
+        (completionMap.get(roomStat.room.id) ?? 0) >= roomStat.itemCount;
+      next.set(roomStat.room.id, isComplete);
+      if (isComplete && previous.get(roomStat.room.id) === false) {
+        newlyCompleted.push(roomStat.room.id);
+      }
+    }
+
+    previousCompletionByRoomRef.current = next;
+    if (newlyCompleted.length === 0) return;
+
+    setCompletedPulseRoomIds((current) => new Set([...current, ...newlyCompleted]));
+    const timer = setTimeout(() => {
+      setCompletedPulseRoomIds((current) => {
+        const updated = new Set(current);
+        newlyCompleted.forEach((roomId) => updated.delete(roomId));
+        return updated;
+      });
+    }, 1400);
+    completedPulseTimersRef.current.push(timer);
+  }, [completionMap, stats]);
+
+  useEffect(() => {
+    return () => {
+      completedPulseTimersRef.current.forEach(clearTimeout);
+    };
+  }, []);
 
   const isLoading = roomsLoading || itemsLoading;
 
@@ -2040,6 +2157,8 @@ export default function PropertyDetailScreen() {
         queryClient.invalidateQueries({ queryKey: ["inventory-files"] }),
       ]);
       showToast("Cover photo saved");
+      setCoverSavedTick(true);
+      setTimeout(() => setCoverSavedTick(false), 1800);
     } finally {
       setCoverPhotoUploading(false);
     }
@@ -2198,6 +2317,8 @@ export default function PropertyDetailScreen() {
             >
               {coverPhotoUploading ? (
                 <ActivityIndicator size="small" color="#fff" />
+              ) : coverSavedTick ? (
+                <Feather name="check" size={16} color="#fff" />
               ) : (
                 <Feather name="camera" size={16} color="#fff" />
               )}
@@ -2416,39 +2537,35 @@ export default function PropertyDetailScreen() {
 
         {/* 4 — Rooms heading + add-room button */}
         {propertyRecommendedAction ? (
-          <RecommendedActionCard {...propertyRecommendedAction} />
+          <View style={[styles.compactRecommendedCard, { backgroundColor: colors.card, borderColor: colors.border, borderRadius: colors.radius }]}>
+            <View style={styles.compactRecommendedCopy}>
+              <Text style={[styles.compactRecommendedKicker, { color: colors.mutedForeground }]}>RECOMMENDED ACTION</Text>
+              <Text style={[styles.compactRecommendedTitle, { color: colors.foreground }]} numberOfLines={1}>
+                {propertyRecommendedAction.body}
+              </Text>
+              <Text style={[styles.compactRecommendedDetail, { color: colors.mutedForeground }]} numberOfLines={2}>
+                {propertyRecommendedAction.detail}
+              </Text>
+            </View>
+            <Pressable
+              accessibilityRole="button"
+              onPress={propertyRecommendedAction.onPrimaryPress}
+              style={({ pressed }) => [
+                styles.compactRecommendedButton,
+                { backgroundColor: colors.primary, opacity: pressed ? 0.82 : 1 },
+              ]}
+            >
+              <Text style={[styles.compactRecommendedButtonText, { color: colors.primaryForeground }]}>
+                {propertyRecommendedAction.primaryLabel}
+              </Text>
+              <Feather name="arrow-right" size={13} color={colors.primaryForeground} />
+            </Pressable>
+          </View>
         ) : null}
 
-        <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
-          <Text style={[styles.sectionHeading, { color: colors.foreground }]}>
-            Rooms
-          </Text>
-          <Pressable
-            onPress={() => {
-              setAddRoomName("");
-              setAddRoomType(null);
-              setAddRoomError(null);
-              setAddRoomVisible(true);
-            }}
-            hitSlop={10}
-            style={({ pressed }) => ({
-              flexDirection: "row",
-              alignItems: "center",
-              gap: 5,
-              paddingHorizontal: 12,
-              paddingVertical: 6,
-              borderRadius: 20,
-              borderWidth: 1,
-              borderColor: colors.border,
-              backgroundColor: pressed ? colors.secondary : colors.card,
-            })}
-          >
-            <Feather name="plus" size={14} color={colors.primary} />
-            <Text style={{ fontSize: 13, fontFamily: "Inter_500Medium", color: colors.primary }}>
-              Add room
-            </Text>
-          </Pressable>
-        </View>
+        <Text style={[styles.sectionHeading, { color: colors.foreground }]}>
+          Rooms
+        </Text>
       </View>
       </>
     );
@@ -2597,7 +2714,8 @@ export default function PropertyDetailScreen() {
     <>
       <Stack.Screen
         options={{
-          title: property?.name ?? name ?? "Property",
+          title: property?.name ?? routePropertyName,
+          headerTitle: property?.name ?? routePropertyName,
           headerTitleAlign: "center",
           headerBackVisible: false,
           headerLeft: () => (
@@ -2612,18 +2730,50 @@ export default function PropertyDetailScreen() {
           },
           headerTintColor: colors.primary,
           headerRight: () => (
-            <Pressable
-              onPress={() =>
-                router.push({
-                  pathname: "/(tabs)/edit-property/[id]",
-                  params: { id },
-                })
-              }
-              style={{ padding: 4 }}
-              hitSlop={8}
-            >
-              <Feather name="edit-2" size={19} color={colors.primary} />
-            </Pressable>
+            <View style={styles.propertyHeaderActions}>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Add room"
+                onPress={() => {
+                  setAddRoomName("");
+                  setAddRoomType(null);
+                  setAddRoomError(null);
+                  setAddRoomVisible(true);
+                }}
+                hitSlop={8}
+                style={({ pressed }) => [
+                  styles.addRoomHeaderAction,
+                  {
+                    backgroundColor: colors.secondary,
+                    borderColor: colors.border,
+                    opacity: pressed ? 0.72 : 1,
+                  },
+                ]}
+              >
+                <Feather name="plus" size={16} color={colors.primary} />
+                <Text style={[styles.addRoomHeaderText, { color: colors.primary }]}>Room</Text>
+              </Pressable>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Edit property"
+                onPress={() =>
+                  router.push({
+                    pathname: "/(tabs)/edit-property/[id]",
+                    params: { id },
+                  })
+                }
+                style={({ pressed }) => [
+                  styles.editPropertyHeaderAction,
+                  {
+                    backgroundColor: colors.secondary,
+                    opacity: pressed ? 0.72 : 1,
+                  },
+                ]}
+                hitSlop={8}
+              >
+                <Feather name="edit-2" size={18} color={colors.primary} />
+              </Pressable>
+            </View>
           ),
         }}
       />
@@ -2653,6 +2803,7 @@ export default function PropertyDetailScreen() {
                 totalValue={rs.totalValue}
                 categoryValues={rs.categoryValues}
                 completedCount={completionMap.get(rs.room.id) ?? 0}
+                completionPulse={completedPulseRoomIds.has(rs.room.id)}
                 colors={colors}
                 resolvedCoverUrl={roomSignedUrlById.get(rs.room.id) ?? null}
               />
@@ -3142,6 +3293,45 @@ const styles = StyleSheet.create({
     fontFamily: "Inter_700Bold",
     marginTop: 2,
     marginBottom: 2,
+  },
+  compactRecommendedCard: {
+    borderWidth: 1,
+    padding: 11,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
+  compactRecommendedCopy: { flex: 1, minWidth: 0, gap: 2 },
+  compactRecommendedKicker: { fontSize: 9, fontFamily: "Inter_700Bold", letterSpacing: 0.7 },
+  compactRecommendedTitle: { fontSize: 13, fontFamily: "Inter_700Bold" },
+  compactRecommendedDetail: { fontSize: 11, lineHeight: 15, fontFamily: "Inter_400Regular" },
+  compactRecommendedButton: {
+    minHeight: 34,
+    borderRadius: 9,
+    paddingHorizontal: 10,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 4,
+  },
+  compactRecommendedButtonText: { fontSize: 12, fontFamily: "Inter_700Bold" },
+  propertyHeaderActions: { flexDirection: "row", alignItems: "center", gap: 7 },
+  addRoomHeaderAction: {
+    minHeight: 34,
+    borderWidth: 1,
+    borderRadius: 17,
+    paddingHorizontal: 10,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+  },
+  addRoomHeaderText: { fontSize: 12, fontFamily: "Inter_600SemiBold" },
+  editPropertyHeaderAction: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: "center",
+    justifyContent: "center",
   },
 
   // Room card

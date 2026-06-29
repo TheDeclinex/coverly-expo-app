@@ -12,6 +12,8 @@ import {
   Alert,
   Dimensions,
   FlatList,
+  InteractionManager,
+  KeyboardAvoidingView,
   Modal,
   Platform,
   Pressable,
@@ -166,7 +168,6 @@ export default function ScanScreen() {
   const [images, setImages] = useState<ScanEncodedImage[]>([]);
   const [scanStatus, setScanStatus] = useState<ScanStatus>("idle");
   const [detectedItems, setDetectedItems] = useState<ScanDetectedItem[]>([]);
-  const [selectedReviewIndices, setSelectedReviewIndices] = useState<Set<number>>(new Set());
   const [scanError, setScanError] = useState<string | null>(null);
   const [limitModal, setLimitModal] = useState<NormalizedLimitError | null>(null);
   const [savingIds, setSavingIds] = useState<Set<number>>(new Set());
@@ -175,15 +176,23 @@ export default function ScanScreen() {
   const [activePinIndex, setActivePinIndex] = useState<number | null>(null);
   const [activeSourcePhotoIdx, setActiveSourcePhotoIdx] = useState(0);
   const [multiPhotoPromptVisible, setMultiPhotoPromptVisible] = useState(false);
+  const [reviewNameEdit, setReviewNameEdit] = useState<{ index: number; draft: string } | null>(null);
+  const isActiveMultiPhotoSession =
+    selectedMode === "multi_photo_room" &&
+    images.length > 0 &&
+    scanStatus === "idle";
 
   const flatListRef = useRef<FlatList<ScanDetectedItem>>(null);
   const multiPhotoCameraTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const multiPhotoCameraInteractionRef = useRef<{ cancel: () => void } | null>(null);
+  const pendingMultiPhotoCameraRef = useRef(false);
   const aiScanEntitlementCheckedRef = useRef(false);
 
   useEffect(() => () => {
     if (multiPhotoCameraTimerRef.current) {
       clearTimeout(multiPhotoCameraTimerRef.current);
     }
+    multiPhotoCameraInteractionRef.current?.cancel();
   }, []);
 
   const { data: properties, isLoading: propertiesLoading } = useQuery({
@@ -229,6 +238,9 @@ export default function ScanScreen() {
       clearTimeout(multiPhotoCameraTimerRef.current);
       multiPhotoCameraTimerRef.current = null;
     }
+    multiPhotoCameraInteractionRef.current?.cancel();
+    multiPhotoCameraInteractionRef.current = null;
+    pendingMultiPhotoCameraRef.current = false;
     setSelectedMode(null);
     setImages([]);
     setScanError(null);
@@ -280,6 +292,11 @@ export default function ScanScreen() {
       return;
     }
     const isMulti = selectedMode === "multi_photo_room";
+    const remainingMultiPhotos = MAX_MULTI_PHOTO_IMAGES - images.length;
+    if (isMulti && remainingMultiPhotos <= 0) {
+      setMultiPhotoPromptVisible(true);
+      return;
+    }
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (status !== "granted") {
       Alert.alert("Permission needed", "Allow photo library access to continue.");
@@ -289,7 +306,7 @@ export default function ScanScreen() {
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
       allowsMultipleSelection: isMulti,
-      selectionLimit: isMulti ? MAX_MULTI_PHOTO_IMAGES : 1,
+      selectionLimit: isMulti ? remainingMultiPhotos : 1,
       quality: 0.8,
       base64: true,
     });
@@ -334,6 +351,10 @@ export default function ScanScreen() {
     if (!mode) return;
     if (!selectedFileId || !selectedRoomId) {
       setScanError("Choose a property and room before opening the camera.");
+      return;
+    }
+    if (mode === "multi_photo_room" && images.length >= MAX_MULTI_PHOTO_IMAGES) {
+      setMultiPhotoPromptVisible(true);
       return;
     }
     // On web the camera/file prompt must be opened directly from the mode-card
@@ -383,6 +404,33 @@ export default function ScanScreen() {
       setScanError("Could not prepare the captured photo for scanning. Please try again.");
     }
   };
+
+  const openPendingMultiPhotoCamera = () => {
+    if (!pendingMultiPhotoCameraRef.current || multiPhotoPromptVisible) return;
+    pendingMultiPhotoCameraRef.current = false;
+
+    if (selectedMode !== "multi_photo_room" || scanStatus !== "idle" || images.length >= MAX_MULTI_PHOTO_IMAGES) {
+      if (images.length >= MAX_MULTI_PHOTO_IMAGES) setMultiPhotoPromptVisible(true);
+      return;
+    }
+
+    if (multiPhotoCameraTimerRef.current) {
+      clearTimeout(multiPhotoCameraTimerRef.current);
+      multiPhotoCameraTimerRef.current = null;
+    }
+    multiPhotoCameraInteractionRef.current?.cancel();
+    multiPhotoCameraInteractionRef.current = InteractionManager.runAfterInteractions(() => {
+      multiPhotoCameraInteractionRef.current = null;
+      multiPhotoCameraTimerRef.current = setTimeout(() => {
+        multiPhotoCameraTimerRef.current = null;
+        void takePhoto("multi_photo_room", false);
+      }, Platform.OS === "ios" ? 650 : 450);
+    });
+  };
+
+  useEffect(() => {
+    openPendingMultiPhotoCamera();
+  }, [multiPhotoPromptVisible]);
 
   const extractVideoFrames = async (videoUri: string, durationMs: number | null | undefined): Promise<ScanEncodedImage[]> => {
     const effectiveDuration = durationMs && durationMs > 0 ? durationMs : 10_000;
@@ -471,18 +519,13 @@ export default function ScanScreen() {
   };
 
   const takeAnotherMultiPhoto = () => {
-    setMultiPhotoPromptVisible(false);
-    if (multiPhotoCameraTimerRef.current) {
-      clearTimeout(multiPhotoCameraTimerRef.current);
+    if (images.length >= MAX_MULTI_PHOTO_IMAGES) {
+      setMultiPhotoPromptVisible(true);
+      return;
     }
-
-    // Let the native modal finish dismissing before presenting ImagePicker.
-    // Launching the picker in the same tick can leave iOS/Android on the scan
-    // type screen because the previous native presentation is still closing.
-    multiPhotoCameraTimerRef.current = setTimeout(() => {
-      multiPhotoCameraTimerRef.current = null;
-      void takePhoto("multi_photo_room", false);
-    }, Platform.OS === "ios" ? 350 : 150);
+    pendingMultiPhotoCameraRef.current = true;
+    setScanError(null);
+    setMultiPhotoPromptVisible(false);
   };
 
   const chooseScanMode = (mode: ScanMode, comingSoon?: boolean) => {
@@ -492,6 +535,16 @@ export default function ScanScreen() {
       return;
     }
     if (!enforce("ai_scan")) return;
+
+    if (mode === "multi_photo_room" && isActiveMultiPhotoSession) {
+      aiScanEntitlementCheckedRef.current = true;
+      if (images.length >= MAX_MULTI_PHOTO_IMAGES) {
+        setMultiPhotoPromptVisible(true);
+      } else {
+        void takePhoto("multi_photo_room", false);
+      }
+      return;
+    }
 
     clearCaptureState();
     aiScanEntitlementCheckedRef.current = true;
@@ -628,7 +681,6 @@ export default function ScanScreen() {
     setActiveSourcePhotoIdx(0);
     setActivePinIndex(null);
     setDetectedItems(itemsWithThumbs);
-    setSelectedReviewIndices(new Set(itemsWithThumbs.map((_, index) => index)));
     setScanStatus("reviewing");
     void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
   };
@@ -636,13 +688,11 @@ export default function ScanScreen() {
   const handleDiscardItem = (index: number) => {
     void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     setDetectedItems((prev) => prev.filter((_, i) => i !== index));
-    setSelectedReviewIndices((prev) => {
-      const next = new Set<number>();
-      prev.forEach((value) => {
-        if (value < index) next.add(value);
-        else if (value > index) next.add(value - 1);
-      });
-      return next;
+    setReviewNameEdit((current) => {
+      if (!current) return null;
+      if (current.index === index) return null;
+      if (current.index > index) return { ...current, index: current.index - 1 };
+      return current;
     });
     setActivePinIndex((current) => {
       if (current == null) return current;
@@ -651,13 +701,50 @@ export default function ScanScreen() {
     });
   };
 
-  const handleToggleReviewItem = (index: number) => {
-    void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    setSelectedReviewIndices((prev) => {
-      const next = new Set(prev);
-      if (next.has(index)) next.delete(index);
-      else next.add(index);
-      return next;
+  const updateDetectedItem = (index: number, patch: Partial<ScanDetectedItem>) => {
+    setDetectedItems((prev) =>
+      prev.map((item, itemIndex) => (itemIndex === index ? { ...item, ...patch } : item)),
+    );
+  };
+
+  const updateDetectedName = (index: number, value: string) => {
+    const nextName = value.trimStart();
+    if (!nextName.trim()) return;
+    updateDetectedItem(index, { name: nextName });
+  };
+
+  const openReviewNameEdit = (index: number, currentName: string) => {
+    setReviewNameEdit({ index, draft: currentName });
+    void Haptics.selectionAsync().catch(() => undefined);
+  };
+
+  const saveReviewNameEdit = () => {
+    if (!reviewNameEdit) return;
+    const nextName = reviewNameEdit.draft.trim();
+    if (nextName) updateDetectedName(reviewNameEdit.index, nextName);
+    setReviewNameEdit(null);
+  };
+
+  const updateDetectedQuantity = (index: number, value: string) => {
+    const parsed = Number.parseInt(value.replace(/[^0-9]/g, ""), 10);
+    if (!Number.isInteger(parsed) || parsed < 1) return;
+    updateDetectedItem(index, { quantity: parsed });
+  };
+
+  const updateDetectedPrice = (index: number, value: string) => {
+    const cleaned = value.replace(/[^0-9.]/g, "").trim();
+    if (!cleaned) {
+      updateDetectedItem(index, { estimatedPrice: null, unitEstimatedPrice: null });
+      return;
+    }
+    const parsed = Number.parseFloat(cleaned);
+    if (!Number.isFinite(parsed) || parsed < 0) return;
+    const rounded = Math.round(parsed * 100) / 100;
+    updateDetectedItem(index, {
+      estimatedPrice: rounded,
+      unitEstimatedPrice: rounded,
+      priceSourceType: "user_entered",
+      valuationBasis: "manual",
     });
   };
 
@@ -730,13 +817,11 @@ export default function ScanScreen() {
       return;
     }
 
-    const selectedEntries = detectedItems
-      .map((item, index) => ({ item, index }))
-      .filter(({ index }) => selectedReviewIndices.has(index));
+    const selectedEntries = detectedItems.map((item, index) => ({ item, index }));
 
     if (selectedEntries.length === 0) {
       setScanStatus("reviewing");
-      setScanSaveError("Select at least one detected item to save.");
+      setScanSaveError("No detected items left to save.");
       return;
     }
 
@@ -808,15 +893,6 @@ export default function ScanScreen() {
         showToast(`${savedItemIds.length} item${savedItemIds.length === 1 ? "" : "s"} saved`);
       }
       setDetectedItems((prev) => prev.filter((_, i) => !savedIndices.includes(i)));
-      setSelectedReviewIndices((prev) => {
-        const next = new Set<number>();
-        prev.forEach((value) => {
-          if (savedIndices.includes(value)) return;
-          const shift = savedIndices.filter((savedIndex) => savedIndex < value).length;
-          next.add(value - shift);
-        });
-        return next;
-      });
       setPartialFailures(failures);
       setScanStatus("reviewing");
       return;
@@ -827,7 +903,6 @@ export default function ScanScreen() {
     showToast(`${savedItemIds.length} item${savedItemIds.length === 1 ? "" : "s"} added to ${getDestRoomName() ?? "room"}`);
     setScanStatus("done");
     setDetectedItems([]);
-    setSelectedReviewIndices(new Set());
 
     const roomName = getDestRoomName() ?? "Room";
     router.replace({
@@ -847,10 +922,12 @@ export default function ScanScreen() {
       clearTimeout(multiPhotoCameraTimerRef.current);
       multiPhotoCameraTimerRef.current = null;
     }
+    multiPhotoCameraInteractionRef.current?.cancel();
+    multiPhotoCameraInteractionRef.current = null;
+    pendingMultiPhotoCameraRef.current = false;
     setSelectedMode(null);
     setImages([]);
     setDetectedItems([]);
-    setSelectedReviewIndices(new Set());
     setScanStatus("idle");
     setScanError(null);
     setLimitModal(null);
@@ -913,7 +990,7 @@ export default function ScanScreen() {
         <View style={[styles.preparingScreen, { backgroundColor: colors.background }]}>
           <EmptyState
             icon="check-square"
-            title="No items selected"
+            title="No items left to save"
             subtitle="Scan again to capture another photo, or go back to the room."
           />
           <View style={{ flexDirection: "row", gap: 10, marginTop: 8 }}>
@@ -938,7 +1015,7 @@ export default function ScanScreen() {
   }
 
   if ((scanStatus === "reviewing" || scanStatus === "saving") && detectedItems.length > 0) {
-    const selectedCount = detectedItems.filter((_, index) => selectedReviewIndices.has(index)).length;
+    const remainingCount = detectedItems.length;
     // Pin map layout — computed once per render of the review screen
     const PHOTO_W = Dimensions.get("window").width - 32;
     const PHOTO_H = Math.round(PHOTO_W * 0.72);
@@ -1087,16 +1164,8 @@ export default function ScanScreen() {
               const isSaving = savingIds.has(index);
               const badge = confidenceBadgeStyle(item.confidence);
               const isActive = activePinIndex === index;
-              const isSelectedForSave = selectedReviewIndices.has(index);
-
               return (
-                <Pressable
-                  onPress={() => {
-                    setActivePinIndex(isActive ? null : index);
-                    // Switch the source photo panel to this card's source image so the
-                    // matching pin is always visible after tapping a card.
-                    setActiveSourcePhotoIdx(item.sourcePhotoIndex ?? 0);
-                  }}
+                <View
                   style={[
                     revStyles.card,
                     {
@@ -1109,7 +1178,15 @@ export default function ScanScreen() {
                   ]}
                 >
                   {/* Thumbnail with optional pin number badge */}
-                  <View style={{ position: "relative" }}>
+                  <Pressable
+                    onPress={() => {
+                      setActivePinIndex(isActive ? null : index);
+                      // Switch the source photo panel to this card's source image so the
+                      // matching pin is always visible after tapping a card.
+                      setActiveSourcePhotoIdx(item.sourcePhotoIndex ?? 0);
+                    }}
+                    style={{ position: "relative" }}
+                  >
                     <ExpandableImage
                       uri={item.sourceImageUri}
                       style={[revStyles.thumb, { borderTopLeftRadius: colors.radius, borderBottomLeftRadius: colors.radius }]}
@@ -1125,13 +1202,36 @@ export default function ScanScreen() {
                         <Text style={pinStyles.cardBadgeLabel}>{index + 1}</Text>
                       </View>
                     )}
-                  </View>
+                  </Pressable>
 
                   {/* Card body */}
                   <View style={revStyles.cardBody}>
-                    <Text style={[revStyles.itemName, { color: colors.foreground }]} numberOfLines={2}>
-                      {item.name}
-                    </Text>
+                    <View style={revStyles.reviewEditHeader}>
+                      <Text style={[revStyles.reviewEditKicker, { color: colors.mutedForeground }]}>
+                        AI result
+                      </Text>
+                      <Text style={[revStyles.reviewEditHint, { color: colors.mutedForeground }]}>
+                        Tap fields to correct before saving
+                      </Text>
+                    </View>
+                    <Pressable
+                      accessibilityRole="button"
+                      accessibilityLabel="Edit detected item name"
+                      onPress={() => openReviewNameEdit(index, item.name)}
+                      disabled={isSaving || scanStatus === "saving"}
+                      style={({ pressed }) => [
+                        revStyles.reviewNameInput,
+                        {
+                          borderColor: colors.border,
+                          backgroundColor: colors.background,
+                          opacity: pressed || isSaving || scanStatus === "saving" ? 0.72 : 1,
+                        },
+                      ]}
+                    >
+                      <Text style={[revStyles.reviewNameText, { color: colors.foreground }]} numberOfLines={2}>
+                        {item.name}
+                      </Text>
+                    </Pressable>
 
                     <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 5, alignItems: "center" }}>
                       {item.category ? (
@@ -1169,9 +1269,63 @@ export default function ScanScreen() {
                       </Text>
                     ) : null}
 
+                    <View style={revStyles.reviewEditGrid}>
+                      <View style={revStyles.reviewEditField}>
+                        <Text style={[revStyles.reviewEditLabel, { color: colors.mutedForeground }]}>Qty</Text>
+                        <TextInput
+                          accessibilityLabel="Detected item quantity"
+                          value={String(item.quantity ?? 1)}
+                          onChangeText={(value) => updateDetectedQuantity(index, value)}
+                          keyboardType="numeric"
+                          inputMode="numeric"
+                          selectTextOnFocus
+                          disableFullscreenUI
+                          returnKeyType="done"
+                          editable={!isSaving && scanStatus !== "saving"}
+                          style={[
+                            revStyles.reviewSmallInput,
+                            {
+                              color: colors.foreground,
+                              borderColor: colors.border,
+                              backgroundColor: colors.background,
+                            },
+                          ]}
+                        />
+                      </View>
+                      <View style={[revStyles.reviewEditField, { flex: 1.7 }]}>
+                        <Text style={[revStyles.reviewEditLabel, { color: colors.mutedForeground }]}>
+                          {(item.quantity ?? 1) > 1 ? "Each price" : "Price"}
+                        </Text>
+                        <TextInput
+                          accessibilityLabel="Detected item replacement price"
+                          value={
+                            item.unitEstimatedPrice != null || item.estimatedPrice != null
+                              ? String(item.unitEstimatedPrice ?? item.estimatedPrice)
+                              : ""
+                          }
+                          onChangeText={(value) => updateDetectedPrice(index, value)}
+                          keyboardType="decimal-pad"
+                          inputMode="decimal"
+                          placeholder="0"
+                          placeholderTextColor={colors.mutedForeground}
+                          selectTextOnFocus
+                          disableFullscreenUI
+                          returnKeyType="done"
+                          editable={!isSaving && scanStatus !== "saving"}
+                          style={[
+                            revStyles.reviewSmallInput,
+                            {
+                              color: colors.foreground,
+                              borderColor: colors.border,
+                              backgroundColor: colors.background,
+                            },
+                          ]}
+                        />
+                      </View>
+                    </View>
                     {item.estimatedPrice != null ? (
                       <Text style={[revStyles.price, { color: colors.foreground }]}>
-                        {formatCurrency(item.estimatedPrice)}
+                        {formatCurrency((item.unitEstimatedPrice ?? item.estimatedPrice) * (item.quantity ?? 1))}
                       </Text>
                     ) : null}
                   </View>
@@ -1181,39 +1335,18 @@ export default function ScanScreen() {
                     <Pressable
                       onPress={() => handleDiscardItem(index)}
                       disabled={isSaving}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Discard ${item.name}`}
                       hitSlop={4}
                       style={({ pressed }) => [
                         revStyles.actionBtn,
-                        { backgroundColor: colors.secondary, borderRadius: 8, opacity: pressed || isSaving ? 0.6 : 1 },
+                        { backgroundColor: "#FEF2F2", borderRadius: 8, opacity: pressed || isSaving ? 0.6 : 1 },
                       ]}
                     >
-                      <Feather name="x" size={15} color={colors.mutedForeground} />
-                    </Pressable>
-                    <Pressable
-                      onPress={() => handleToggleReviewItem(index)}
-                      disabled={isSaving}
-                      hitSlop={4}
-                      style={({ pressed }) => [
-                        revStyles.actionBtn,
-                        {
-                          backgroundColor: isSelectedForSave ? colors.primary : colors.secondary,
-                          borderRadius: 8,
-                          opacity: pressed || isSaving ? 0.7 : 1,
-                        },
-                      ]}
-                    >
-                      {isSaving ? (
-                        <ActivityIndicator size="small" color={colors.primaryForeground} />
-                      ) : (
-                        <Feather
-                          name="check"
-                          size={15}
-                          color={isSelectedForSave ? colors.primaryForeground : colors.mutedForeground}
-                        />
-                      )}
+                      <Feather name="trash-2" size={15} color="#B91C1C" />
                     </Pressable>
                   </View>
-                </Pressable>
+                </View>
               );
             }}
           />
@@ -1227,11 +1360,11 @@ export default function ScanScreen() {
           >
             <Pressable
               onPress={() => void handleSaveAll()}
-              disabled={scanStatus === "saving" || selectedCount === 0}
+              disabled={scanStatus === "saving" || remainingCount === 0}
               style={({ pressed }) => [
                 revStyles.saveAllBtn,
                 {
-                  backgroundColor: scanStatus === "saving" || selectedCount === 0 ? colors.muted : colors.primary,
+                  backgroundColor: scanStatus === "saving" || remainingCount === 0 ? colors.muted : colors.primary,
                   borderRadius: colors.radius,
                   opacity: pressed ? 0.85 : 1,
                 },
@@ -1245,14 +1378,93 @@ export default function ScanScreen() {
               <Text style={[revStyles.saveAllText, { color: colors.primaryForeground }]}>
                 {scanStatus === "saving"
                   ? "Saving…"
-                  : selectedCount === 0
-                    ? "No items selected"
-                    : selectedCount === 1
-                    ? "Save 1 item"
-                    : `Save ${selectedCount} items`}
+                  : remainingCount === 0
+                    ? "No items to save"
+                    : remainingCount === 1
+                    ? "Save item"
+                    : `Save all ${remainingCount} items`}
               </Text>
             </Pressable>
           </View>
+          <Modal
+            visible={reviewNameEdit != null}
+            transparent
+            animationType="fade"
+            onRequestClose={() => setReviewNameEdit(null)}
+          >
+            <KeyboardAvoidingView
+              style={revStyles.reviewNameModalRoot}
+              behavior={Platform.OS === "ios" ? "padding" : undefined}
+            >
+              <Pressable style={revStyles.reviewNameModalBackdrop} onPress={() => setReviewNameEdit(null)}>
+                <Pressable
+                  accessibilityRole="none"
+                  onPress={(event) => event.stopPropagation()}
+                  style={[
+                    revStyles.reviewNameModalCard,
+                    {
+                      backgroundColor: colors.card,
+                      borderColor: colors.border,
+                      borderRadius: colors.radius + 4,
+                    },
+                  ]}
+                >
+                  <Text style={[revStyles.reviewNameModalTitle, { color: colors.foreground }]}>
+                    Edit item name
+                  </Text>
+                  <TextInput
+                    autoFocus
+                    accessibilityLabel="Detected item name"
+                    value={reviewNameEdit?.draft ?? ""}
+                    onChangeText={(draft) =>
+                      setReviewNameEdit((current) => (current ? { ...current, draft } : current))
+                    }
+                    disableFullscreenUI
+                    returnKeyType="done"
+                    onSubmitEditing={saveReviewNameEdit}
+                    style={[
+                      revStyles.reviewNameModalInput,
+                      {
+                        color: colors.foreground,
+                        backgroundColor: colors.background,
+                        borderColor: colors.primary,
+                      },
+                    ]}
+                  />
+                  <View style={revStyles.reviewNameModalActions}>
+                    <Pressable
+                      accessibilityRole="button"
+                      onPress={() => setReviewNameEdit(null)}
+                      style={({ pressed }) => [
+                        revStyles.reviewNameModalButton,
+                        { borderColor: colors.border, opacity: pressed ? 0.7 : 1 },
+                      ]}
+                    >
+                      <Text style={[revStyles.reviewNameModalButtonText, { color: colors.foreground }]}>
+                        Cancel
+                      </Text>
+                    </Pressable>
+                    <Pressable
+                      accessibilityRole="button"
+                      onPress={saveReviewNameEdit}
+                      style={({ pressed }) => [
+                        revStyles.reviewNameModalButton,
+                        {
+                          backgroundColor: colors.primary,
+                          borderColor: colors.primary,
+                          opacity: pressed ? 0.78 : 1,
+                        },
+                      ]}
+                    >
+                      <Text style={[revStyles.reviewNameModalButtonText, { color: colors.primaryForeground }]}>
+                        Save
+                      </Text>
+                    </Pressable>
+                  </View>
+                </Pressable>
+              </Pressable>
+            </KeyboardAvoidingView>
+          </Modal>
         </View>
       </>
     );
@@ -1468,7 +1680,7 @@ export default function ScanScreen() {
         )}
 
         {/* Scan mode cards */}
-        {launchStep === "type" && (
+        {launchStep === "type" && !isActiveMultiPhotoSession && (
         <View style={styles.section}>
           <View style={styles.stepHeader}>
             {!paramRoomId && (
@@ -1977,6 +2189,76 @@ const revStyles = StyleSheet.create({
   thumbPlaceholder: { width: 76, alignItems: "center", justifyContent: "center" },
   cardBody: { flex: 1, padding: 10, gap: 4 },
   itemName: { fontSize: 14, fontFamily: "Inter_600SemiBold", lineHeight: 19 },
+  reviewEditHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8 },
+  reviewEditKicker: { fontSize: 10, fontFamily: "Inter_700Bold", letterSpacing: 0.7 },
+  reviewEditHint: { flex: 1, fontSize: 10, fontFamily: "Inter_400Regular", textAlign: "right" },
+  reviewNameInput: {
+    minHeight: 38,
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingHorizontal: 9,
+    paddingVertical: 7,
+    justifyContent: "center",
+  },
+  reviewNameText: {
+    fontSize: 14,
+    lineHeight: 18,
+    fontFamily: "Inter_600SemiBold",
+  },
+  reviewEditGrid: { flexDirection: "row", gap: 8, alignItems: "flex-end", marginTop: 2 },
+  reviewEditField: { flex: 1, gap: 4 },
+  reviewEditLabel: { fontSize: 10, fontFamily: "Inter_600SemiBold" },
+  reviewSmallInput: {
+    minHeight: 34,
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+    fontSize: 13,
+    fontFamily: "Inter_500Medium",
+  },
+  reviewNameModalRoot: { flex: 1 },
+  reviewNameModalBackdrop: {
+    flex: 1,
+    paddingHorizontal: 20,
+    justifyContent: "center",
+    backgroundColor: "rgba(15, 23, 42, 0.46)",
+  },
+  reviewNameModalCard: {
+    width: "100%",
+    maxWidth: 440,
+    alignSelf: "center",
+    borderWidth: 1,
+    padding: 16,
+    gap: 12,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.18,
+    shadowRadius: 18,
+    elevation: 12,
+  },
+  reviewNameModalTitle: { fontSize: 16, fontFamily: "Inter_600SemiBold" },
+  reviewNameModalInput: {
+    minHeight: 44,
+    borderWidth: 1.5,
+    borderRadius: 9,
+    paddingHorizontal: 11,
+    paddingVertical: 10,
+    fontSize: 15,
+    lineHeight: 21,
+    fontFamily: "Inter_400Regular",
+  },
+  reviewNameModalActions: { flexDirection: "row", justifyContent: "flex-end", gap: 9 },
+  reviewNameModalButton: {
+    minWidth: 92,
+    minHeight: 42,
+    borderWidth: 1,
+    borderRadius: 9,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 14,
+  },
+  reviewNameModalButtonText: { fontSize: 13, fontFamily: "Inter_600SemiBold" },
   pill: { borderRadius: 10, paddingHorizontal: 8, paddingVertical: 2 },
   pillText: { fontSize: 11, fontFamily: "Inter_500Medium" },
   meta: { fontSize: 12, fontFamily: "Inter_400Regular" },

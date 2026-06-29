@@ -1,3 +1,4 @@
+import { friendlyNetworkErrorMessage } from "@/lib/network-errors";
 import { anonKey, debugSupabaseUrl, supabase } from "@/lib/supabase";
 import type { InventoryItem } from "@/types";
 export { replacementVoiceTranscriptToQuery } from "./replacement-pricing-query.ts";
@@ -181,7 +182,9 @@ export async function searchReplacementPrices(
   }
 
   const functionUrl = `${debugSupabaseUrl.replace(/\/$/, "")}/functions/v1/${REPLACEMENT_PRICE_FUNCTION_NAME}`;
-  const httpResponse = await fetch(functionUrl, {
+  let httpResponse: Response;
+  try {
+    httpResponse = await fetch(functionUrl, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -189,7 +192,14 @@ export async function searchReplacementPrices(
       Authorization: `Bearer ${accessToken}`,
     },
     body: JSON.stringify(requestBody),
-  });
+    });
+  } catch (error) {
+    const friendlyMessage = friendlyNetworkErrorMessage(error);
+    if (friendlyMessage) {
+      throw new ReplacementPriceSearchError(friendlyMessage, { errorCode: "NETWORK_UNAVAILABLE" });
+    }
+    throw error;
+  }
 
   const responseText = await httpResponse.text();
   let data: ReplacementPriceSearchResponse | null = null;

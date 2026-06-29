@@ -9,12 +9,14 @@ import {
   Animated,
   Easing,
   FlatList,
+  Modal,
   Platform,
   Pressable,
   RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   useWindowDimensions,
   View,
 } from "react-native";
@@ -29,7 +31,7 @@ import { useEntitlements } from "@/context/EntitlementsContext";
 import { ENABLE_RECOMMENDED_ACTIONS } from "@/constants/recommendedActions";
 import { propertyTypeLabel } from "@/constants/propertyTypes";
 import { useColors } from "@/hooks/useColors";
-import { useSignedUrl } from "@/hooks/useSignedUrls";
+import { useSignedUrl, useSignedUrls } from "@/hooks/useSignedUrls";
 import { calcPortfolioStats } from "@/lib/dashboard-stats";
 import {
   calculateCoverageInsight,
@@ -37,15 +39,45 @@ import {
 } from "@/lib/coverage";
 import { formatCurrency, getItemTotalValue } from "@/lib/inventory-mappers";
 import { supabase } from "@/lib/supabase";
-import type { InventoryFile, InventoryItem } from "@/types";
+import type { InventoryFile, InventoryItem, InventoryRoom } from "@/types";
 
 const HOME_ITEMS_PAGE_SIZE = 1000;
 const HOME_SUMMARY_BACKGROUND = "#F6FBFA";
 const HOME_SUMMARY_BORDER = "#D7E7E4";
 const countFormatter = new Intl.NumberFormat("en-NZ");
+type GlobalReadinessFilter = "all" | "needs_review" | "missing_photo" | "missing_value";
 
 function formatCount(value: number): string {
   return countFormatter.format(value);
+}
+
+function itemHasPhoto(item: InventoryItem): boolean {
+  return Boolean(item.image_url || item.photo_url);
+}
+
+function itemHasValue(item: InventoryItem): boolean {
+  return getItemTotalValue(item) > 0;
+}
+
+function globalItemNeedsReview(item: InventoryItem): boolean {
+  const lowConfidence = item.confidence != null && item.confidence < 0.7;
+  const unclearName = item.name.trim().length < 3;
+  return !itemHasValue(item) || !item.quantity || lowConfidence || unclearName;
+}
+
+function globalReadinessLabel(item: InventoryItem): string | null {
+  if (!itemHasPhoto(item)) return "No photo";
+  if (!itemHasValue(item)) return "No value";
+  if (globalItemNeedsReview(item)) return "Needs review";
+  return null;
+}
+
+function matchesGlobalReadiness(item: InventoryItem, filter: GlobalReadinessFilter): boolean {
+  if (filter === "all") return true;
+  if (filter === "needs_review") return globalItemNeedsReview(item);
+  if (filter === "missing_photo") return !itemHasPhoto(item);
+  if (filter === "missing_value") return !itemHasValue(item);
+  return true;
 }
 
 const WARNING_GRADIENT_STOPS = [
@@ -408,6 +440,9 @@ export default function HomeScreen() {
   const { canCreateProperty, enforce } = useEntitlements();
   const colors = useColors();
   const insets = useSafeAreaInsets();
+  const [globalSearchVisible, setGlobalSearchVisible] = React.useState(false);
+  const [globalSearchText, setGlobalSearchText] = React.useState("");
+  const [globalReadinessFilter, setGlobalReadinessFilter] = React.useState<GlobalReadinessFilter>("all");
 
   const {
     data: properties,
@@ -446,7 +481,7 @@ export default function HomeScreen() {
       while (true) {
         const { data, error } = await supabase
           .from("inventory_items")
-          .select("id, file_id, room_id, estimated_price, unit_estimated_price, quantity")
+          .select("id, sort_order, file_id, room_id, room, name, category, confidence, estimated_price, unit_estimated_price, quantity, valuation_basis, price_source_type, description, image_url, photo_url, brand_maker")
           .order("id", { ascending: true })
           .range(from, from + HOME_ITEMS_PAGE_SIZE - 1);
         if (error) throw error;
@@ -490,10 +525,10 @@ export default function HomeScreen() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("inventory_rooms")
-        .select("id")
+        .select("id, file_id, user_id, name, room_type, sort_order, cover_photo_url, notes, description, archived_at")
         .is("archived_at", null);
       if (error) throw error;
-      return (data ?? []) as { id: string }[];
+      return (data ?? []) as InventoryRoom[];
     },
     enabled: !!session,
   });
@@ -505,6 +540,51 @@ export default function HomeScreen() {
       totalItems: exactItemCount,
     };
   }, [properties, allItems, exactItemCount]);
+  const propertyById = useMemo(() => {
+    const map = new Map<string, InventoryFile>();
+    (properties ?? []).forEach((property) => map.set(property.id, property));
+    return map;
+  }, [properties]);
+  const roomById = useMemo(() => {
+    const map = new Map<string, InventoryRoom>();
+    (allRooms ?? []).forEach((room) => map.set(room.id, room));
+    return map;
+  }, [allRooms]);
+  const globalSearchImagePaths = useMemo(
+    () => (allItems ?? []).map((item) => item.image_url ?? item.photo_url ?? null),
+    [allItems],
+  );
+  const globalSearchSignedUrls = useSignedUrls(globalSearchImagePaths);
+  const normalizedGlobalSearch = globalSearchText.trim().toLowerCase();
+  const globalSearchActive = normalizedGlobalSearch.length > 0 || globalReadinessFilter !== "all";
+  const globalSearchResults = useMemo(() => {
+    const results = (allItems ?? []).filter((item) => {
+      const room = item.room_id ? roomById.get(item.room_id) : null;
+      const property = propertyById.get(item.file_id);
+      const valueText = String(Math.round(getItemTotalValue(item)));
+      const haystack = [
+        item.name,
+        item.category,
+        item.brand_maker,
+        item.description,
+        item.room,
+        room?.name,
+        property?.name,
+        valueText,
+        globalReadinessLabel(item),
+      ]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase();
+      return (
+        (!normalizedGlobalSearch || haystack.includes(normalizedGlobalSearch)) &&
+        matchesGlobalReadiness(item, globalReadinessFilter)
+      );
+    });
+    return results
+      .sort((a, b) => (b.sort_order ?? 0) - (a.sort_order ?? 0))
+      .slice(0, 60);
+  }, [allItems, globalReadinessFilter, normalizedGlobalSearch, propertyById, roomById]);
 
   const isLoading = propsLoading || itemsLoading || itemCountLoading;
   const homeError = propsError ?? itemsError ?? itemCountError;
@@ -542,6 +622,28 @@ export default function HomeScreen() {
     if (!enforce("property", propertyCount)) return;
     router.push("/(tabs)/add-property");
   };
+
+  const clearGlobalSearch = React.useCallback(() => {
+    setGlobalSearchText("");
+    setGlobalReadinessFilter("all");
+  }, []);
+
+  const openGlobalSearchResult = React.useCallback((item: InventoryItem) => {
+    const room = item.room_id ? roomById.get(item.room_id) : null;
+    const property = propertyById.get(item.file_id);
+    setGlobalSearchVisible(false);
+    router.push({
+      pathname: "/(tabs)/item/[id]",
+      params: {
+        id: item.id,
+        name: item.name,
+        roomId: item.room_id ?? "",
+        roomName: room?.name ?? item.room ?? "",
+        fileId: item.file_id,
+        fileName: property?.name ?? "Property",
+      },
+    });
+  }, [propertyById, roomById]);
 
   const homeRecommendedAction = useMemo(() => {
     if (!ENABLE_RECOMMENDED_ACTIONS) return null;
@@ -691,6 +793,160 @@ export default function HomeScreen() {
     );
   };
 
+  const renderGlobalSearchChip = (
+    label: string,
+    value: GlobalReadinessFilter,
+  ) => {
+    const selected = globalReadinessFilter === value;
+    return (
+      <Pressable
+        accessibilityRole="button"
+        accessibilityState={{ selected }}
+        onPress={() => setGlobalReadinessFilter(value)}
+        style={({ pressed }) => [
+          styles.globalFilterChip,
+          {
+            backgroundColor: selected ? colors.primary : colors.card,
+            borderColor: selected ? colors.primary : colors.border,
+            opacity: pressed ? 0.75 : 1,
+          },
+        ]}
+      >
+        <Text style={[styles.globalFilterChipText, { color: selected ? colors.primaryForeground : colors.foreground }]}>
+          {label}
+        </Text>
+      </Pressable>
+    );
+  };
+
+  const renderGlobalSearchModal = () => (
+    <Modal
+      visible={globalSearchVisible}
+      transparent
+      animationType="fade"
+      onRequestClose={() => setGlobalSearchVisible(false)}
+    >
+      <Pressable style={styles.globalSearchBackdrop} onPress={() => setGlobalSearchVisible(false)}>
+        <Pressable
+          accessibilityRole="none"
+          onPress={(event) => event.stopPropagation()}
+          style={[
+            styles.globalSearchSheet,
+            {
+              backgroundColor: colors.card,
+              borderColor: colors.border,
+              borderRadius: colors.radius + 6,
+              paddingBottom: insets.bottom + 16,
+            },
+          ]}
+        >
+          <View style={styles.globalSearchHeader}>
+            <Text style={[styles.globalSearchTitle, { color: colors.foreground }]}>Search inventory</Text>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Close inventory search"
+              onPress={() => setGlobalSearchVisible(false)}
+              style={styles.globalSearchClose}
+              hitSlop={8}
+            >
+              <Feather name="x" size={20} color={colors.mutedForeground} />
+            </Pressable>
+          </View>
+          <View style={[styles.globalSearchBox, { borderColor: colors.border, backgroundColor: colors.background }]}>
+            <Feather name="search" size={16} color={colors.mutedForeground} />
+            <TextInput
+              value={globalSearchText}
+              onChangeText={setGlobalSearchText}
+              placeholder="Search item, room, property, category"
+              placeholderTextColor={colors.mutedForeground}
+              returnKeyType="search"
+              style={[styles.globalSearchInput, { color: colors.foreground }]}
+            />
+            {globalSearchActive ? (
+              <Pressable accessibilityRole="button" accessibilityLabel="Clear search" onPress={clearGlobalSearch} hitSlop={6}>
+                <Feather name="x-circle" size={16} color={colors.mutedForeground} />
+              </Pressable>
+            ) : null}
+          </View>
+          <View style={styles.globalFilterRow}>
+            {renderGlobalSearchChip("All", "all")}
+            {renderGlobalSearchChip("Needs review", "needs_review")}
+            {renderGlobalSearchChip("Missing photo", "missing_photo")}
+            {renderGlobalSearchChip("Missing value", "missing_value")}
+          </View>
+          <FlatList
+            data={globalSearchResults}
+            keyExtractor={(item) => item.id}
+            keyboardShouldPersistTaps="handled"
+            style={styles.globalResultsList}
+            contentContainerStyle={styles.globalResultsContent}
+            ListEmptyComponent={
+              <View style={styles.globalEmpty}>
+                <Feather name="search" size={22} color={colors.mutedForeground} />
+                <Text style={[styles.globalEmptyTitle, { color: colors.foreground }]}>No matching items found</Text>
+                <Text style={[styles.globalEmptyBody, { color: colors.mutedForeground }]}>
+                  Try another item name, category, room, property, value, or status.
+                </Text>
+              </View>
+            }
+            renderItem={({ item }) => {
+              const room = item.room_id ? roomById.get(item.room_id) : null;
+              const property = propertyById.get(item.file_id);
+              const imageRef = item.image_url ?? item.photo_url ?? "";
+              const imageUri = globalSearchSignedUrls.get(imageRef) ?? null;
+              const readiness = globalReadinessLabel(item);
+              const value = getItemTotalValue(item);
+
+              return (
+                <Pressable
+                  accessibilityRole="button"
+                  onPress={() => openGlobalSearchResult(item)}
+                  style={({ pressed }) => [
+                    styles.globalResultRow,
+                    {
+                      backgroundColor: colors.background,
+                      borderColor: colors.border,
+                      opacity: pressed ? 0.78 : 1,
+                    },
+                  ]}
+                >
+                  {imageUri ? (
+                    <Image source={{ uri: imageUri }} style={styles.globalResultThumb} contentFit="cover" />
+                  ) : (
+                    <View style={[styles.globalResultThumb, styles.globalResultPlaceholder, { backgroundColor: colors.secondary }]}>
+                      <Feather name="package" size={18} color={colors.primary} />
+                    </View>
+                  )}
+                  <View style={styles.globalResultCopy}>
+                    <Text style={[styles.globalResultName, { color: colors.foreground }]} numberOfLines={1}>
+                      {item.name}
+                    </Text>
+                    <Text style={[styles.globalResultContext, { color: colors.mutedForeground }]} numberOfLines={1}>
+                      {room?.name ?? item.room ?? "No room"} · {property?.name ?? "Property"}
+                    </Text>
+                    <View style={styles.globalResultMetaRow}>
+                      <Text style={[styles.globalResultValue, { color: colors.mutedForeground }]} numberOfLines={1}>
+                        {value > 0 ? formatCurrency(value) : "No value"}
+                      </Text>
+                      {readiness ? (
+                        <View style={[styles.globalReadinessChip, { borderColor: colors.warning, backgroundColor: colors.warning + "10" }]}>
+                          <Text style={[styles.globalReadinessText, { color: colors.warning }]} numberOfLines={1}>
+                            {readiness}
+                          </Text>
+                        </View>
+                      ) : null}
+                    </View>
+                  </View>
+                  <Feather name="chevron-right" size={17} color={colors.mutedForeground} />
+                </Pressable>
+              );
+            }}
+          />
+        </Pressable>
+      </Pressable>
+    </Modal>
+  );
+
   return (
     <>
       <Stack.Screen
@@ -705,6 +961,21 @@ export default function HomeScreen() {
           ),
           headerRight: () => (
             <View style={styles.headerActions}>
+              <Pressable
+                onPress={() => setGlobalSearchVisible(true)}
+                hitSlop={8}
+                accessibilityRole="button"
+                accessibilityLabel="Search inventory"
+                style={({ pressed }) => [
+                  styles.accountAction,
+                  {
+                    backgroundColor: colors.secondary,
+                    opacity: pressed ? 0.7 : 1,
+                  },
+                ]}
+              >
+                <Feather name="search" size={18} color={colors.primary} />
+              </Pressable>
               <Pressable
                 onPress={handleAddProperty}
                 hitSlop={8}
@@ -779,6 +1050,7 @@ export default function HomeScreen() {
           }
         />
       )}
+      {renderGlobalSearchModal()}
     </>
   );
 }
@@ -859,6 +1131,119 @@ const styles = StyleSheet.create({
     borderRadius: 17,
     alignItems: "center",
     justifyContent: "center",
+  },
+  globalSearchBackdrop: {
+    flex: 1,
+    justifyContent: "flex-end",
+    backgroundColor: "rgba(15, 23, 42, 0.46)",
+  },
+  globalSearchSheet: {
+    width: "100%",
+    maxHeight: "86%",
+    borderTopWidth: 1,
+    paddingHorizontal: 16,
+    paddingTop: 14,
+    gap: 12,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: -8 },
+    shadowOpacity: 0.14,
+    shadowRadius: 18,
+    elevation: 12,
+  },
+  globalSearchHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+  },
+  globalSearchTitle: { fontSize: 17, fontFamily: "Inter_700Bold" },
+  globalSearchClose: {
+    width: 32,
+    height: 32,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  globalSearchBox: {
+    minHeight: 44,
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingHorizontal: 10,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  globalSearchInput: {
+    flex: 1,
+    minWidth: 0,
+    paddingVertical: 9,
+    fontSize: 14,
+    fontFamily: "Inter_400Regular",
+  },
+  globalFilterRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+  },
+  globalFilterChip: {
+    minHeight: 32,
+    borderWidth: 1,
+    borderRadius: 999,
+    paddingHorizontal: 11,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  globalFilterChipText: { fontSize: 12, fontFamily: "Inter_600SemiBold" },
+  globalResultsList: { maxHeight: 430 },
+  globalResultsContent: { gap: 8, paddingBottom: 4 },
+  globalResultRow: {
+    minHeight: 74,
+    borderWidth: 1,
+    borderRadius: 10,
+    padding: 9,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
+  globalResultThumb: {
+    width: 54,
+    height: 54,
+    borderRadius: 8,
+    overflow: "hidden",
+  },
+  globalResultPlaceholder: {
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  globalResultCopy: { flex: 1, minWidth: 0, gap: 3 },
+  globalResultName: { fontSize: 14, fontFamily: "Inter_700Bold" },
+  globalResultContext: { fontSize: 12, fontFamily: "Inter_400Regular" },
+  globalResultMetaRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 7,
+    flexWrap: "wrap",
+  },
+  globalResultValue: { fontSize: 12, fontFamily: "Inter_600SemiBold" },
+  globalReadinessChip: {
+    borderWidth: 1,
+    borderRadius: 999,
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+  },
+  globalReadinessText: { fontSize: 10, fontFamily: "Inter_600SemiBold" },
+  globalEmpty: {
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 28,
+    gap: 7,
+  },
+  globalEmptyTitle: { fontSize: 15, fontFamily: "Inter_700Bold", textAlign: "center" },
+  globalEmptyBody: {
+    maxWidth: 280,
+    fontSize: 12,
+    lineHeight: 18,
+    fontFamily: "Inter_400Regular",
+    textAlign: "center",
   },
   statsCard: {
     borderWidth: 1.5,

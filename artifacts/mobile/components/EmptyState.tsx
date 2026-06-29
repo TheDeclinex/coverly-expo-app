@@ -7,12 +7,14 @@ interface EmptyStateProps {
   icon?: keyof typeof Feather.glyphMap;
   title: string;
   subtitle?: string;
+  action?: React.ReactNode;
 }
 
 export function EmptyState({
   icon = "inbox",
   title,
   subtitle,
+  action,
 }: EmptyStateProps) {
   const colors = useColors();
   return (
@@ -24,6 +26,7 @@ export function EmptyState({
           {subtitle}
         </Text>
       ) : null}
+      {action ? <View style={styles.action}>{action}</View> : null}
     </View>
   );
 }
@@ -46,5 +49,9 @@ const styles = StyleSheet.create({
     fontFamily: "Inter_400Regular",
     textAlign: "center",
     lineHeight: 22,
+  },
+  action: {
+    width: "100%",
+    marginTop: 6,
   },
 });
