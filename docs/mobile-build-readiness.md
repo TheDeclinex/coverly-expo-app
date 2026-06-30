@@ -27,6 +27,35 @@ This checklist is for preparing Coverly Expo builds for Android internal testing
 - Confirm privacy and terms URLs are set before wider TestFlight or store review.
 - Run TypeScript and Expo config checks before starting a cloud build.
 
+## EAS environment variables
+
+Both `preview` and `production` build profiles use the EAS `production` environment. Confirm these variable names exist in EAS before standalone Android/iOS builds:
+
+- `EXPO_PUBLIC_SUPABASE_URL`
+- `EXPO_PUBLIC_SUPABASE_ANON_KEY`
+- `EXPO_PUBLIC_APP_ENV`
+- `EXPO_PUBLIC_PRIVACY_URL`
+- `EXPO_PUBLIC_TERMS_URL`
+- `EXPO_PUBLIC_REVENUECAT_IOS_API_KEY`
+- `EXPO_PUBLIC_REVENUECAT_ANDROID_API_KEY`
+- `EXPO_PUBLIC_REVENUECAT_ENTITLEMENT_ID`
+- `EXPO_PUBLIC_REVENUECAT_OFFERING_ID`
+- `EXPO_PUBLIC_BILLING_GATES_ENABLED`
+
+Do not commit real values to the repo. Keep local values in `.env.local` and cloud build values in EAS.
+
+Expo public variables are bundled into the app binary and are not private secrets. They are fine for Supabase anon keys, public legal links, RevenueCat public SDK keys, and feature flags; never put service-role keys or server-side API secrets in an `EXPO_PUBLIC_` variable.
+
+Value-free verification examples:
+
+```powershell
+eas env:list --environment production
+eas env:create --environment production --name EXPO_PUBLIC_SUPABASE_URL --value "<public Supabase URL>"
+eas env:create --environment production --name EXPO_PUBLIC_SUPABASE_ANON_KEY --value "<public Supabase anon key>"
+```
+
+When checking EAS output, verify names and environments only. Do not paste real values into tickets, docs, commits, or screenshots.
+
 ## Local validation commands
 
 From `C:\Users\User\Documents\GitHub\coverly-expo-app\artifacts\mobile`:

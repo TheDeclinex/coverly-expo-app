@@ -61,6 +61,10 @@ import type {
 
 // Future option: auto-save detected scan results after review confidence improves / with undo.
 
+const VIDEO_SCAN_USED_DURATION_MS = 10_000;
+const VIDEO_SCAN_USED_SECONDS = VIDEO_SCAN_USED_DURATION_MS / 1000;
+const VIDEO_SCAN_LIMIT_COPY = `Record or upload a room walkthrough. Coverly will scan up to the first ${VIDEO_SCAN_USED_SECONDS} seconds.`;
+
 interface ScanModeCard {
   mode: ScanMode;
   icon: keyof typeof Feather.glyphMap;
@@ -98,9 +102,8 @@ const SCAN_MODES: ScanModeCard[] = [
     mode: "video_room",
     icon: "video",
     title: "Video room scan",
-    subtitle:
-      "Record or upload a room walkthrough video for maximum coverage.",
-    creditLabel: `Up to ${MAX_VIDEO_SCAN_FRAMES} frames`,
+    subtitle: VIDEO_SCAN_LIMIT_COPY,
+    creditLabel: `First ${VIDEO_SCAN_USED_SECONDS} seconds`,
   },
 ];
 
@@ -187,6 +190,8 @@ export default function ScanScreen() {
   const multiPhotoCameraInteractionRef = useRef<{ cancel: () => void } | null>(null);
   const pendingMultiPhotoCameraRef = useRef(false);
   const aiScanEntitlementCheckedRef = useRef(false);
+  const videoProcessingRef = useRef<{ key: string; sessionId: number } | null>(null);
+  const videoProcessingSessionRef = useRef(0);
 
   useEffect(() => () => {
     if (multiPhotoCameraTimerRef.current) {
@@ -433,7 +438,8 @@ export default function ScanScreen() {
   }, [multiPhotoPromptVisible]);
 
   const extractVideoFrames = async (videoUri: string, durationMs: number | null | undefined): Promise<ScanEncodedImage[]> => {
-    const effectiveDuration = durationMs && durationMs > 0 ? durationMs : 10_000;
+    const sourceDuration = durationMs && durationMs > 0 ? durationMs : VIDEO_SCAN_USED_DURATION_MS;
+    const effectiveDuration = Math.min(sourceDuration, VIDEO_SCAN_USED_DURATION_MS);
     const frameCount = Math.max(1, Math.min(MAX_VIDEO_SCAN_FRAMES, Math.ceil(effectiveDuration / 1000)));
     const interval = effectiveDuration / frameCount;
     const frames: ScanEncodedImage[] = [];
@@ -455,15 +461,30 @@ export default function ScanScreen() {
   };
 
   const scanVideoAsset = async (asset: ImagePicker.ImagePickerAsset) => {
+    const videoKey = `${asset.uri}:${asset.duration ?? "unknown"}`;
+    if (videoProcessingRef.current) {
+      scanLog("video processing ignored because another video is in flight", {
+        activeSessionId: videoProcessingRef.current.sessionId,
+        sameVideo: videoProcessingRef.current.key === videoKey,
+      });
+      return;
+    }
+
+    const sessionId = videoProcessingSessionRef.current + 1;
+    videoProcessingSessionRef.current = sessionId;
+    videoProcessingRef.current = { key: videoKey, sessionId };
     setScanStatus("picking");
     setScanError(null);
     try {
       scanLog("video frame extraction started", {
+        sessionId,
         durationMs: asset.duration ?? null,
+        usedDurationMs: Math.min(asset.duration && asset.duration > 0 ? asset.duration : VIDEO_SCAN_USED_DURATION_MS, VIDEO_SCAN_USED_DURATION_MS),
         maxFrames: MAX_VIDEO_SCAN_FRAMES,
       });
       const frames = await extractVideoFrames(asset.uri, asset.duration);
       scanLog("video frame extraction completed", {
+        sessionId,
         frameCount: frames.length,
         approxBase64Chars: frames.reduce((sum, frame) => sum + frame.base64.length, 0),
       });
@@ -473,6 +494,10 @@ export default function ScanScreen() {
       if (__DEV__) console.error("[Scan] video frame extraction failed", error);
       setScanStatus("idle");
       setScanError(error instanceof Error ? error.message : "Could not prepare video frames. Try a shorter or clearer video.");
+    } finally {
+      if (videoProcessingRef.current?.sessionId === sessionId) {
+        videoProcessingRef.current = null;
+      }
     }
   };
 
@@ -511,11 +536,23 @@ export default function ScanScreen() {
     const result = await ImagePicker.launchCameraAsync({
       mediaTypes: ImagePicker.MediaTypeOptions.Videos,
       quality: 0.8,
-      videoMaxDuration: 30,
+      videoMaxDuration: VIDEO_SCAN_USED_SECONDS,
     });
     if (!result.canceled && result.assets[0]) {
       await scanVideoAsset(result.assets[0]);
     }
+  };
+
+  const showVideoScanChoice = () => {
+    Alert.alert(
+      "Video room scan",
+      VIDEO_SCAN_LIMIT_COPY,
+      [
+        { text: "Record video", onPress: () => void recordVideo() },
+        { text: "Choose from library", onPress: () => void pickVideo() },
+        { text: "Cancel", style: "cancel" },
+      ],
+    );
   };
 
   const takeAnotherMultiPhoto = () => {
@@ -549,7 +586,10 @@ export default function ScanScreen() {
     clearCaptureState();
     aiScanEntitlementCheckedRef.current = true;
     setSelectedMode(mode);
-    if (mode === "video_room") return;
+    if (mode === "video_room") {
+      showVideoScanChoice();
+      return;
+    }
     void takePhoto(mode, mode !== "multi_photo_room");
   };
 
@@ -1498,7 +1538,7 @@ export default function ScanScreen() {
           <ActivityIndicator color={colors.primary} />
           <Text style={[styles.preparingTitle, { color: colors.foreground }]}>Preparing video frames</Text>
           <Text style={[styles.preparingText, { color: colors.mutedForeground }]}>
-            Coverly is choosing the clearest frames before scanning.
+            Coverly is scanning frames from the first {VIDEO_SCAN_USED_SECONDS} seconds of your video.
           </Text>
         </View>
       </>
@@ -1927,7 +1967,7 @@ export default function ScanScreen() {
           <View style={styles.section}>
             <Text style={[styles.sectionLabel, { color: colors.mutedForeground }]}>VIDEO</Text>
             <Text style={[styles.videoHelper, { color: colors.mutedForeground }]}>
-              Record or choose a room walkthrough. Coverly will scan up to {MAX_VIDEO_SCAN_FRAMES} frames.
+              {VIDEO_SCAN_LIMIT_COPY}
             </Text>
             <View style={{ flexDirection: "row", gap: 10 }}>
               <Pressable

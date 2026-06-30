@@ -27,6 +27,7 @@ import type { ScanDetectedItem, ScanInput, ScanResult } from "@/types/scan";
 const SCAN_EDGE_FUNCTION_NAME: string | null = "scan-room-photo";
 const EXPECTED_SCAN_PROJECT_REF = "jqijavrugjidqzbbgpag";
 const SCAN_INVOKE_TIMEOUT_MS = 90_000;
+const VIDEO_SCAN_INVOKE_TIMEOUT_MS = 120_000;
 
 interface ScanFunctionResponse {
   success?: boolean;
@@ -219,11 +220,12 @@ export async function runAiScan(input: ScanInput): Promise<ScanResult> {
 
     const functionUrl = `${debugSupabaseUrl.replace(/\/$/, "")}/functions/v1/${SCAN_EDGE_FUNCTION_NAME}`;
     const requestBody = JSON.stringify(productionPayload);
+    const timeoutMs = input.mode === "video_room" ? VIDEO_SCAN_INVOKE_TIMEOUT_MS : SCAN_INVOKE_TIMEOUT_MS;
     scanLog("function invoke started", {
       functionName: SCAN_EDGE_FUNCTION_NAME,
       functionUrl,
       requestBodyChars: requestBody.length,
-      timeoutMs: SCAN_INVOKE_TIMEOUT_MS,
+      timeoutMs,
     });
 
     const response = await withTimeout(
@@ -236,7 +238,7 @@ export async function runAiScan(input: ScanInput): Promise<ScanResult> {
         },
         body: requestBody,
       }),
-      SCAN_INVOKE_TIMEOUT_MS,
+      timeoutMs,
       "scan-room-photo invoke"
     );
 

@@ -26,6 +26,7 @@ interface ExpandableImageProps {
    */
   pin?: { x: number; y: number } | null;
   pinColor?: string;
+  disabled?: boolean;
   /**
    * When provided, the pin becomes draggable (long-press → drag → release).
    * Called with the new normalised coords on drop; throw to signal failure
@@ -47,6 +48,7 @@ export function ExpandableImage({
   initialPhotoIndex = 0,
   pin,
   pinColor = "#1D9E75",
+  disabled = false,
   onReposition,
 }: ExpandableImageProps) {
   const [lightboxVisible, setLightboxVisible] = useState(false);
@@ -106,7 +108,9 @@ export function ExpandableImage({
   return (
     <>
       <Pressable
-        onPress={() => {
+        disabled={disabled}
+        onPress={(event) => {
+          event.stopPropagation();
           if (suppressNextPress.current) {
             suppressNextPress.current = false;
             return;
@@ -114,6 +118,7 @@ export function ExpandableImage({
           setLightboxVisible(true);
         }}
         onLongPress={(event) => {
+          event.stopPropagation();
           if (!hasPin || !onReposition) return;
           suppressNextPress.current = true;
           const { locationX, locationY } = event.nativeEvent;

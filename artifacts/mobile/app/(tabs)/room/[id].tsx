@@ -13,6 +13,7 @@ import {
   Animated,
   Easing,
   FlatList,
+  Keyboard,
   KeyboardAvoidingView,
   Modal,
   Platform,
@@ -249,6 +250,7 @@ function ItemCard({
   const dotColor = categoryDotColor(item.category);
   const placeholderIcon = categoryIcon(item.category);
   const readinessChip = itemReadinessChip(item);
+  const showInlineValuationEditor = false;
 
   const persistCardUpdate = async (updates: Partial<InventoryItem>): Promise<boolean> => {
     setSavingCard(true);
@@ -286,6 +288,8 @@ function ItemCard({
       return;
     }
     setNameDraft(item.name);
+    setQuantityDraft(String(quantity));
+    setUnitPriceDraft(String(unitPrice));
     onBeginEdit("name");
     void Haptics.selectionAsync().catch(() => undefined);
   };
@@ -295,13 +299,15 @@ function ItemCard({
       onToggleSelected?.();
       return;
     }
+    setNameDraft(item.name);
     setQuantityDraft(String(quantity));
     setUnitPriceDraft(String(unitPrice));
     onBeginEdit("valuation");
     void Haptics.selectionAsync().catch(() => undefined);
   };
 
-  const cancelInlineEdit = () => {
+  const cancelEdit = () => {
+    Keyboard.dismiss();
     setNameDraft(item.name);
     setQuantityDraft(String(quantity));
     setUnitPriceDraft(String(unitPrice));
@@ -309,31 +315,26 @@ function ItemCard({
     void Haptics.selectionAsync().catch(() => undefined);
   };
 
-  const saveNameEdit = async () => {
+  const saveItemEdit = async () => {
     if (savingCard) return;
     const nextName = nameDraft.trim();
     if (!nextName) {
       Alert.alert("Item name required", "Enter a name before saving.");
       return;
     }
-    if (nextName === item.name) {
-      onCloseEdit("name");
-      return;
-    }
-    if (await persistCardUpdate({ name: nextName })) onCloseEdit("name");
-  };
 
-  const saveValuationEdit = async () => {
-    if (savingCard) return;
     const nextUnitPrice = parsePrice(unitPriceDraft);
     if (nextUnitPrice === null) {
-      Alert.alert("Check price", "Enter a valid each price of zero or more.");
+      Alert.alert("Check replacement price", "Enter a valid replacement price of zero or more.");
       return;
     }
 
     const roundedUnitPrice = Math.round(nextUnitPrice * 100) / 100;
     const priceChanged = roundedUnitPrice !== unitPrice;
+    const quantityChanged = draftQuantity !== quantity;
+    const nameChanged = nextName !== item.name;
     const updates: Partial<InventoryItem> = {
+      name: nextName,
       quantity: draftQuantity,
       estimated_price: roundedUnitPrice,
       unit_estimated_price: roundedUnitPrice,
@@ -342,24 +343,16 @@ function ItemCard({
         : {}),
     };
 
-    if (await persistCardUpdate(updates)) onCloseEdit("valuation");
+    Keyboard.dismiss();
+    if (!nameChanged && !quantityChanged && !priceChanged) {
+      if (editingTarget) onCloseEdit(editingTarget);
+      return;
+    }
+    if (await persistCardUpdate(updates) && editingTarget) onCloseEdit(editingTarget);
   };
 
-  useEffect(() => {
-    if (Platform.OS !== "web" || editingTarget !== "valuation") return;
-
-    const handlePointerDown = (event: PointerEvent) => {
-      const editor = activeEditorRef.current as unknown as {
-        contains?: (target: EventTarget | null) => boolean;
-      } | null;
-      if (editor?.contains?.(event.target)) return;
-
-      void saveValuationEdit();
-    };
-
-    document.addEventListener("pointerdown", handlePointerDown, true);
-    return () => document.removeEventListener("pointerdown", handlePointerDown, true);
-  }, [editingTarget, nameDraft, quantityDraft, unitPriceDraft, savingCard]);
+  const saveValuationEdit = saveItemEdit;
+  const cancelInlineEdit = cancelEdit;
 
   const goToDetail = async () => {
     await Haptics.selectionAsync();
@@ -457,9 +450,14 @@ function ItemCard({
       >
       {/* ── Summary row ── */}
       <Pressable
-        disabled={!selectionMode}
-        onPress={onToggleSelected}
-        style={styles.cardSummary}
+        accessibilityRole="button"
+        accessibilityLabel={selectionMode ? `${isSelected ? "Deselect" : "Select"} ${item.name}` : `Open ${item.name} details`}
+        accessibilityState={selectionMode ? { selected: isSelected } : undefined}
+        onPress={selectionMode ? onToggleSelected : () => void goToDetail()}
+        style={({ pressed }) => [
+          styles.cardSummary,
+          !selectionMode && pressed ? styles.cardSummaryPressed : null,
+        ]}
       >
         {selectionMode ? (
           <View
@@ -485,6 +483,7 @@ function ItemCard({
             placeholderIconColor={TEAL}
             placeholderBackgroundColor={colors.muted}
             pin={pin}
+            disabled={selectionMode}
           />
         </View>
 
@@ -498,7 +497,14 @@ function ItemCard({
                   <Text style={[styles.newBadgeText, { color: colors.primaryForeground }]}>NEW</Text>
                 </View>
               ) : null}
-              <Pressable accessibilityLabel="Edit item name" onPress={beginNameEdit} hitSlop={5}>
+              <Pressable
+                accessibilityLabel="Edit item"
+                onPress={(event) => {
+                  event.stopPropagation();
+                  beginNameEdit();
+                }}
+                hitSlop={5}
+              >
                 <Text
                   style={[styles.cardName, { color: colors.foreground }]}
                   numberOfLines={useStackedSummary ? 3 : 2}
@@ -511,10 +517,9 @@ function ItemCard({
               style={[
                 styles.priceBlock,
                 useStackedSummary ? styles.priceBlockStacked : null,
-                editingTarget === "valuation" ? styles.priceBlockEditing : null,
               ]}
             >
-              {editingTarget === "valuation" ? (
+              {showInlineValuationEditor ? (
                 <View ref={activeEditorRef} style={styles.compactValuationEdit}>
                   <View style={styles.compactQuantityRow}>
                     <Text style={[styles.compactEditLabel, { color: colors.mutedForeground }]}>Qty</Text>
@@ -591,7 +596,14 @@ function ItemCard({
                 </View>
               ) : (
                 <>
-                  <Pressable accessibilityLabel="Edit item valuation" onPress={beginValuationEdit} hitSlop={5}>
+                  <Pressable
+                    accessibilityLabel="Edit item valuation"
+                    onPress={(event) => {
+                      event.stopPropagation();
+                      beginValuationEdit();
+                    }}
+                    hitSlop={5}
+                  >
                     <View style={styles.compactValuation}>
                       <Text style={[styles.mainValue, { color: colors.foreground }]}>
                         {formatCurrencyFull(totalValue)}
@@ -607,7 +619,10 @@ function ItemCard({
                     <Pressable
                       accessibilityRole="link"
                       accessibilityLabel="Open replacement listing"
-                      onPress={() => void openReplacementListing()}
+                      onPress={(event) => {
+                        event.stopPropagation();
+                        void openReplacementListing();
+                      }}
                       hitSlop={6}
                     >
                       <Text style={[styles.valLabel, styles.listingLink, { color: TEAL }]}>
@@ -761,16 +776,16 @@ function ItemCard({
       ) : null}
       </View>
       <Modal
-        visible={editingTarget === "name"}
+        visible={editingTarget !== null}
         transparent
         animationType="fade"
-        onRequestClose={cancelInlineEdit}
+        onRequestClose={cancelEdit}
       >
         <KeyboardAvoidingView
           style={styles.nameModalKeyboard}
           behavior={Platform.OS === "ios" ? "padding" : undefined}
         >
-          <Pressable style={styles.nameModalBackdrop} onPress={cancelInlineEdit}>
+          <Pressable style={styles.nameModalBackdrop} onPress={cancelEdit}>
             <Pressable
               accessibilityRole="none"
               onPress={(event) => event.stopPropagation()}
@@ -783,29 +798,86 @@ function ItemCard({
                 },
               ]}
             >
-              <Text style={[styles.nameModalTitle, { color: colors.foreground }]}>Edit item name</Text>
-              <TextInput
-                autoFocus
-                accessibilityLabel="Item name"
-                value={nameDraft}
-                onChangeText={setNameDraft}
-                editable={!savingCard}
-                disableFullscreenUI
-                returnKeyType="done"
-                onSubmitEditing={() => void saveNameEdit()}
-                style={[
-                  styles.nameModalInput,
-                  {
-                    color: colors.foreground,
-                    backgroundColor: colors.background,
-                    borderColor: colors.primary,
-                  },
-                ]}
-              />
+              <Text style={[styles.nameModalTitle, { color: colors.foreground }]}>Edit item</Text>
+              <View style={styles.editFieldGroup}>
+                <Text style={[styles.editFieldLabel, { color: colors.mutedForeground }]}>Name</Text>
+                <TextInput
+                  autoFocus={editingTarget === "name"}
+                  accessibilityLabel="Item name"
+                  value={nameDraft}
+                  onChangeText={setNameDraft}
+                  editable={!savingCard}
+                  disableFullscreenUI
+                  returnKeyType="next"
+                  style={[
+                    styles.editModalInput,
+                    {
+                      color: colors.foreground,
+                      backgroundColor: colors.background,
+                      borderColor: colors.border,
+                    },
+                  ]}
+                />
+              </View>
+              <View style={styles.editModalRow}>
+                <View style={[styles.editFieldGroup, styles.editQuantityField]}>
+                  <Text style={[styles.editFieldLabel, { color: colors.mutedForeground }]}>Quantity</Text>
+                  <TextInput
+                    accessibilityLabel="Quantity"
+                    value={quantityDraft}
+                    onChangeText={setQuantityDraft}
+                    editable={!savingCard}
+                    keyboardType="numeric"
+                    inputMode="numeric"
+                    disableFullscreenUI
+                    selectTextOnFocus
+                    style={[
+                      styles.editModalInput,
+                      {
+                        color: colors.foreground,
+                        backgroundColor: colors.background,
+                        borderColor: colors.border,
+                      },
+                    ]}
+                  />
+                </View>
+                <View style={[styles.editFieldGroup, styles.editPriceField]}>
+                  <Text style={[styles.editFieldLabel, { color: colors.mutedForeground }]}>Replacement price</Text>
+                  <View
+                    style={[
+                      styles.editPriceInputWrap,
+                      {
+                        backgroundColor: colors.background,
+                        borderColor: colors.border,
+                      },
+                    ]}
+                  >
+                    <Text style={[styles.editCurrencyPrefix, { color: colors.mutedForeground }]}>$</Text>
+                    <TextInput
+                      autoFocus={editingTarget === "valuation"}
+                      accessibilityLabel="Replacement price"
+                      value={unitPriceDraft}
+                      onChangeText={setUnitPriceDraft}
+                      editable={!savingCard}
+                      keyboardType="decimal-pad"
+                      inputMode="decimal"
+                      disableFullscreenUI
+                      selectTextOnFocus
+                      onSubmitEditing={() => void saveItemEdit()}
+                      style={[styles.editPriceInput, { color: colors.foreground }]}
+                    />
+                  </View>
+                </View>
+              </View>
+              {draftQuantity > 1 ? (
+                <Text style={[styles.editTotalPreview, { color: colors.mutedForeground }]}>
+                  Total {formatCurrencyFull(draftTotal)}
+                </Text>
+              ) : null}
               <View style={styles.nameModalActions}>
                 <Pressable
                   accessibilityRole="button"
-                  onPress={cancelInlineEdit}
+                  onPress={cancelEdit}
                   disabled={savingCard}
                   style={({ pressed }) => [
                     styles.nameModalButton,
@@ -816,7 +888,7 @@ function ItemCard({
                 </Pressable>
                 <Pressable
                   accessibilityRole="button"
-                  onPress={() => void saveNameEdit()}
+                  onPress={() => void saveItemEdit()}
                   disabled={savingCard}
                   style={({ pressed }) => [
                     styles.nameModalButton,
@@ -2517,6 +2589,7 @@ const styles = StyleSheet.create({
     padding: 12,
     gap: 12,
   },
+  cardSummaryPressed: { opacity: 0.82 },
   thumbWrap: {
     width: 76,
     height: 76,
@@ -2697,6 +2770,38 @@ const styles = StyleSheet.create({
     lineHeight: 21,
     fontFamily: "Inter_400Regular",
   },
+  editFieldGroup: { gap: 6 },
+  editFieldLabel: { fontSize: 11, fontFamily: "Inter_600SemiBold" },
+  editModalInput: {
+    minHeight: 44,
+    borderWidth: 1,
+    borderRadius: 9,
+    paddingHorizontal: 11,
+    paddingVertical: 9,
+    fontSize: 15,
+    fontFamily: "Inter_400Regular",
+  },
+  editModalRow: { flexDirection: "row", gap: 10 },
+  editQuantityField: { width: 104 },
+  editPriceField: { flex: 1, minWidth: 0 },
+  editPriceInputWrap: {
+    minHeight: 44,
+    borderWidth: 1,
+    borderRadius: 9,
+    paddingHorizontal: 11,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+  },
+  editCurrencyPrefix: { fontSize: 15, fontFamily: "Inter_500Medium" },
+  editPriceInput: {
+    flex: 1,
+    minWidth: 0,
+    paddingVertical: 8,
+    fontSize: 15,
+    fontFamily: "Inter_400Regular",
+  },
+  editTotalPreview: { fontSize: 12, fontFamily: "Inter_600SemiBold", textAlign: "right" },
   nameModalActions: { flexDirection: "row", justifyContent: "flex-end", gap: 9 },
   nameModalButton: {
     minWidth: 92,
