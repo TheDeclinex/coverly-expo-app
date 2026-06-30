@@ -1,5 +1,4 @@
 import { Feather } from "@expo/vector-icons";
-import { Image } from "expo-image";
 import * as Haptics from "expo-haptics";
 import { LinearGradient } from "expo-linear-gradient";
 import { Stack, router, type Href } from "expo-router";
@@ -26,6 +25,7 @@ import Svg, { Circle } from "react-native-svg";
 import { ErrorState } from "@/components/ErrorState";
 import { LoadingState } from "@/components/LoadingState";
 import { RecommendedActionCard } from "@/components/RecommendedActionCard";
+import { ReliableImage } from "@/components/ReliableImage";
 import { useAuth } from "@/context/AuthContext";
 import { useEntitlements } from "@/context/EntitlementsContext";
 import { ENABLE_RECOMMENDED_ACTIONS } from "@/constants/recommendedActions";
@@ -336,10 +336,20 @@ function PropertyCard({
       ]}
     >
       {signedCoverUrl ? (
-        <Image
-          source={{ uri: signedCoverUrl }}
+        <ReliableImage
+          uri={signedCoverUrl}
           style={[styles.cardImage, { borderRadius: colors.radius }]}
           contentFit="cover"
+          fallback={
+            <View
+              style={[
+                styles.cardImagePlaceholder,
+                { backgroundColor: colors.secondary, borderRadius: colors.radius },
+              ]}
+            >
+              <Feather name="home" size={32} color={colors.primary} />
+            </View>
+          }
         />
       ) : (
         <View
@@ -911,7 +921,16 @@ export default function HomeScreen() {
                   ]}
                 >
                   {imageUri ? (
-                    <Image source={{ uri: imageUri }} style={styles.globalResultThumb} contentFit="cover" />
+                    <ReliableImage
+                      uri={imageUri}
+                      style={styles.globalResultThumb}
+                      contentFit="cover"
+                      fallback={
+                        <View style={[styles.globalResultThumb, styles.globalResultPlaceholder, { backgroundColor: colors.secondary }]}>
+                          <Feather name="package" size={18} color={colors.primary} />
+                        </View>
+                      }
+                    />
                   ) : (
                     <View style={[styles.globalResultThumb, styles.globalResultPlaceholder, { backgroundColor: colors.secondary }]}>
                       <Feather name="package" size={18} color={colors.primary} />

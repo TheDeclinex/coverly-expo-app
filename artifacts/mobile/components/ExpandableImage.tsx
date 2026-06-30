@@ -10,6 +10,8 @@ import { ImageViewerModal } from "@/components/ImageViewerModal";
 import { ItemPinMarker, PIN_MARKER_SIZE } from "@/components/ItemPinMarker";
 import { isDisplayableUri } from "@/lib/storage-helpers";
 
+const IMAGE_LOAD_RETRY_DELAYS_MS = [350, 900];
+
 interface ExpandableImageProps {
   uri: string | null | undefined;
   style?: StyleProp<ViewStyle>;
@@ -54,11 +56,23 @@ export function ExpandableImage({
   const [lightboxVisible, setLightboxVisible] = useState(false);
   const [dims, setDims] = useState({ w: 0, h: 0 });
   const [hasError, setHasError] = useState(false);
+  const [loadAttempt, setLoadAttempt] = useState(0);
   const suppressNextPress = useRef(false);
+  const retryTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const clearRetryTimeout = () => {
+    if (retryTimeoutRef.current) {
+      clearTimeout(retryTimeoutRef.current);
+      retryTimeoutRef.current = null;
+    }
+  };
 
   // Reset error state whenever the URI changes so a new valid URL gets a fresh load attempt.
   useEffect(() => {
+    clearRetryTimeout();
     setHasError(false);
+    setLoadAttempt(0);
+    return clearRetryTimeout;
   }, [uri]);
 
   const lightboxUris: string[] =
@@ -104,6 +118,7 @@ export function ExpandableImage({
   // At this point canDisplay is true → isDisplayableUri(uri) passed → uri is a real string.
   // TypeScript can't infer this without a type guard, so we assert here.
   const safeUri = uri as string;
+  const imageRenderKey = `${safeUri}:${loadAttempt}`;
 
   return (
     <>
@@ -143,11 +158,14 @@ export function ExpandableImage({
          * from blocking the display of a newly resolved signed URL.
          */}
         <Image
-          key={safeUri}
+          key={imageRenderKey}
           source={{ uri: safeUri }}
+          recyclingKey={imageRenderKey}
+          cachePolicy={loadAttempt > 0 ? "none" : "memory-disk"}
           style={{ width: "100%", height: "100%" }}
           contentFit={contentFit}
           onLoad={() => {
+            clearRetryTimeout();
             if (__DEV__) console.log("[ExpandableImage] ✓ loaded:", safeUri.slice(0, 70));
           }}
           onError={(e) => {
@@ -156,6 +174,15 @@ export function ExpandableImage({
               safeUri.slice(0, 70),
               (e as { error?: unknown }).error,
             );
+            const retryDelayMs = IMAGE_LOAD_RETRY_DELAYS_MS[loadAttempt];
+            if (retryDelayMs != null) {
+              clearRetryTimeout();
+              retryTimeoutRef.current = setTimeout(() => {
+                retryTimeoutRef.current = null;
+                setLoadAttempt((attempt) => attempt + 1);
+              }, retryDelayMs);
+              return;
+            }
             setHasError(true);
           }}
         />

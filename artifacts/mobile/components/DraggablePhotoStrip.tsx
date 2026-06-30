@@ -1,6 +1,5 @@
 import { Feather } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
-import { Image } from "expo-image";
 import * as ImagePicker from "expo-image-picker";
 import React, { useCallback } from "react";
 import { Alert, Pressable, ScrollView, Text, TextInput, View } from "react-native";
@@ -14,6 +13,7 @@ import Animated, {
 
 import { useColors } from "@/hooks/useColors";
 import { useSignedUrl } from "@/hooks/useSignedUrls";
+import { ReliableImage } from "@/components/ReliableImage";
 
 export interface PhotoEntry {
   url: string;
@@ -102,8 +102,8 @@ function PhotoCard({
     <GestureDetector gesture={panGesture}>
       <Animated.View style={[animStyle, { width: CARD_W, gap: 6 }]}>
         <View style={{ position: "relative" }}>
-          <Image
-            source={resolvedUrl ? { uri: resolvedUrl } : undefined}
+          <ReliableImage
+            uri={resolvedUrl}
             style={{
               width: CARD_W,
               height: CARD_H,
@@ -113,6 +113,22 @@ function PhotoCard({
             }}
             contentFit="cover"
             transition={150}
+            fallback={
+              <View
+                style={{
+                  width: CARD_W,
+                  height: CARD_H,
+                  borderRadius: colors.radius,
+                  borderWidth: index === 0 ? 2 : 1,
+                  borderColor: index === 0 ? colors.primary : colors.border,
+                  alignItems: "center",
+                  justifyContent: "center",
+                  backgroundColor: colors.secondary,
+                }}
+              >
+                <Feather name="image" size={22} color={colors.primary} />
+              </View>
+            }
           />
 
           {index === 0 && (

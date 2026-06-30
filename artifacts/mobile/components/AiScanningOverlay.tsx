@@ -10,7 +10,6 @@
 
 import React, { useEffect, useState } from "react";
 import { Dimensions, StyleSheet, Text, View } from "react-native";
-import { Image } from "expo-image";
 import Animated, {
   Easing,
   useAnimatedStyle,
@@ -20,6 +19,7 @@ import Animated, {
   withTiming,
 } from "react-native-reanimated";
 
+import { ReliableImage } from "@/components/ReliableImage";
 import type { ScanEncodedImage } from "@/types/scan";
 
 const { width: SCREEN_W } = Dimensions.get("window");
@@ -156,11 +156,12 @@ export function AiScanningOverlay({
         <View style={styles.frame}>
           {/* Photo (or dark placeholder) */}
           {photoUri ? (
-            <Image
-              source={{ uri: photoUri }}
+            <ReliableImage
+              uri={photoUri}
               style={StyleSheet.absoluteFill}
               contentFit="cover"
               transition={300}
+              fallback={<View style={[StyleSheet.absoluteFill, styles.photoPlaceholder]} />}
             />
           ) : (
             <View style={[StyleSheet.absoluteFill, styles.photoPlaceholder]} />

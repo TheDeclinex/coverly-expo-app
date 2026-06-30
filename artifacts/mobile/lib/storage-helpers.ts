@@ -21,6 +21,11 @@ export const CLAIM_EVIDENCE_BUCKET = "claim-evidence";
  * 1 hour — short enough to rotate regularly, long enough for a browsing session.
  */
 export const SIGNED_URL_EXPIRY_SECS = 3600;
+const SIGNED_URL_CREATE_RETRY_DELAYS_MS = [300, 800];
+
+function wait(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 /**
  * Returns true if `value` is a Supabase Storage object path (bare relative path).
@@ -87,12 +92,33 @@ export async function getSignedDisplayUrl(
 
   // Storage path — generate signed URL.
   if (__DEV__) console.log("[storage] creating signed URL for path:", pathOrUrl.slice(0, 70));
-  const { data, error } = await supabase.storage
-    .from(bucket)
-    .createSignedUrl(pathOrUrl, SIGNED_URL_EXPIRY_SECS);
+  let signedUrl: string | null = null;
+  let lastErrorMessage: string | undefined;
 
-  if (error || !data?.signedUrl) {
-    if (__DEV__) console.warn("[storage] createSignedUrl FAILED | path:", pathOrUrl, "| error:", error?.message);
+  for (let attempt = 0; attempt <= SIGNED_URL_CREATE_RETRY_DELAYS_MS.length; attempt += 1) {
+    const { data, error } = await supabase.storage
+      .from(bucket)
+      .createSignedUrl(pathOrUrl, SIGNED_URL_EXPIRY_SECS);
+
+    if (data?.signedUrl) {
+      signedUrl = data.signedUrl;
+      break;
+    }
+
+    lastErrorMessage = error?.message;
+    const retryDelayMs = SIGNED_URL_CREATE_RETRY_DELAYS_MS[attempt];
+    if (retryDelayMs == null) break;
+    if (__DEV__) console.warn(
+      "[storage] createSignedUrl retrying | path:",
+      pathOrUrl.slice(0, 70),
+      "| error:",
+      lastErrorMessage,
+    );
+    await wait(retryDelayMs);
+  }
+
+  if (!signedUrl) {
+    if (__DEV__) console.warn("[storage] createSignedUrl FAILED | path:", pathOrUrl, "| error:", lastErrorMessage);
     return null;
   }
 
@@ -100,7 +126,7 @@ export async function getSignedDisplayUrl(
 
   // DEV-only: HEAD-fetch the signed URL to verify the object actually exists in storage.
   if (__DEV__) {
-    fetch(data.signedUrl, { method: "HEAD" })
+    fetch(signedUrl, { method: "HEAD" })
       .then((r) => {
         if (r.ok) {
           if (__DEV__) console.log(`[storage] HEAD verify ✓ ${r.status} | path: ${pathOrUrl.slice(0, 50)}`);
@@ -115,7 +141,7 @@ export async function getSignedDisplayUrl(
       });
   }
 
-  return data.signedUrl;
+  return signedUrl;
 }
 
 /**

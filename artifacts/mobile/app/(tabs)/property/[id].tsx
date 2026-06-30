@@ -1,5 +1,4 @@
 import { Feather, MaterialCommunityIcons } from "@expo/vector-icons";
-import { Image } from "expo-image";
 import * as Haptics from "expo-haptics";
 import * as ImagePicker from "expo-image-picker";
 import { LinearGradient } from "expo-linear-gradient";
@@ -31,6 +30,7 @@ import { EmptyState } from "@/components/EmptyState";
 import { ErrorState } from "@/components/ErrorState";
 import { LoadingState } from "@/components/LoadingState";
 import { ContextBackButton } from "@/components/ContextBackButton";
+import { ReliableImage } from "@/components/ReliableImage";
 import { useToast } from "@/components/Toast";
 import { getCategoryColor, getCategoryLegendEntry } from "@/constants/categoryColors";
 import { ENABLE_RECOMMENDED_ACTIONS } from "@/constants/recommendedActions";
@@ -1363,10 +1363,25 @@ function RoomCard({
             )}
           </Svg>
           {resolvedCoverUrl ? (
-            <Image
-              source={{ uri: resolvedCoverUrl }}
+            <ReliableImage
+              uri={resolvedCoverUrl}
               style={styles.roomThumb}
               contentFit="cover"
+              fallback={
+                <View
+                  style={[
+                    styles.roomThumbPlaceholder,
+                    { backgroundColor: colors.muted },
+                  ]}
+                >
+                  <MaterialCommunityIcons
+                    name={getRoomPlaceholderIcon(item.room_type, item.name)}
+                    size={20}
+                    color={colors.primary}
+                    style={{ opacity: 0.6 }}
+                  />
+                </View>
+              }
             />
           ) : (
             <View
@@ -2210,10 +2225,24 @@ export default function PropertyDetailScreen() {
                 transform: [{ translateY: heroTranslateY }],
               }}
             >
-              <Image
-                source={{ uri: (localCoverUrl ?? signedCoverUrl)! }}
+              <ReliableImage
+                uri={localCoverUrl ?? signedCoverUrl}
                 style={StyleSheet.absoluteFill}
                 contentFit="cover"
+                fallback={
+                  <View
+                    style={[
+                      StyleSheet.absoluteFill,
+                      {
+                        alignItems: "center",
+                        justifyContent: "center",
+                        backgroundColor: colors.secondary,
+                      },
+                    ]}
+                  >
+                    <Feather name="home" size={40} color={colors.primary} />
+                  </View>
+                }
               />
             </Animated.View>
           ) : (

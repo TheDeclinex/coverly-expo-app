@@ -2,7 +2,6 @@ import { Feather, MaterialCommunityIcons } from "@expo/vector-icons";
 import * as ImagePicker from "expo-image-picker";
 import * as Haptics from "expo-haptics";
 import * as WebBrowser from "expo-web-browser";
-import { Image } from "expo-image";
 import { Stack, router, useLocalSearchParams, type Href } from "expo-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import React, { useEffect, useRef, useState } from "react";
@@ -37,6 +36,7 @@ import { ContextBackButton } from "@/components/ContextBackButton";
 import { ErrorState } from "@/components/ErrorState";
 import { ExpandableImage } from "@/components/ExpandableImage";
 import { LoadingState } from "@/components/LoadingState";
+import { ReliableImage } from "@/components/ReliableImage";
 import { useToast } from "@/components/Toast";
 import { getCategoryColor } from "@/constants/categoryColors";
 import { ENABLE_RECOMMENDED_ACTIONS } from "@/constants/recommendedActions";
@@ -1045,7 +1045,16 @@ function CompactItemCard({
           </View>
         ) : null}
         {resolvedImageUrl ? (
-          <Image source={{ uri: resolvedImageUrl }} style={styles.gridThumb} contentFit="cover" />
+          <ReliableImage
+            uri={resolvedImageUrl}
+            style={styles.gridThumb}
+            contentFit="cover"
+            fallback={
+              <View style={[styles.gridThumb, styles.gridThumbPlaceholder, { backgroundColor: colors.muted }]}>
+                <Feather name={placeholderIcon} size={24} color={TEAL} />
+              </View>
+            }
+          />
         ) : (
           <View style={[styles.gridThumb, styles.gridThumbPlaceholder, { backgroundColor: colors.muted }]}>
             <Feather name={placeholderIcon} size={24} color={TEAL} />
@@ -1744,10 +1753,20 @@ export default function ItemsScreen() {
             transform: [{ translateY: heroTranslateY }],
           }}
         >
-          <Image
-            source={{ uri: signedCoverUrl }}
+          <ReliableImage
+            uri={signedCoverUrl}
             style={StyleSheet.absoluteFill}
             contentFit="cover"
+            fallback={
+              <View style={styles.coverPlaceholder}>
+                <MaterialCommunityIcons
+                  name={getRoomPlaceholderIcon(room?.room_type, room?.name ?? name)}
+                  size={72}
+                  color={colors.primary}
+                  style={{ opacity: 0.55 }}
+                />
+              </View>
+            }
           />
         </Animated.View>
       ) : (

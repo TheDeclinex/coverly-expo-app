@@ -1,5 +1,4 @@
 import { Feather } from "@expo/vector-icons";
-import { Image } from "expo-image";
 import type { ImageLoadEventData } from "expo-image";
 import React, { useCallback, useMemo, useRef, useState } from "react";
 import {
@@ -16,6 +15,7 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { ItemPinMarker, PIN_MARKER_SIZE } from "@/components/ItemPinMarker";
+import { ReliableImage } from "@/components/ReliableImage";
 
 const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get("window");
 
@@ -82,8 +82,8 @@ function ImagePage({
         </View>
       ) : (
         <>
-          <Image
-            source={{ uri }}
+          <ReliableImage
+            uri={uri}
             style={styles.image}
             contentFit="contain"
             onLoad={(e: ImageLoadEventData) => {
@@ -91,7 +91,7 @@ function ImagePage({
               const { width, height } = e.source;
               if (width > 0 && height > 0) setImgSize({ w: width, h: height });
             }}
-            onError={() => {
+            onPermanentError={() => {
               setLoading(false);
               setError(true);
             }}
