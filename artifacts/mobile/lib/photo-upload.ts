@@ -137,6 +137,14 @@ async function uploadInventoryPhoto(
       fileSize: file.fileSize,
     });
 
+    const uploadStartedAt = Date.now();
+    if (__DEV__) console.info("[storageUpload] upload started", {
+      bucket: INVENTORY_PHOTOS_BUCKET,
+      uploadPath,
+      source: context.source,
+      fileSize: file.fileSize,
+    });
+
     const { data: uploadData, error: uploadError } = await supabase.storage
       .from(INVENTORY_PHOTOS_BUCKET)
       .upload(uploadPath, file.data, { contentType: file.contentType, upsert: false });
@@ -145,12 +153,27 @@ async function uploadInventoryPhoto(
       return createUploadFailure(context, userId, uploadPath, uploadError, file);
     }
 
+    if (__DEV__) console.info("[storageUpload] upload completed", {
+      bucket: INVENTORY_PHOTOS_BUCKET,
+      uploadPath: uploadData.path,
+      source: context.source,
+      elapsedMs: Date.now() - uploadStartedAt,
+    });
+
     const { data: signedData, error: signedError } = await supabase.storage
       .from(INVENTORY_PHOTOS_BUCKET)
       .createSignedUrl(uploadData.path, SIGNED_URL_EXPIRY_SECS);
     if (signedError) {
       if (__DEV__) console.warn("[photoUpload] signed URL error:", signedError.message);
     }
+
+    if (__DEV__) console.info("[storageUpload] signed URL step completed", {
+      bucket: INVENTORY_PHOTOS_BUCKET,
+      uploadPath: uploadData.path,
+      source: context.source,
+      hasDisplayUrl: !!signedData?.signedUrl,
+      signedUrlError: signedError?.message ?? null,
+    });
 
     return {
       ok: true,

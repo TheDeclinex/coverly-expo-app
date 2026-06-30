@@ -100,6 +100,36 @@ function scanLog(message: string, details?: Record<string, unknown>) {
   }
 }
 
+function scanNetworkFailureMessage(error: unknown): string | null {
+  const message = error instanceof Error ? error.message : String(error);
+  const normalized = message.toLowerCase();
+
+  if (error instanceof Error && error.name === "ScanTimeoutError") {
+    return "Scan timed out before completion.";
+  }
+
+  if (
+    normalized.includes("network request timed out") ||
+    normalized.includes("timed out") ||
+    normalized.includes("timeout")
+  ) {
+    return "Scan timed out before completion.";
+  }
+
+  if (
+    normalized.includes("network request failed") ||
+    normalized.includes("failed to fetch") ||
+    normalized.includes("networkerror") ||
+    normalized.includes("internet connection") ||
+    normalized.includes("offline") ||
+    normalized.includes("not connected")
+  ) {
+    return "Network request failed while scanning. Check your connection and try again.";
+  }
+
+  return null;
+}
+
 function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   const timeout = new Promise<never>((_, reject) => {
@@ -117,10 +147,7 @@ function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): 
 
 
 function expectedScanNetworkMessage(error: unknown): string | null {
-  if (error instanceof Error && error.name === "ScanTimeoutError") {
-    return "Scan timed out. Please try again.";
-  }
-  return friendlyNetworkErrorMessage(error);
+  return scanNetworkFailureMessage(error) ?? friendlyNetworkErrorMessage(error);
 }
 function createUsageIdempotencyKey(): string {
   const randomUuid =
@@ -221,9 +248,9 @@ export async function runAiScan(input: ScanInput): Promise<ScanResult> {
     const functionUrl = `${debugSupabaseUrl.replace(/\/$/, "")}/functions/v1/${SCAN_EDGE_FUNCTION_NAME}`;
     const requestBody = JSON.stringify(productionPayload);
     const timeoutMs = input.mode === "video_room" ? VIDEO_SCAN_INVOKE_TIMEOUT_MS : SCAN_INVOKE_TIMEOUT_MS;
+    const invokeStartedAt = Date.now();
     scanLog("function invoke started", {
       functionName: SCAN_EDGE_FUNCTION_NAME,
-      functionUrl,
       requestBodyChars: requestBody.length,
       timeoutMs,
     });
@@ -245,13 +272,13 @@ export async function runAiScan(input: ScanInput): Promise<ScanResult> {
     scanLog("HTTP status received", {
       status: response.status,
       ok: response.ok,
+      elapsedMs: Date.now() - invokeStartedAt,
     });
 
     const responseText = await response.text();
     scanLog("response body received", {
       status: response.status,
       bodyChars: responseText.length,
-      bodyPreview: responseText.slice(0, 240),
     });
     let data: ScanFunctionResponse | null = null;
     try {
@@ -259,7 +286,8 @@ export async function runAiScan(input: ScanInput): Promise<ScanResult> {
     } catch {
       if (__DEV__) console.error("[Scan] function invoke failed", {
         status: response.status,
-        responsePreview: responseText.slice(0, 500),
+        bodyChars: responseText.length,
+        elapsedMs: Date.now() - invokeStartedAt,
       });
       return {
         status: "error",
@@ -275,6 +303,7 @@ export async function runAiScan(input: ScanInput): Promise<ScanResult> {
         status: response.status,
         errorCode: data?.errorCode,
         message: data?.message,
+        elapsedMs: Date.now() - invokeStartedAt,
       });
       return {
         status: "error",
@@ -286,11 +315,12 @@ export async function runAiScan(input: ScanInput): Promise<ScanResult> {
       };
     }
 
-    scanLog("function invoke returned", {
+    scanLog("function invoke completed", {
       success: data?.success,
       itemCount: Array.isArray(data?.items) ? data.items.length : 0,
       errorCode: data?.errorCode,
       edgeFunctionVersion: data?.edgeFunctionVersion ?? data?.diagnostics?.edgeFunctionVersion,
+      elapsedMs: Date.now() - invokeStartedAt,
     });
 
     // Production function returns { success: bool, items?, errorCode?, message? }

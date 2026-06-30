@@ -51,7 +51,7 @@ import {
 } from "@/lib/photo-upload";
 import { markRecentItem, markRecentItems } from "@/lib/recent-items";
 import { supabase } from "@/lib/supabase";
-import type { InventoryFile, InventoryRoom } from "@/types";
+import type { InventoryFile, InventoryItem, InventoryRoom } from "@/types";
 import type {
   ScanDetectedItem,
   ScanEncodedImage,
@@ -113,6 +113,18 @@ interface PartialFailure {
 }
 
 type ScanLaunchStep = "property" | "room" | "type";
+type ScanSaveStage =
+  | "scan-review-save"
+  | "photo-handling"
+  | "storage-upload"
+  | "db-insert"
+  | "room-refresh";
+
+interface SaveInsertResult {
+  ok: boolean;
+  savedViaDuplicateKey?: boolean;
+  error?: unknown;
+}
 
 function scanLog(message: string, details?: Record<string, unknown>) {
   if (!__DEV__) return;
@@ -121,6 +133,144 @@ function scanLog(message: string, details?: Record<string, unknown>) {
   } else {
     console.info(`[Scan] ${message}`);
   }
+}
+
+function errorMessage(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  if (typeof error === "object" && error !== null) {
+    const record = error as Record<string, unknown>;
+    if (typeof record.message === "string") return record.message;
+    if (typeof record.error === "string") return record.error;
+  }
+  return String(error);
+}
+
+function isTimeoutMessage(message: string): boolean {
+  return /network request timed out|timed out|timeout/i.test(message);
+}
+
+function isNetworkFailureMessage(message: string): boolean {
+  return /network request failed|failed to fetch|networkerror|internet connection|offline|not connected/i.test(message);
+}
+
+function isTransientSaveFailure(error: unknown): boolean {
+  const message = errorMessage(error);
+  return isTimeoutMessage(message) || isNetworkFailureMessage(message);
+}
+
+function isDuplicateKeyError(error: unknown): boolean {
+  if (typeof error === "object" && error !== null) {
+    const record = error as Record<string, unknown>;
+    if (record.code === "23505") return true;
+  }
+  return /duplicate key|already exists/i.test(errorMessage(error));
+}
+
+function scanSaveErrorMessage(stage: ScanSaveStage, error: unknown, itemName?: string): string {
+  const message = errorMessage(error);
+  if (stage === "storage-upload" || stage === "photo-handling") {
+    if (isTimeoutMessage(message)) return "Photo upload timed out while saving this item.";
+    if (isNetworkFailureMessage(message)) return "Network request failed while saving item.";
+    return "Photo upload failed while saving this item. Please try again.";
+  }
+  if (stage === "db-insert") {
+    if (isTimeoutMessage(message)) return "Item save timed out. Please try again.";
+    if (isNetworkFailureMessage(message)) return "Network request failed while saving item.";
+    return itemName ? `Failed to save "${itemName}": ${message}` : `Item save failed: ${message}`;
+  }
+  if (stage === "room-refresh") {
+    return "The item may have saved, but refresh timed out. Pull to refresh or reopen the room.";
+  }
+  if (stage === "scan-review-save") {
+    if (isTimeoutMessage(message)) return "Item save timed out. Please try again.";
+    if (isNetworkFailureMessage(message)) return "Network request failed while saving item.";
+  }
+  return message;
+}
+
+async function insertScanReviewItem(
+  payload: InventoryItem,
+  context: { itemIndex: number; itemCount: number },
+): Promise<SaveInsertResult> {
+  const payloadChars = JSON.stringify(payload).length;
+  for (let attempt = 1; attempt <= 2; attempt += 1) {
+    const startedAt = Date.now();
+    scanLog("DB insert started", {
+      stage: "db-insert",
+      itemIndex: context.itemIndex,
+      itemCount: context.itemCount,
+      attempt,
+      payloadChars,
+      hasImageStoragePath: Boolean(payload.image_url || payload.photo_url),
+    });
+
+    try {
+      const { error } = await supabase.from("inventory_items").insert(payload);
+      if (!error) {
+        scanLog("DB insert completed", {
+          stage: "db-insert",
+          itemIndex: context.itemIndex,
+          itemCount: context.itemCount,
+          attempt,
+          elapsedMs: Date.now() - startedAt,
+        });
+        return { ok: true };
+      }
+
+      if (isDuplicateKeyError(error)) {
+        scanLog("DB insert completed after duplicate-key retry", {
+          stage: "db-insert",
+          itemIndex: context.itemIndex,
+          itemCount: context.itemCount,
+          attempt,
+          elapsedMs: Date.now() - startedAt,
+        });
+        return { ok: true, savedViaDuplicateKey: true };
+      }
+
+      scanLog("DB insert failed", {
+        stage: "db-insert",
+        itemIndex: context.itemIndex,
+        itemCount: context.itemCount,
+        attempt,
+        message: error.message,
+        elapsedMs: Date.now() - startedAt,
+      });
+
+      if (attempt === 1 && isTransientSaveFailure(error)) {
+        scanLog("DB insert retrying once with same item id", {
+          stage: "db-insert",
+          itemIndex: context.itemIndex,
+          itemCount: context.itemCount,
+        });
+        continue;
+      }
+
+      return { ok: false, error };
+    } catch (error) {
+      scanLog("DB insert failed", {
+        stage: "db-insert",
+        itemIndex: context.itemIndex,
+        itemCount: context.itemCount,
+        attempt,
+        message: errorMessage(error),
+        elapsedMs: Date.now() - startedAt,
+      });
+
+      if (attempt === 1 && isTransientSaveFailure(error)) {
+        scanLog("DB insert retrying once with same item id", {
+          stage: "db-insert",
+          itemIndex: context.itemIndex,
+          itemCount: context.itemCount,
+        });
+        continue;
+      }
+
+      return { ok: false, error };
+    }
+  }
+
+  return { ok: false, error: new Error("Item save failed after retry.") };
 }
 
 async function uriToBase64(uri: string): Promise<string> {
@@ -192,6 +342,7 @@ export default function ScanScreen() {
   const aiScanEntitlementCheckedRef = useRef(false);
   const videoProcessingRef = useRef<{ key: string; sessionId: number } | null>(null);
   const videoProcessingSessionRef = useRef(0);
+  const saveAllInFlightRef = useRef(false);
 
   useEffect(() => () => {
     if (multiPhotoCameraTimerRef.current) {
@@ -627,16 +778,51 @@ export default function ScanScreen() {
       sourcePhotoIndex: item.sourcePhotoIndex,
     });
 
-  const invalidateRoomQueries = () => {
+  const invalidateRoomQueries = (reason = "scan-review-save") => {
     // Invalidate with the full key (matches room/[id].tsx query key exactly).
     // Also use the 2-part prefix as a belt-and-suspenders fallback.
     const userId = session?.user.id;
-    queryClient.invalidateQueries({ queryKey: ["items", selectedRoomId, userId] });
-    queryClient.invalidateQueries({ queryKey: ["items", selectedRoomId] });
-    queryClient.invalidateQueries({ queryKey: ["all-items"] });
-    queryClient.invalidateQueries({ queryKey: ["property-items", selectedFileId] });
-    // Also invalidate signed-url cache so the new item's path gets a fresh signed URL.
-    queryClient.invalidateQueries({ queryKey: ["signed-urls"] });
+    scanLog("room refresh/cache invalidation started", {
+      stage: "room-refresh",
+      reason,
+      roomId: selectedRoomId,
+      fileId: selectedFileId,
+    });
+
+    try {
+      const invalidations = [
+        queryClient.invalidateQueries({ queryKey: ["items", selectedRoomId, userId] }),
+        queryClient.invalidateQueries({ queryKey: ["items", selectedRoomId] }),
+        queryClient.invalidateQueries({ queryKey: ["all-items"] }),
+        queryClient.invalidateQueries({ queryKey: ["property-items", selectedFileId] }),
+        // Also invalidate signed-url cache so the new item's path gets a fresh signed URL.
+        queryClient.invalidateQueries({ queryKey: ["signed-urls"] }),
+      ];
+
+      void Promise.allSettled(invalidations).then((results) => {
+        const failures = results.filter((result) => result.status === "rejected");
+        if (failures.length > 0) {
+          scanLog("room refresh/cache invalidation failed", {
+            stage: "room-refresh",
+            reason,
+            failureCount: failures.length,
+          });
+          setScanSaveError(scanSaveErrorMessage("room-refresh", new Error("refresh failed")));
+          return;
+        }
+        scanLog("room refresh/cache invalidation completed", {
+          stage: "room-refresh",
+          reason,
+        });
+      });
+    } catch (error) {
+      scanLog("room refresh/cache invalidation failed", {
+        stage: "room-refresh",
+        reason,
+        message: errorMessage(error),
+      });
+      setScanSaveError(scanSaveErrorMessage("room-refresh", error));
+    }
   };
 
   const handleStartScan = async (
@@ -846,85 +1032,144 @@ export default function ScanScreen() {
   /** Save all items sequentially. On partial failure, keep unsaved items visible and report failures inline. */
   const handleSaveAll = async () => {
     if (!selectedFileId || !selectedRoomId) return;
+    if (saveAllInFlightRef.current || scanStatus === "saving") return;
+
+    saveAllInFlightRef.current = true;
     setScanStatus("saving");
     setScanSaveError(null);
     setPartialFailures([]);
 
-    const userId = session?.user.id;
-    if (!userId) {
-      setScanStatus("reviewing");
-      setScanSaveError("You must be signed in to save items.");
-      return;
-    }
+    try {
+      const userId = session?.user.id;
+      if (!userId) {
+        setScanStatus("reviewing");
+        setScanSaveError("You must be signed in to save items.");
+        return;
+      }
 
-    const selectedEntries = detectedItems.map((item, index) => ({ item, index }));
+      const selectedEntries = detectedItems.map((item, index) => ({ item, index }));
 
-    if (selectedEntries.length === 0) {
-      setScanStatus("reviewing");
-      setScanSaveError("No detected items left to save.");
-      return;
-    }
+      scanLog("scan review save started", {
+        stage: "scan-review-save",
+        mode: "batch",
+        selectedItemCount: selectedEntries.length,
+      });
+
+      if (selectedEntries.length === 0) {
+        setScanStatus("reviewing");
+        setScanSaveError("No detected items left to save.");
+        return;
+      }
 
     // Phase 1: Upload each unique source photo once.
     // Track successful uploads (photoIdx → URL) and failures (photoIdx in failedPhotoIndices).
     // Items whose photo failed to upload are treated as partial failures and never inserted.
     // Stores durable storage paths (not signed URLs) keyed by photo index.
-    const photoUrlByIndex = new Map<number, string>();
-    const failedPhotoIndices = new Set<number>();
-    const uploadFailureByPhotoIndex = new Map<number, UploadFailure>();
+      const photoUrlByIndex = new Map<number, string>();
+      const failedPhotoIndices = new Set<number>();
+      const uploadFailureByPhotoIndex = new Map<number, UploadFailure>();
 
-    for (const { item } of selectedEntries) {
-      const photoIdx = item.sourcePhotoIndex ?? 0;
-      if (photoUrlByIndex.has(photoIdx) || failedPhotoIndices.has(photoIdx)) continue;
-      const uri = item.sourceImageUri ?? images[photoIdx]?.uri ?? null;
-      if (!uri) { failedPhotoIndices.add(photoIdx); continue; }
-      const dedupeKey = `${photoIdx}:${uri}`;
-      const uploaded = await uploadScanPhoto(uri, userId, dedupeKey, {
-        fileId: selectedFileId,
-      });
-      // Store the durable path (not the short-lived displayUrl) in the DB map.
-      if (uploaded.ok) { photoUrlByIndex.set(photoIdx, uploaded.path); }
-      else {
-        failedPhotoIndices.add(photoIdx);
-        uploadFailureByPhotoIndex.set(photoIdx, uploaded);
-        if (__DEV__) console.error("[Scan] Photo upload diagnostic\n" + formatUploadFailure(uploaded));
+      for (const { item, index: i } of selectedEntries) {
+        const photoIdx = item.sourcePhotoIndex ?? 0;
+        if (photoUrlByIndex.has(photoIdx) || failedPhotoIndices.has(photoIdx)) continue;
+
+        scanLog("photo handling started", {
+          stage: "photo-handling",
+          itemIndex: i,
+          sourcePhotoIndex: photoIdx,
+          hasSourceImageUri: Boolean(item.sourceImageUri ?? images[photoIdx]?.uri),
+        });
+
+        const uri = item.sourceImageUri ?? images[photoIdx]?.uri ?? null;
+        if (!uri) {
+          failedPhotoIndices.add(photoIdx);
+          scanLog("photo handling failed", {
+            stage: "photo-handling",
+            itemIndex: i,
+            sourcePhotoIndex: photoIdx,
+            message: "Source image is missing before upload",
+          });
+          continue;
+        }
+
+        const dedupeKey = `${photoIdx}:${uri}`;
+        const uploaded = await uploadScanPhoto(uri, userId, dedupeKey, {
+          fileId: selectedFileId,
+        });
+        // Store the durable path (not the short-lived displayUrl) in the DB map.
+        if (uploaded.ok) {
+          photoUrlByIndex.set(photoIdx, uploaded.path);
+          scanLog("photo handling completed", {
+            stage: "photo-handling",
+            itemIndex: i,
+            sourcePhotoIndex: photoIdx,
+            hasStoragePath: true,
+          });
+        } else {
+          failedPhotoIndices.add(photoIdx);
+          uploadFailureByPhotoIndex.set(photoIdx, uploaded);
+          if (__DEV__) console.error("[Scan] Photo upload diagnostic\n" + formatUploadFailure(uploaded));
+          scanLog("photo handling failed", {
+            stage: "photo-handling",
+            itemIndex: i,
+            sourcePhotoIndex: photoIdx,
+            message: uploaded.error,
+          });
+        }
       }
-    }
 
-    const failures: PartialFailure[] = [];
-    const savedIndices: number[] = [];
-    const savedItemIds: string[] = [];
+      const failures: PartialFailure[] = [];
+      const savedIndices: number[] = [];
+      const savedItemIds: string[] = [];
 
     // Phase 2: Sequential insert — skip items whose source photo failed to upload.
-    for (const { item, index: i } of selectedEntries) {
-      const photoIdx = item.sourcePhotoIndex ?? 0;
+      for (const { item, index: i } of selectedEntries) {
+        const photoIdx = item.sourcePhotoIndex ?? 0;
 
-      if (failedPhotoIndices.has(photoIdx)) {
-        const uploadFailure = uploadFailureByPhotoIndex.get(photoIdx);
-        failures.push({
-          itemName: item.name,
-          error: uploadFailure
-            ? formatUploadFailure(uploadFailure)
-            : "scan_photo: Source image is missing before upload",
+        if (failedPhotoIndices.has(photoIdx)) {
+          const uploadFailure = uploadFailureByPhotoIndex.get(photoIdx);
+          failures.push({
+            itemName: item.name,
+            error: uploadFailure
+              ? scanSaveErrorMessage("storage-upload", uploadFailure.error, item.name)
+              : scanSaveErrorMessage("photo-handling", new Error("Source image is missing before upload"), item.name),
+          });
+          continue;
+        }
+
+        scanLog("per-item save started", {
+          stage: "scan-review-save",
+          mode: "batch",
+          itemIndex: i,
+          itemCount: selectedEntries.length,
         });
-        continue;
+        const uploadedUrl = photoUrlByIndex.get(photoIdx) ?? null;
+        const payload = buildPayload(item, uploadedUrl);
+        const insertResult = await insertScanReviewItem(payload, {
+          itemIndex: i,
+          itemCount: selectedEntries.length,
+        });
+        if (!insertResult.ok) {
+          if (__DEV__) console.error("[Scan] Save all item failed:", errorMessage(insertResult.error));
+          failures.push({
+            itemName: item.name,
+            error: scanSaveErrorMessage("db-insert", insertResult.error, item.name),
+          });
+        } else {
+          savedIndices.push(i);
+          savedItemIds.push(payload.id);
+          scanLog("per-item save completed", {
+            stage: "scan-review-save",
+            mode: "batch",
+            itemIndex: i,
+            savedViaDuplicateKey: insertResult.savedViaDuplicateKey ?? false,
+          });
+        }
       }
 
-      const uploadedUrl = photoUrlByIndex.get(photoIdx) ?? null;
-      const payload = buildPayload(item, uploadedUrl);
-      const { error } = await supabase.from("inventory_items").insert(payload);
-      if (error) {
-        if (__DEV__) console.error("[Scan] Save all — item failed:", error.message);
-        failures.push({ itemName: item.name, error: error.message });
-      } else {
-        savedIndices.push(i);
-        savedItemIds.push(payload.id);
+      if (savedIndices.length > 0) {
+        invalidateRoomQueries("save-all");
       }
-    }
-
-    if (savedIndices.length > 0) {
-      invalidateRoomQueries();
-    }
 
     if (failures.length > 0) {
       // Keep unsaved items in review; surface partial failure list
@@ -955,6 +1200,22 @@ export default function ScanScreen() {
         addedCount: String(savedItemIds.length),
       },
     });
+    scanLog("save completed", {
+      stage: "scan-review-save",
+      mode: "batch",
+      savedItemCount: savedItemIds.length,
+    });
+    } catch (error) {
+      scanLog("save failed", {
+        stage: "scan-review-save",
+        mode: "batch",
+        message: errorMessage(error),
+      });
+      setScanStatus("reviewing");
+      setScanSaveError(scanSaveErrorMessage("scan-review-save", error));
+    } finally {
+      saveAllInFlightRef.current = false;
+    }
   };
 
   const resetScan = () => {
