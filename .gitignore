@@ -59,3 +59,6 @@ reference/
 # Local package/cache folders
 .pnpm-store/
 node_modules/
+/outputs/brand-final
+/outputs
+/scripts
