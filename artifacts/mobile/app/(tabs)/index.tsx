@@ -8,6 +8,7 @@ import {
   Animated,
   Easing,
   FlatList,
+  Image,
   Modal,
   Platform,
   Pressable,
@@ -977,9 +978,16 @@ export default function HomeScreen() {
           headerBackVisible: false,
           headerLeft: () => null,
           headerTitle: () => (
-            <View style={styles.brandTitle}>
-              <Text style={[styles.brandName, { color: colors.foreground }]}>Coverly</Text>
-              <Text style={[styles.brandTagline, { color: colors.mutedForeground }]}>Know what you own</Text>
+            <View style={styles.brandLockup}>
+              <Image
+                source={require("../../assets/brand/coverly-header-icon.png")}
+                style={styles.brandMark}
+                resizeMode="cover"
+              />
+              <View style={styles.brandTitle}>
+                <Text style={[styles.brandName, { color: colors.foreground }]}>Coverly</Text>
+                <Text style={[styles.brandTagline, { color: colors.mutedForeground }]}>Know what you own</Text>
+              </View>
             </View>
           ),
           headerRight: () => (
@@ -1134,6 +1142,8 @@ function FirstUseEmptyState({ onAddProperty }: { onAddProperty: () => void }) {
 }
 
 const styles = StyleSheet.create({
+  brandLockup: { flexDirection: "row", alignItems: "center", gap: 8 },
+  brandMark: { width: 30, height: 30, borderRadius: 7 },
   brandTitle: { gap: 0 },
   brandName: { fontSize: 17, fontFamily: "Inter_700Bold", lineHeight: 20 },
   brandTagline: { fontSize: 10, fontFamily: "Inter_400Regular", lineHeight: 13 },

@@ -6,6 +6,8 @@ import {
   adminDateLabel,
   adminMetricLabel,
   adminNumberLabel,
+  adminUserIdDebugSummary,
+  normalizeAdminUserIdParam,
   adminStatusLabel,
   adminTextLabel,
 } from "../admin-model.ts";
@@ -26,4 +28,17 @@ test("admin metric label handles loading and error states", () => {
   assert.equal(adminMetricLabel(12), "12");
   assert.equal(adminMetricLabel(null, true), "Loading");
   assert.equal(adminMetricLabel(null, false, true), "Unavailable");
+});
+
+test("admin user id helpers normalize route params safely", () => {
+  const id = "11111111-1111-4111-8111-111111111111";
+  assert.equal(normalizeAdminUserIdParam(id), id);
+  assert.equal(normalizeAdminUserIdParam([id, "ignored"]), id);
+  assert.equal(normalizeAdminUserIdParam("  "), null);
+  assert.deepEqual(adminUserIdDebugSummary(id), {
+    present: true,
+    type: "string",
+    length: 36,
+    uuidLike: true,
+  });
 });

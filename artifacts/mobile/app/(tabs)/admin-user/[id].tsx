@@ -9,20 +9,41 @@ import { LoadingState } from "@/components/LoadingState";
 import { useAuth } from "@/context/AuthContext";
 import { useAccountProfile } from "@/hooks/useAccountProfile";
 import { useColors } from "@/hooks/useColors";
-import { adminDateLabel, adminNumberLabel, adminStatusLabel, adminTextLabel } from "@/lib/admin-model";
-import { loadAdminUserDetail } from "@/lib/admin-service";
+import {
+  adminDateLabel,
+  adminNumberLabel,
+  adminStatusLabel,
+  adminTextLabel,
+  adminUserIdDebugSummary,
+  normalizeAdminUserIdParam,
+} from "@/lib/admin-model";
+import { loadAdminUserDetail, loadAdminUserFiles, type AdminUserFile } from "@/lib/admin-service";
 
 export default function AdminUserDetailScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
-  const { id } = useLocalSearchParams<{ id: string }>();
+  const params = useLocalSearchParams();
+  const selectedUserId = normalizeAdminUserIdParam(params.id);
   const { session } = useAuth();
   const { isAdmin, isLoading } = useAccountProfile();
 
+  React.useEffect(() => {
+    if (!__DEV__) return;
+    console.log("[admin] detail route param", { target: adminUserIdDebugSummary(params.id) });
+  }, [params.id]);
+
   const detailQuery = useQuery({
-    queryKey: ["admin-user-detail", session?.user.id, id],
-    queryFn: () => loadAdminUserDetail(id),
-    enabled: !!session && isAdmin && !!id,
+    queryKey: ["admin-user-detail", session?.user.id, selectedUserId],
+    queryFn: () => loadAdminUserDetail(selectedUserId!),
+    enabled: !!session && isAdmin && !!selectedUserId,
+    staleTime: 20_000,
+    retry: 1,
+  });
+
+  const filesQuery = useQuery({
+    queryKey: ["admin-user-files", session?.user.id, selectedUserId],
+    queryFn: () => loadAdminUserFiles(selectedUserId!),
+    enabled: !!session && isAdmin && !!selectedUserId && !!detailQuery.data?.profile,
     staleTime: 20_000,
     retry: 1,
   });
@@ -37,7 +58,12 @@ export default function AdminUserDetailScreen() {
     <>
       <Stack.Screen options={{ title: "User detail" }} />
       <ScrollView contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + 28 }]} showsVerticalScrollIndicator={false}>
-        {detailQuery.isLoading ? (
+        {!selectedUserId ? (
+          <View style={[styles.stateCard, { backgroundColor: colors.card, borderColor: colors.border, borderRadius: colors.radius }]}>
+            <Text style={[styles.title, { color: colors.foreground }]}>User unavailable</Text>
+            <Text style={[styles.helper, { color: colors.mutedForeground }]}>No valid user ID was provided.</Text>
+          </View>
+        ) : detailQuery.isLoading ? (
           <View style={[styles.stateCard, { backgroundColor: colors.card, borderColor: colors.border, borderRadius: colors.radius }]}>
             <ActivityIndicator color={colors.primary} />
             <Text style={[styles.helper, { color: colors.mutedForeground }]}>Loading user...</Text>
@@ -67,6 +93,31 @@ export default function AdminUserDetailScreen() {
               <AccountRow icon="grid" title="Rooms" value={adminNumberLabel(detail.counts.roomCount)} />
               <AccountRow icon="package" title="Items" value={adminNumberLabel(detail.counts.itemCount)} />
               <AccountRow icon="archive" title="Claim packs" value={adminNumberLabel(detail.counts.claimPackCount)} last />
+            </AccountSection>
+
+            <AccountSection title="Properties setup">
+              {filesQuery.isLoading ? (
+                <AccountRow icon="loader" title="Loading properties" value="Loading" last />
+              ) : filesQuery.isError ? (
+                <AccountRow icon="alert-triangle" title="Properties unavailable" subtitle="User profile loaded, but property inspection failed." value="Check RPC" last />
+              ) : (filesQuery.data ?? []).length === 0 ? (
+                <AccountRow icon="home" title="No properties found" value="Empty" last />
+              ) : (
+                <>
+                  {(filesQuery.data ?? []).slice(0, 3).map((file, index, files) => (
+                    <PropertySetupRow key={file.id} file={file} last={index === files.length - 1 && (filesQuery.data?.length ?? 0) <= 3} />
+                  ))}
+                  {(filesQuery.data?.length ?? 0) > 3 ? (
+                    <AccountRow
+                      icon="list"
+                      title="Open all properties"
+                      value={adminNumberLabel(filesQuery.data?.length ?? null)}
+                      onPress={() => router.push({ pathname: "/(tabs)/admin-user-files/[id]", params: { id: profile.id } } as Href)}
+                      last
+                    />
+                  ) : null}
+                </>
+              )}
             </AccountSection>
 
             <AccountSection title={`Usage ${detail.usage.monthKey ?? ""}`.trim()}>
@@ -106,6 +157,18 @@ export default function AdminUserDetailScreen() {
         )}
       </ScrollView>
     </>
+  );
+}
+
+function PropertySetupRow({ file, last }: { file: AdminUserFile; last: boolean }) {
+  return (
+    <AccountRow
+      icon="home"
+      title={adminTextLabel(file.name)}
+      subtitle={`${adminStatusLabel(file.property_type)} / Updated ${adminDateLabel(file.updated_at)}`}
+      value={`${adminNumberLabel(file.room_count)} rooms / ${adminNumberLabel(file.item_count)} items`}
+      last={last}
+    />
   );
 }
 

@@ -10,18 +10,35 @@ import { LoadingState } from "@/components/LoadingState";
 import { useAuth } from "@/context/AuthContext";
 import { useAccountProfile } from "@/hooks/useAccountProfile";
 import { useColors } from "@/hooks/useColors";
-import { adminDateLabel, adminNumberLabel, adminStatusLabel, adminTextLabel } from "@/lib/admin-model";
+import {
+  adminDateLabel,
+  adminNumberLabel,
+  adminStatusLabel,
+  adminTextLabel,
+  adminUserIdDebugSummary,
+  normalizeAdminUserIdParam,
+} from "@/lib/admin-model";
 import { loadAdminEntitlementDebug, searchAdminUsers, type AdminUserSearchResult } from "@/lib/admin-service";
 
 export default function AdminEntitlementsScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
-  const { userId } = useLocalSearchParams<{ userId?: string }>();
+  const params = useLocalSearchParams();
+  const routeUserId = normalizeAdminUserIdParam(params.userId);
   const { session } = useAuth();
   const { isAdmin, isLoading } = useAccountProfile();
   const [queryText, setQueryText] = React.useState("");
   const [submittedQuery, setSubmittedQuery] = React.useState("");
-  const [selectedUserId, setSelectedUserId] = React.useState<string | null>(userId ?? null);
+  const [selectedUserId, setSelectedUserId] = React.useState<string | null>(routeUserId);
+
+  React.useEffect(() => {
+    if (!__DEV__) return;
+    console.log("[admin] entitlement route param", { target: adminUserIdDebugSummary(params.userId) });
+  }, [params.userId]);
+
+  React.useEffect(() => {
+    if (routeUserId) setSelectedUserId(routeUserId);
+  }, [routeUserId]);
 
   const usersQuery = useQuery({
     queryKey: ["admin-entitlement-users", session?.user.id, submittedQuery],
@@ -78,7 +95,15 @@ export default function AdminEntitlementsScreen() {
                 user={user}
                 selected={user.id === selectedUserId}
                 last={index === (usersQuery.data?.length ?? 0) - 1}
-                onPress={() => setSelectedUserId(user.id)}
+                onPress={() => {
+                  if (__DEV__) {
+                    console.log("[admin] selected entitlement user row", {
+                      target: adminUserIdDebugSummary(user.id),
+                      emailPresent: !!user.email,
+                    });
+                  }
+                  setSelectedUserId(user.id);
+                }}
               />
             ))}
           </View>

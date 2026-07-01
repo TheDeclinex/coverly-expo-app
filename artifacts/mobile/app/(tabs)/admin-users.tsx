@@ -9,7 +9,7 @@ import { LoadingState } from "@/components/LoadingState";
 import { useAuth } from "@/context/AuthContext";
 import { useAccountProfile } from "@/hooks/useAccountProfile";
 import { useColors } from "@/hooks/useColors";
-import { adminDateLabel, adminStatusLabel, adminTextLabel } from "@/lib/admin-model";
+import { adminDateLabel, adminStatusLabel, adminTextLabel, adminUserIdDebugSummary } from "@/lib/admin-model";
 import { searchAdminUsers, type AdminUserSearchResult } from "@/lib/admin-service";
 
 export default function AdminUsersScreen() {
@@ -63,7 +63,15 @@ export default function AdminUsersScreen() {
           users={usersQuery.data ?? []}
           isLoading={usersQuery.isLoading}
           isError={usersQuery.isError}
-          onOpen={(user) => router.push({ pathname: "/(tabs)/admin-user/[id]", params: { id: user.id } } as Href)}
+          onOpen={(user) => {
+            if (__DEV__) {
+              console.log("[admin] selected user row", {
+                target: adminUserIdDebugSummary(user.id),
+                emailPresent: !!user.email,
+              });
+            }
+            router.push({ pathname: "/(tabs)/admin-user/[id]", params: { id: user.id } } as Href);
+          }}
         />
       </ScrollView>
     </>

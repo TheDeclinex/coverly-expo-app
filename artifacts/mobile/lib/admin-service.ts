@@ -1,4 +1,5 @@
 import { supabase } from "@/lib/supabase";
+import { adminUserIdDebugSummary } from "@/lib/admin-model";
 
 export interface AdminOverview {
   totalUsers: number | null;
@@ -75,7 +76,7 @@ export interface AdminEntitlementDebug {
   supportsBonusAllowance: boolean;
 }
 
-export type AdminAccessAction = "grant_tester" | "remove_tester" | "grant_plus" | "clear_access" | "add_bonus_allowance";
+export type AdminAccessAction = "grant_tester" | "remove_tester" | "grant_plus" | "grant_family" | "clear_access" | "add_bonus_allowance";
 
 export interface AdminUserFile {
   id: string;
@@ -127,6 +128,24 @@ async function rpcValue<T>(name: string, params?: Record<string, unknown>): Prom
   return data as T;
 }
 
+function adminDevLog(event: string, details?: Record<string, unknown>) {
+  if (!__DEV__) return;
+  console.log(`[admin] ${event}`, details ?? {});
+}
+
+function adminErrorSummary(error: unknown): Record<string, unknown> {
+  if (!error || typeof error !== "object") {
+    return { message: error instanceof Error ? error.message : String(error) };
+  }
+  const maybeError = error as { message?: unknown; code?: unknown; details?: unknown; hint?: unknown };
+  return {
+    message: typeof maybeError.message === "string" ? maybeError.message : "Unknown admin RPC error",
+    code: typeof maybeError.code === "string" ? maybeError.code : undefined,
+    hasDetails: typeof maybeError.details === "string" && maybeError.details.length > 0,
+    hasHint: typeof maybeError.hint === "string" && maybeError.hint.length > 0,
+  };
+}
+
 export function loadAdminOverview(): Promise<AdminOverview> {
   return rpcValue<AdminOverview>("admin_get_overview");
 }
@@ -138,8 +157,21 @@ export function searchAdminUsers(query: string, limit = 25): Promise<AdminUserSe
   });
 }
 
-export function loadAdminUserDetail(userId: string): Promise<AdminUserDetail> {
-  return rpcValue<AdminUserDetail>("admin_get_user_detail", { p_user_id: userId });
+export async function loadAdminUserDetail(userId: string): Promise<AdminUserDetail> {
+  const target = adminUserIdDebugSummary(userId);
+  adminDevLog("admin_get_user_detail starting", { target });
+  try {
+    const detail = await rpcValue<AdminUserDetail>("admin_get_user_detail", { p_user_id: userId });
+    adminDevLog("admin_get_user_detail succeeded", {
+      target,
+      hasProfile: !!detail?.profile,
+      propertyCount: detail?.counts?.propertyCount ?? null,
+    });
+    return detail;
+  } catch (error) {
+    adminDevLog("admin_get_user_detail failed", { target, error: adminErrorSummary(error) });
+    throw error;
+  }
 }
 
 export function updateAdminUserAccess(input: {
@@ -148,20 +180,49 @@ export function updateAdminUserAccess(input: {
   expiresAt?: string | null;
   reason?: string | null;
 }): Promise<AdminUserDetail> {
+  const target = adminUserIdDebugSummary(input.userId);
+  adminDevLog("admin_update_user_access starting", {
+    target,
+    action: input.action,
+    hasExpiry: !!input.expiresAt,
+    hasReason: !!input.reason,
+  });
   return rpcValue<AdminUserDetail>("admin_update_user_access", {
     p_user_id: input.userId,
     p_action: input.action,
     p_expires_at: input.expiresAt ?? null,
     p_reason: input.reason ?? null,
-  });
+  })
+    .then((detail) => {
+      adminDevLog("admin_update_user_access succeeded", {
+        target,
+        action: input.action,
+        effectivePlan: detail?.profile?.effectivePlan ?? null,
+        testerStatus: detail?.profile?.testerStatus ?? null,
+      });
+      return detail;
+    })
+    .catch((error) => {
+      adminDevLog("admin_update_user_access failed", { target, action: input.action, error: adminErrorSummary(error) });
+      throw error;
+    });
 }
 
 export function loadAdminEntitlementDebug(userId: string): Promise<AdminEntitlementDebug> {
   return rpcValue<AdminEntitlementDebug>("admin_get_entitlement_debug", { p_user_id: userId });
 }
 
-export function loadAdminUserFiles(userId: string): Promise<AdminUserFile[]> {
-  return rpcValue<AdminUserFile[]>("admin_list_user_files", { p_user_id: userId });
+export async function loadAdminUserFiles(userId: string): Promise<AdminUserFile[]> {
+  const target = adminUserIdDebugSummary(userId);
+  adminDevLog("admin_list_user_files starting", { target });
+  try {
+    const files = await rpcValue<AdminUserFile[]>("admin_list_user_files", { p_user_id: userId });
+    adminDevLog("admin_list_user_files succeeded", { target, fileCount: files?.length ?? 0 });
+    return files;
+  } catch (error) {
+    adminDevLog("admin_list_user_files failed", { target, error: adminErrorSummary(error) });
+    throw error;
+  }
 }
 
 export function loadAdminClaimPacks(limit = 50): Promise<AdminClaimPackSummary[]> {

@@ -45,3 +45,26 @@ export function adminMetricLabel(value: number | null | undefined, isLoading = f
   if (isError) return "Unavailable";
   return adminNumberLabel(value);
 }
+
+export function normalizeAdminUserIdParam(value: unknown): string | null {
+  const raw = Array.isArray(value) ? value[0] : value;
+  if (typeof raw !== "string") return null;
+  const trimmed = raw.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+export function adminUserIdDebugSummary(value: unknown): {
+  present: boolean;
+  type: string;
+  length: number;
+  uuidLike: boolean;
+} {
+  const raw = Array.isArray(value) ? value[0] : value;
+  const text = typeof raw === "string" ? raw.trim() : "";
+  return {
+    present: text.length > 0,
+    type: Array.isArray(value) ? "array" : typeof value,
+    length: text.length,
+    uuidLike: /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(text),
+  };
+}

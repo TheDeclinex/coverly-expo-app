@@ -10,7 +10,13 @@ import { LoadingState } from "@/components/LoadingState";
 import { useAuth } from "@/context/AuthContext";
 import { useAccountProfile } from "@/hooks/useAccountProfile";
 import { useColors } from "@/hooks/useColors";
-import { adminDateLabel, adminStatusLabel, adminTextLabel } from "@/lib/admin-model";
+import {
+  adminDateLabel,
+  adminStatusLabel,
+  adminTextLabel,
+  adminUserIdDebugSummary,
+  normalizeAdminUserIdParam,
+} from "@/lib/admin-model";
 import {
   loadAdminUserDetail,
   searchAdminUsers,
@@ -23,14 +29,24 @@ export default function AdminAccessScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const queryClient = useQueryClient();
-  const { userId } = useLocalSearchParams<{ userId?: string }>();
+  const params = useLocalSearchParams();
+  const routeUserId = normalizeAdminUserIdParam(params.userId);
   const { session } = useAuth();
   const { isAdmin, isLoading } = useAccountProfile();
   const [queryText, setQueryText] = React.useState("");
   const [submittedQuery, setSubmittedQuery] = React.useState("");
-  const [selectedUserId, setSelectedUserId] = React.useState<string | null>(userId ?? null);
+  const [selectedUserId, setSelectedUserId] = React.useState<string | null>(routeUserId);
   const [expiryDate, setExpiryDate] = React.useState("");
   const [reason, setReason] = React.useState("");
+
+  React.useEffect(() => {
+    if (!__DEV__) return;
+    console.log("[admin] access route param", { target: adminUserIdDebugSummary(params.userId) });
+  }, [params.userId]);
+
+  React.useEffect(() => {
+    if (routeUserId) setSelectedUserId(routeUserId);
+  }, [routeUserId]);
 
   const usersQuery = useQuery({
     queryKey: ["admin-access-users", session?.user.id, submittedQuery],
@@ -56,9 +72,13 @@ export default function AdminAccessScreen() {
         expiresAt: expiryDate.trim() || null,
         reason: reason.trim() || null,
       }),
-    onSuccess: async () => {
+    onSuccess: async (detail) => {
+      queryClient.setQueryData(["admin-user-detail", session?.user.id, selectedUserId], detail);
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["admin-user-detail", session?.user.id, selectedUserId] }),
+        queryClient.invalidateQueries({ queryKey: ["admin-entitlement-debug", session?.user.id, selectedUserId] }),
+        queryClient.invalidateQueries({ queryKey: ["admin-users", session?.user.id] }),
+        queryClient.invalidateQueries({ queryKey: ["admin-access-users", session?.user.id] }),
         queryClient.invalidateQueries({ queryKey: ["admin-overview", session?.user.id] }),
       ]);
       Alert.alert("Access updated", "The user's access state was updated.");
@@ -115,7 +135,15 @@ export default function AdminAccessScreen() {
                 user={user}
                 selected={user.id === selectedUserId}
                 last={index === (usersQuery.data?.length ?? 0) - 1}
-                onPress={() => setSelectedUserId(user.id)}
+                onPress={() => {
+                  if (__DEV__) {
+                    console.log("[admin] selected access user row", {
+                      target: adminUserIdDebugSummary(user.id),
+                      emailPresent: !!user.email,
+                    });
+                  }
+                  setSelectedUserId(user.id);
+                }}
               />
             ))}
           </View>
@@ -158,6 +186,7 @@ export default function AdminAccessScreen() {
                 <ActionRow title="Grant tester access" icon="user-check" pending={mutation.isPending} onPress={() => runAction("grant_tester", "Grant tester access")} />
                 <ActionRow title="Remove tester access" icon="user-x" pending={mutation.isPending} onPress={() => runAction("remove_tester", "Remove tester access")} />
                 <ActionRow title="Grant temporary Plus" icon="credit-card" pending={mutation.isPending} onPress={() => runAction("grant_plus", "Grant temporary Plus")} />
+                <ActionRow title="Grant temporary Family" icon="users" pending={mutation.isPending} onPress={() => runAction("grant_family", "Grant temporary Family")} />
                 <ActionRow title="Clear access override" icon="x-circle" pending={mutation.isPending} onPress={() => runAction("clear_access", "Clear access override")} />
                 <AccountRow icon="plus-circle" title="Add bonus scan/search allowance" value="Not available" disabled last />
               </AccountSection>

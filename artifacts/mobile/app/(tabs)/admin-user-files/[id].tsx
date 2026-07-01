@@ -8,20 +8,33 @@ import { LoadingState } from "@/components/LoadingState";
 import { useAuth } from "@/context/AuthContext";
 import { useAccountProfile } from "@/hooks/useAccountProfile";
 import { useColors } from "@/hooks/useColors";
-import { adminCurrencyLabel, adminDateLabel, adminNumberLabel, adminStatusLabel } from "@/lib/admin-model";
+import {
+  adminCurrencyLabel,
+  adminDateLabel,
+  adminNumberLabel,
+  adminStatusLabel,
+  adminUserIdDebugSummary,
+  normalizeAdminUserIdParam,
+} from "@/lib/admin-model";
 import { loadAdminUserFiles, type AdminUserFile } from "@/lib/admin-service";
 
 export default function AdminUserFilesScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
-  const { id } = useLocalSearchParams<{ id: string }>();
+  const params = useLocalSearchParams();
+  const selectedUserId = normalizeAdminUserIdParam(params.id);
   const { session } = useAuth();
   const { isAdmin, isLoading } = useAccountProfile();
 
+  React.useEffect(() => {
+    if (!__DEV__) return;
+    console.log("[admin] user files route param", { target: adminUserIdDebugSummary(params.id) });
+  }, [params.id]);
+
   const filesQuery = useQuery({
-    queryKey: ["admin-user-files", session?.user.id, id],
-    queryFn: () => loadAdminUserFiles(id),
-    enabled: !!session && isAdmin && !!id,
+    queryKey: ["admin-user-files", session?.user.id, selectedUserId],
+    queryFn: () => loadAdminUserFiles(selectedUserId!),
+    enabled: !!session && isAdmin && !!selectedUserId,
     staleTime: 20_000,
     retry: 1,
   });
@@ -40,7 +53,9 @@ export default function AdminUserFilesScreen() {
           <Text style={[styles.helper, { color: colors.mutedForeground }]}>Admin V1 does not allow editing or deleting user inventory.</Text>
         </View>
 
-        {filesQuery.isLoading ? (
+        {!selectedUserId ? (
+          <StateCard label="No valid user ID was provided." />
+        ) : filesQuery.isLoading ? (
           <StateCard label="Loading properties..." loading />
         ) : filesQuery.isError ? (
           <StateCard label="Properties unavailable. Check admin RPC access." />

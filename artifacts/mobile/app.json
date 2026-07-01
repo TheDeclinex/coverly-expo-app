@@ -5,17 +5,18 @@
     "slug": "coverly",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/images/icon.png",
+    "icon": "./assets/brand/coverly-app-icon-1024.png",
     "scheme": "coverly",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "splash": {
-      "image": "./assets/images/icon.png",
+      "image": "./assets/brand/coverly-splash-logo.png",
       "resizeMode": "contain",
-      "backgroundColor": "#ffffff"
+      "backgroundColor": "#F6FBFA"
     },
     "ios": {
       "supportsTablet": false,
+      "icon": "./assets/brand/coverly-app-icon-1024.png",
       "bundleIdentifier": "nz.coverly.app",
       "buildNumber": "1",
       "infoPlist": {
@@ -25,13 +26,17 @@
     "android": {
       "package": "nz.coverly.app",
       "versionCode": 1,
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/brand/coverly-android-adaptive-foreground.png",
+        "backgroundColor": "#F6FBFA"
+      },
       "permissions": [
         "android.permission.RECORD_AUDIO",
         "android.permission.MODIFY_AUDIO_SETTINGS"
       ]
     },
     "web": {
-      "favicon": "./assets/images/icon.png"
+      "favicon": "./assets/brand/coverly-app-icon-1024.png"
     },
     "plugins": [
       "expo-router",
