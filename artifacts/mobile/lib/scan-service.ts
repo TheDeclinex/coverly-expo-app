@@ -4,9 +4,9 @@
  * ARCHITECTURE RULES (do not violate):
  * - The mobile app MUST NOT call OpenAI directly. All AI processing goes through
  *   the scan-room-photo Supabase Edge Function so API keys never leave the backend.
- * - Images are base64-encoded at pick time (ImagePicker base64:true option).
- *   The encoded data is sent directly in the Edge Function request body.
- *   No storage upload is required for AI scanning.
+ * - Scan images are uploaded to Supabase Storage before invoke.
+ *   The Edge Function receives small storage references instead of large base64
+ *   JSON payloads. Legacy base64 payloads are still supported by the function.
  * - Scan results are normalised to ScanDetectedItem[] then saved via
  *   buildItemInsertPayload — the same path as Manual Add Item.
  *
@@ -17,8 +17,9 @@
  */
 
 import { friendlyNetworkErrorMessage } from "@/lib/network-errors";
+import { uploadScanPhoto } from "@/lib/photo-upload";
 import { anonKey, debugSupabaseUrl, supabase } from "@/lib/supabase";
-import type { ScanDetectedItem, ScanInput, ScanResult } from "@/types/scan";
+import type { ScanDetectedItem, ScanEncodedImage, ScanInput, ScanResult } from "@/types/scan";
 
 /**
  * Name of the Supabase Edge Function that handles AI scan processing.
@@ -38,6 +39,14 @@ interface ScanFunctionResponse {
   diagnostics?: {
     edgeFunctionVersion?: string;
   };
+}
+
+interface ScanImagePayload {
+  id: string;
+  mimeType: string;
+  sourceName: string;
+  storagePath?: string;
+  imageBase64?: string;
 }
 
 /**
@@ -149,6 +158,19 @@ function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): 
 function expectedScanNetworkMessage(error: unknown): string | null {
   return scanNetworkFailureMessage(error) ?? friendlyNetworkErrorMessage(error);
 }
+
+function scanUploadFailureMessage(error: string): string {
+  const normalized = error.toLowerCase();
+  if (
+    normalized.includes("network request timed out") ||
+    normalized.includes("timed out") ||
+    normalized.includes("timeout")
+  ) {
+    return "Photo upload timed out before scanning. Please try again.";
+  }
+  return "Photo upload failed before scanning. Please try again.";
+}
+
 function createUsageIdempotencyKey(): string {
   const randomUuid =
     typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
@@ -161,11 +183,114 @@ function createUsageIdempotencyKey(): string {
   return `scan:${Date.now()}:${randomUuid}`;
 }
 
+async function buildStorageFirstImagePayload(
+  images: ScanEncodedImage[],
+  userId: string,
+  fileId: string,
+): Promise<{ ok: true; images: ScanImagePayload[] } | { ok: false; errorMessage: string }> {
+  const uploadedImages: ScanImagePayload[] = [];
+
+  scanLog("scan pre-upload batch started", {
+    imageCount: images.length,
+  });
+
+  for (let index = 0; index < images.length; index += 1) {
+    const image = images[index];
+    const id = `photo_${index + 1}`;
+    const sourceName = id;
+
+    if (image.storagePath) {
+      scanLog("per-photo upload skipped; existing storage ref present", {
+        imageIndex: index,
+      });
+      uploadedImages.push({
+        id,
+        storagePath: image.storagePath,
+        mimeType: image.mimeType,
+        sourceName,
+      });
+      continue;
+    }
+
+    if (image.uri) {
+      scanLog("per-photo upload started", {
+        imageIndex: index,
+        imageCount: images.length,
+        maxAttempts: 3,
+      });
+      const uploaded = await uploadScanPhoto(image.uri, userId, `${index}:${image.uri}`, {
+        fileId,
+        maxAttempts: 3,
+      });
+      if (!uploaded.ok) {
+        const errorMessage = scanUploadFailureMessage(uploaded.error);
+        scanLog("per-photo upload failed", {
+          imageIndex: index,
+          source: uploaded.source,
+          statusCode: uploaded.statusCode ?? null,
+          message: uploaded.error,
+          uploadedImageRefCount: uploadedImages.filter((uploadedImage) => !!uploadedImage.storagePath).length,
+        });
+        scanLog("scan invoke skipped because upload incomplete", {
+          imageCount: images.length,
+          failedImageIndex: index,
+          uploadedImageRefCount: uploadedImages.filter((uploadedImage) => !!uploadedImage.storagePath).length,
+        });
+        return {
+          ok: false,
+          errorMessage,
+        };
+      }
+
+      scanLog("per-photo upload completed", {
+        imageIndex: index,
+        imageCount: images.length,
+      });
+      uploadedImages.push({
+        id,
+        storagePath: uploaded.path,
+        mimeType: image.mimeType,
+        sourceName,
+      });
+      continue;
+    }
+
+    if (image.base64) {
+      uploadedImages.push({
+        id,
+        imageBase64: image.base64,
+        mimeType: image.mimeType,
+        sourceName,
+      });
+      continue;
+    }
+
+    scanLog("scan invoke skipped because upload incomplete", {
+      imageCount: images.length,
+      failedImageIndex: index,
+      uploadedImageRefCount: uploadedImages.filter((uploadedImage) => !!uploadedImage.storagePath).length,
+      reason: "missing image uri or fallback payload",
+    });
+    return {
+      ok: false,
+      errorMessage: "Photo upload failed before scanning. Please try again.",
+    };
+  }
+
+  scanLog("scan pre-upload batch completed", {
+    imageCount: images.length,
+    uploadedImageRefCount: uploadedImages.filter((image) => !!image.storagePath).length,
+    legacyBase64ImageCount: uploadedImages.filter((image) => !!image.imageBase64).length,
+  });
+
+  return { ok: true, images: uploadedImages };
+}
+
 /**
  * Run an AI-assisted inventory scan via the scan-room-photo Edge Function.
  *
- * ScanInput.images must be pre-encoded (base64 from ImagePicker base64:true option).
- * The function maps the mobile payload to the production contract, handles
+ * ScanInput.images are uploaded to Storage before invoke. The function maps the
+ * mobile payload to the production contract, handles
  * success/error envelopes, and normalises returned items to ScanDetectedItem[].
  */
 export async function runAiScan(input: ScanInput): Promise<ScanResult> {
@@ -190,32 +315,56 @@ export async function runAiScan(input: ScanInput): Promise<ScanResult> {
     scanLog("payload construction started", {
       mode: input.mode,
       imageCount: input.images.length,
-      fileId: input.fileId,
-      roomId: input.roomId,
     });
+
+    const supabaseHost = new URL(debugSupabaseUrl).host;
+    const usesExpectedProject = supabaseHost.startsWith(`${EXPECTED_SCAN_PROJECT_REF}.`);
+    const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
+    const accessToken = sessionData.session?.access_token;
+    const userId = sessionData.session?.user.id;
+    scanLog("auth session checked", {
+      hasAccessToken: !!accessToken,
+      hasUserId: !!userId,
+      hasSessionError: !!sessionError,
+    });
+    if (sessionError || !accessToken || !userId) {
+      if (__DEV__) console.error("[Scan] function invoke failed", {
+        message: sessionError?.message ?? "Missing Supabase session token",
+      });
+      return {
+        status: "error",
+        items: [],
+        errorMessage: "You must be signed in to scan items.",
+      };
+    }
+
+    const imagePayload = await buildStorageFirstImagePayload(input.images, userId, input.fileId);
+    if (!imagePayload.ok) {
+      return {
+        status: "error",
+        items: [],
+        errorMessage: imagePayload.errorMessage,
+      };
+    }
 
     const productionPayload = {
       mode: toProductionMode(input.mode),
       usageIdempotencyKey: input.usageIdempotencyKey ?? createUsageIdempotencyKey(),
-      images: input.images.map((img, i) => ({
-        id: `photo_${i + 1}`,
-        imageBase64: img.base64,
-        mimeType: img.mimeType,
-        sourceName: `photo_${i + 1}`,
-      })),
+      images: imagePayload.images,
       context: {
         fileId: input.fileId,
+        roomId: input.roomId,
         roomName: input.roomName ?? undefined,
       },
     };
 
-    const supabaseHost = new URL(debugSupabaseUrl).host;
-    const usesExpectedProject = supabaseHost.startsWith(`${EXPECTED_SCAN_PROJECT_REF}.`);
     scanLog("payload construction completed", {
       productionMode: productionPayload.mode,
       hasUsageIdempotencyKey: !!productionPayload.usageIdempotencyKey,
       imageCount: productionPayload.images.length,
-      approxBase64Chars: productionPayload.images.reduce((sum, img) => sum + img.imageBase64.length, 0),
+      uploadedImageRefCount: productionPayload.images.filter((image) => !!image.storagePath).length,
+      legacyBase64ImageCount: productionPayload.images.filter((image) => !!image.imageBase64).length,
+      approxBase64Chars: productionPayload.images.reduce((sum, img) => sum + (img.imageBase64?.length ?? 0), 0),
       supabaseHost,
       expectedProjectRef: EXPECTED_SCAN_PROJECT_REF,
       usesExpectedProject,
@@ -226,23 +375,6 @@ export async function runAiScan(input: ScanInput): Promise<ScanResult> {
         expectedProjectRef: EXPECTED_SCAN_PROJECT_REF,
         supabaseHost,
       });
-    }
-
-    const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
-    const accessToken = sessionData.session?.access_token;
-    scanLog("auth session checked", {
-      hasAccessToken: !!accessToken,
-      hasSessionError: !!sessionError,
-    });
-    if (sessionError || !accessToken) {
-      if (__DEV__) console.error("[Scan] function invoke failed", {
-        message: sessionError?.message ?? "Missing Supabase session token",
-      });
-      return {
-        status: "error",
-        items: [],
-        errorMessage: "You must be signed in to scan items.",
-      };
     }
 
     const functionUrl = `${debugSupabaseUrl.replace(/\/$/, "")}/functions/v1/${SCAN_EDGE_FUNCTION_NAME}`;

@@ -18,18 +18,11 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { useAuth } from "@/context/AuthContext";
+import { PROPERTY_TYPES, normalizePropertyTypeValue } from "@/constants/propertyTypes";
 import { useColors } from "@/hooks/useColors";
+import { formatPropertySaveError as formatPropertyServiceSaveError } from "@/lib/property-service";
 import { supabase } from "@/lib/supabase";
 import type { InventoryFile } from "@/types";
-
-const PROPERTY_TYPES = [
-  { label: "Main home", value: "main_home" },
-  { label: "Rental property", value: "rental" },
-  { label: "Holiday / beach house", value: "holiday" },
-  { label: "Storage unit", value: "storage" },
-  { label: "Parent's home", value: "parents" },
-  { label: "Other", value: "other" },
-];
 
 function FormField({
   label,
@@ -113,7 +106,7 @@ export default function EditPropertyScreen() {
   useEffect(() => {
     if (property) {
       setName(property.name ?? "");
-      setPropertyType(property.property_type ?? null);
+      setPropertyType(normalizePropertyTypeValue(property.property_type));
       setCoverAmount(property.contents_sum_insured != null ? String(property.contents_sum_insured) : "");
       setInsurerName(property.insurer_name ?? "");
       setPolicyNumber(property.policy_number ?? "");
@@ -137,7 +130,7 @@ export default function EditPropertyScreen() {
       .from("inventory_files")
       .update({
         name: name.trim(),
-        property_type: propertyType ?? null,
+        property_type: normalizePropertyTypeValue(propertyType),
         contents_sum_insured: coverAmount ? parseFloat(coverAmount) : null,
         insurer_name: insurerName.trim() || null,
         policy_number: policyNumber.trim() || null,
@@ -149,7 +142,7 @@ export default function EditPropertyScreen() {
 
     if (dbError) {
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-      setError(dbError.message);
+      setError(formatPropertyServiceSaveError(dbError));
       return;
     }
 

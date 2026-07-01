@@ -1,12 +1,27 @@
 export const PROPERTY_TYPES = [
   { label: "Main home",             value: "main_home" },
-  { label: "Rental property",       value: "rental"    },
-  { label: "Holiday / beach house", value: "holiday"   },
-  { label: "Storage unit",          value: "storage"   },
-  { label: "Parent's home",         value: "parents"   },
+  { label: "Rental property",       value: "rental_property" },
+  { label: "Holiday / beach house", value: "holiday_beach_house" },
+  { label: "Storage unit",          value: "storage_unit" },
+  { label: "Parent's home",         value: "parents_home" },
   { label: "Business",              value: "business"  },
   { label: "Other",                 value: "other"     },
 ];
+
+const LEGACY_PROPERTY_TYPE_VALUES: Record<string, string> = {
+  rental: "rental_property",
+  holiday: "holiday_beach_house",
+  holiday_home: "holiday_beach_house",
+  storage: "storage_unit",
+  parents: "parents_home",
+};
+
+export function normalizePropertyTypeValue(value: string | null | undefined): string | null {
+  if (!value) return null;
+  const normalized = value.trim().toLowerCase();
+  if (!normalized) return null;
+  return LEGACY_PROPERTY_TYPE_VALUES[normalized] ?? normalized;
+}
 
 /**
  * Returns the human-readable display label for a stored property_type value.
@@ -14,8 +29,9 @@ export const PROPERTY_TYPES = [
  * unknown values that may have been stored before the canonical list existed.
  */
 export function propertyTypeLabel(value: string | null | undefined): string | null {
-  if (!value) return null;
-  const match = PROPERTY_TYPES.find((pt) => pt.value === value);
+  const normalized = normalizePropertyTypeValue(value);
+  if (!normalized) return null;
+  const match = PROPERTY_TYPES.find((pt) => pt.value === normalized);
   if (match) return match.label;
-  return value.charAt(0).toUpperCase() + value.slice(1).replace(/_/g, " ");
+  return normalized.charAt(0).toUpperCase() + normalized.slice(1).replace(/_/g, " ");
 }

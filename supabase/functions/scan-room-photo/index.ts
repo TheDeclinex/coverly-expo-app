@@ -14,7 +14,7 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.3';
 
 // Version marker — bump this whenever the edge function is redeployed so the
 // client can confirm it is running the expected version via diagnostics.
-const EDGE_FUNCTION_VERSION = 'v24.2.5-usage-accounting';
+const EDGE_FUNCTION_VERSION = 'v24.3.0-storage-image-refs';
 
 const CORS_HEADERS = {
   'Access-Control-Allow-Origin': '*',
@@ -26,6 +26,8 @@ const OPENAI_URL = 'https://api.openai.com/v1/chat/completions';
 const DEFAULT_MODEL = 'gpt-4o';
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL') ?? '';
 const SUPABASE_ANON_KEY = Deno.env.get('SUPABASE_ANON_KEY') ?? '';
+const INVENTORY_PHOTOS_BUCKET = 'inventory-photos';
+const SCAN_SIGNED_URL_TTL_SECONDS = 600;
 const OPENAI_TIMEOUT_MS = 45_000;
 // 8000 tokens — enough for busy scenes, 5-6 photo batches, video frames, full descriptions
 const MAX_TOKENS = 8000;
@@ -87,7 +89,8 @@ function normaliseCategory(raw: string | undefined): string {
 // ── Types ─────────────────────────────────────────────────────────────────────
 interface ScanImage {
   id: string;
-  imageBase64: string;
+  imageBase64?: string;
+  storagePath?: string;
   mimeType?: string;
   sourceName?: string;
 }
@@ -95,9 +98,17 @@ interface ScanImage {
 interface ScanRequest {
   mode: 'single_photo' | 'multi_photo' | 'video_frames' | 'single_item';
   images: ScanImage[];
-  context?: { propertyId?: string; fileId?: string; roomName?: string };
+  context?: { propertyId?: string; fileId?: string; roomId?: string; roomName?: string };
   model?: string;
   usageIdempotencyKey?: string;
+}
+
+interface OpenAiImageContent {
+  type: 'image_url';
+  image_url: {
+    url: string;
+    detail: 'high';
+  };
 }
 
 interface RawItem {
@@ -473,17 +484,99 @@ ${FIELDS}
 Return ONLY the raw JSON array.`;
 }
 
-// ── Build OpenAI request body ─────────────────────────────────────────────────
-function buildOpenAiBody(req: ScanRequest): object {
-  const model = req.model ?? DEFAULT_MODEL;
+function isSafeStoragePath(path: string): boolean {
+  if (!path) return false;
+  if (path.startsWith('/') || path.startsWith('\\')) return false;
+  if (path.startsWith('http://') || path.startsWith('https://')) return false;
+  if (path.includes('..') || path.includes('\\')) return false;
+  return true;
+}
 
-  const imageContent = req.images.map((img) => ({
-    type: 'image_url',
-    image_url: {
-      url: `data:${img.mimeType ?? 'image/jpeg'};base64,${img.imageBase64}`,
-      detail: 'high',
-    },
-  }));
+function validateScanStoragePath(
+  path: string,
+  userId: string,
+  fileId: string | null | undefined,
+): string | null {
+  const trimmed = path.trim();
+  if (!isSafeStoragePath(trimmed)) return null;
+  if (!trimmed.startsWith(`${userId}/`)) return null;
+  if (fileId && !trimmed.startsWith(`${userId}/${fileId}/`)) return null;
+  return trimmed;
+}
+
+async function prepareOpenAiImageContent(
+  req: ScanRequest,
+  userClient: ReturnType<typeof createClient>,
+  userId: string,
+): Promise<OpenAiImageContent[]> {
+  const fileId = req.context?.fileId;
+  const content: OpenAiImageContent[] = [];
+  let storagePathCount = 0;
+  let legacyBase64Count = 0;
+
+  for (const [index, img] of req.images.entries()) {
+    if (typeof img.storagePath === 'string' && img.storagePath.trim()) {
+      const storagePath = validateScanStoragePath(img.storagePath, userId, fileId);
+      if (!storagePath) {
+        throw Object.assign(new Error(`Invalid scan image storage path at index ${index}`), {
+          status: 400,
+          errorCode: 'INVALID_IMAGE_STORAGE_PATH',
+        });
+      }
+
+      const { data, error } = await userClient.storage
+        .from(INVENTORY_PHOTOS_BUCKET)
+        .createSignedUrl(storagePath, SCAN_SIGNED_URL_TTL_SECONDS);
+
+      if (error || !data?.signedUrl) {
+        throw Object.assign(new Error('Could not prepare scan image for AI processing'), {
+          status: 500,
+          errorCode: 'IMAGE_REFERENCE_SIGNING_FAILED',
+          details: error?.message,
+        });
+      }
+
+      storagePathCount += 1;
+      content.push({
+        type: 'image_url',
+        image_url: {
+          url: data.signedUrl,
+          detail: 'high',
+        },
+      });
+      continue;
+    }
+
+    if (typeof img.imageBase64 === 'string' && img.imageBase64.trim()) {
+      legacyBase64Count += 1;
+      content.push({
+        type: 'image_url',
+        image_url: {
+          url: `data:${img.mimeType ?? 'image/jpeg'};base64,${img.imageBase64}`,
+          detail: 'high',
+        },
+      });
+      continue;
+    }
+
+    throw Object.assign(new Error(`Scan image at index ${index} is missing a storage path or base64 data`), {
+      status: 400,
+      errorCode: 'INVALID_IMAGE_PAYLOAD',
+    });
+  }
+
+  scanLog('image_references_prepared', {
+    imageCount: req.images.length,
+    storagePathCount,
+    legacyBase64Count,
+  });
+
+  return content;
+}
+
+// ── Build OpenAI request body ─────────────────────────────────────────────────
+function buildOpenAiBody(req: ScanRequest, imageContent: OpenAiImageContent[]): object {
+  const model = req.model ?? DEFAULT_MODEL;
 
   const userPrompt = buildUserPrompt(req.mode, req.images.length);
 
@@ -555,6 +648,7 @@ serve(async (req: Request) => {
   }
 
   let userClient: ReturnType<typeof createClient> | null = null;
+  let authUserId: string | null = null;
   try {
     scanLog('auth_verification_started');
     userClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
@@ -567,6 +661,7 @@ serve(async (req: Request) => {
       scanLog('response_returned', { status: 401, errorCode: 'UNAUTHORIZED' });
       return jsonResponse({ success: false, errorCode: 'UNAUTHORIZED', message: 'Invalid or expired session', edgeFunctionVersion: EDGE_FUNCTION_VERSION }, 401);
     }
+    authUserId = data.user.id;
     scanLog('auth_verification_completed', { hasUser: true });
   } catch (error) {
     scanError('auth_verification_failed', { message: errorMessage(error) });
@@ -614,10 +709,40 @@ serve(async (req: Request) => {
   }
 
   const approximateBase64Length = scanReq.images.reduce((sum, image) => sum + (image.imageBase64?.length ?? 0), 0);
+  const storagePathCount = scanReq.images.filter((image) => typeof image.storagePath === 'string' && image.storagePath.trim()).length;
+  const legacyBase64Count = scanReq.images.filter((image) => typeof image.imageBase64 === 'string' && image.imageBase64.trim()).length;
   scanLog('image_payload_checked', {
     imageCount: scanReq.images.length,
     approximateBase64Length,
+    storagePathCount,
+    legacyBase64Count,
   });
+
+  let openAiImageContent: OpenAiImageContent[];
+  try {
+    scanLog('image_references_prepare_started', {
+      imageCount: scanReq.images.length,
+      storagePathCount,
+      legacyBase64Count,
+    });
+    openAiImageContent = await prepareOpenAiImageContent(scanReq, userClient!, authUserId!);
+  } catch (error) {
+    const record = error as { status?: number; errorCode?: string; details?: string };
+    const status = record.status ?? 400;
+    const errorCode = record.errorCode ?? 'INVALID_IMAGE_PAYLOAD';
+    scanError('image_references_prepare_failed', {
+      errorCode,
+      message: errorMessage(error),
+      details: record.details,
+    });
+    scanLog('response_returned', { status, errorCode });
+    return jsonResponse({
+      success: false,
+      errorCode,
+      message: errorMessage(error),
+      edgeFunctionVersion: EDGE_FUNCTION_VERSION,
+    }, status);
+  }
 
   let usageReservation: UsageReservationResult | null = null;
   let usageReservationId: string | null = null;
@@ -691,7 +816,7 @@ serve(async (req: Request) => {
   };
 
   try {
-    const openAiBody = buildOpenAiBody(scanReq);
+    const openAiBody = buildOpenAiBody(scanReq, openAiImageContent);
     scanLog('openai_call_started', {
       model: scanReq.model ?? DEFAULT_MODEL,
       imageCount: scanReq.images.length,

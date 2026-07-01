@@ -10,16 +10,19 @@ export type ScanMode =
   | "single_item";        // close-up → 1 item with rich brand/model/value detail (1 credit)
 
 /**
- * A single image captured or picked by the user, ready to send to the Edge Function.
- * base64 is encoded at pick time using ImagePicker's base64 option — no separate upload needed.
+ * A single image captured or picked by the user, ready to scan.
+ * Local URI is uploaded to Storage before invoking the Edge Function.
+ * base64 is optional legacy fallback data only.
  */
 export interface ScanEncodedImage {
   /** Local device URI — used for thumbnail display only */
   uri: string;
-  /** Base64-encoded image data (no data: prefix) for Edge Function payload */
-  base64: string;
+  /** Optional legacy base64 data (no data: prefix) for Edge Function fallback payloads */
+  base64?: string;
   /** MIME type e.g. "image/jpeg" */
   mimeType: string;
+  /** Durable Supabase Storage path uploaded before scan invoke */
+  storagePath?: string;
 }
 
 export interface ScanInput {

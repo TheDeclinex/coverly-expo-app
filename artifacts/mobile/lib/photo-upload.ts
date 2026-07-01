@@ -43,6 +43,7 @@ export type UploadResult = UploadSuccess | UploadFailure;
 interface UploadContext {
   source: UploadSource;
   fileId?: string;
+  maxAttempts?: number;
 }
 
 interface UploadBody {
@@ -54,6 +55,11 @@ interface UploadBody {
 
 /** Per-session cache of successful scan-photo uploads only. */
 const uploadCache = new Map<string, UploadSuccess>();
+const SCAN_UPLOAD_RETRY_DELAYS_MS = [700, 1600];
+
+function wait(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 function imageMetadata(localUri: string, reportedType?: string | null) {
   const uriExtension = localUri
@@ -127,59 +133,92 @@ async function uploadInventoryPhoto(
     const timestamp = Date.now();
     const rand = Math.random().toString(36).slice(2, 7);
     uploadPath = `${userId}/${context.fileId}/${uploadPrefix(context.source)}-${timestamp}-${rand}.${file.extension}`;
+    const maxAttempts = Math.max(1, context.maxAttempts ?? 1);
 
     if (__DEV__) console.info("[storageUpload] prepared", {
       bucket: INVENTORY_PHOTOS_BUCKET,
-      uploadPath,
+      hasUploadPath: uploadPath !== "not generated",
       source: context.source,
       platform: Platform.OS,
       contentType: file.contentType,
       fileSize: file.fileSize,
+      maxAttempts,
     });
 
-    const uploadStartedAt = Date.now();
-    if (__DEV__) console.info("[storageUpload] upload started", {
-      bucket: INVENTORY_PHOTOS_BUCKET,
-      uploadPath,
-      source: context.source,
-      fileSize: file.fileSize,
-    });
+    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+      const uploadStartedAt = Date.now();
+      if (__DEV__) console.info("[storageUpload] upload started", {
+        bucket: INVENTORY_PHOTOS_BUCKET,
+        hasUploadPath: uploadPath !== "not generated",
+        source: context.source,
+        fileSize: file.fileSize,
+        attempt,
+        maxAttempts,
+      });
 
-    const { data: uploadData, error: uploadError } = await supabase.storage
-      .from(INVENTORY_PHOTOS_BUCKET)
-      .upload(uploadPath, file.data, { contentType: file.contentType, upsert: false });
+      const { data: uploadData, error: uploadError } = await supabase.storage
+        .from(INVENTORY_PHOTOS_BUCKET)
+        .upload(uploadPath, file.data, { contentType: file.contentType, upsert: false });
 
-    if (uploadError) {
+      if (!uploadError) {
+        if (__DEV__) console.info("[storageUpload] upload completed", {
+          bucket: INVENTORY_PHOTOS_BUCKET,
+          hasUploadPath: !!uploadData.path,
+          source: context.source,
+          elapsedMs: Date.now() - uploadStartedAt,
+          attempt,
+          maxAttempts,
+        });
+
+        return createUploadSuccess(context, uploadData.path, attempt);
+      }
+
+      const metadata = errorMetadata(uploadError);
+      if (attempt > 1 && isDuplicateUploadError(metadata)) {
+        if (__DEV__) console.info("[storageUpload] upload completed from previous attempt", {
+          bucket: INVENTORY_PHOTOS_BUCKET,
+          hasUploadPath: true,
+          source: context.source,
+          attempt,
+          maxAttempts,
+        });
+        return createUploadSuccess(context, uploadPath, attempt);
+      }
+
+      if (__DEV__) console.warn("[storageUpload] upload failed attempt", {
+        bucket: INVENTORY_PHOTOS_BUCKET,
+        hasUploadPath: uploadPath !== "not generated",
+        source: context.source,
+        attempt,
+        maxAttempts,
+        statusCode: metadata.statusCode,
+        details: metadata.details,
+        message: metadata.error,
+      });
+
+      const retryDelayMs = SCAN_UPLOAD_RETRY_DELAYS_MS[attempt - 1];
+      if (attempt < maxAttempts && isTransientUploadError(metadata) && retryDelayMs != null) {
+        if (__DEV__) console.info("[storageUpload] upload retry scheduled", {
+          bucket: INVENTORY_PHOTOS_BUCKET,
+          source: context.source,
+          attempt,
+          nextAttempt: attempt + 1,
+          retryDelayMs,
+        });
+        await wait(retryDelayMs);
+        continue;
+      }
+
       return createUploadFailure(context, userId, uploadPath, uploadError, file);
     }
 
-    if (__DEV__) console.info("[storageUpload] upload completed", {
-      bucket: INVENTORY_PHOTOS_BUCKET,
-      uploadPath: uploadData.path,
-      source: context.source,
-      elapsedMs: Date.now() - uploadStartedAt,
-    });
-
-    const { data: signedData, error: signedError } = await supabase.storage
-      .from(INVENTORY_PHOTOS_BUCKET)
-      .createSignedUrl(uploadData.path, SIGNED_URL_EXPIRY_SECS);
-    if (signedError) {
-      if (__DEV__) console.warn("[photoUpload] signed URL error:", signedError.message);
-    }
-
-    if (__DEV__) console.info("[storageUpload] signed URL step completed", {
-      bucket: INVENTORY_PHOTOS_BUCKET,
-      uploadPath: uploadData.path,
-      source: context.source,
-      hasDisplayUrl: !!signedData?.signedUrl,
-      signedUrlError: signedError?.message ?? null,
-    });
-
-    return {
-      ok: true,
-      path: uploadData.path,
-      displayUrl: signedData?.signedUrl ?? null,
-    };
+    return createUploadFailure(
+      context,
+      userId,
+      uploadPath,
+      { message: "Upload failed after retry attempts", code: "UPLOAD_RETRY_EXHAUSTED" },
+      file,
+    );
   } catch (error) {
     return createUploadFailure(context, userId, uploadPath, error);
   }
@@ -223,6 +262,74 @@ function errorMetadata(error: unknown): {
   return { error: String(error) };
 }
 
+function isTransientUploadError(metadata: {
+  error: string;
+  statusCode?: string | number;
+  details?: string;
+}): boolean {
+  const message = `${metadata.error} ${metadata.details ?? ""}`.toLowerCase();
+  const status =
+    typeof metadata.statusCode === "number"
+      ? metadata.statusCode
+      : typeof metadata.statusCode === "string"
+        ? Number.parseInt(metadata.statusCode, 10)
+        : NaN;
+
+  return (
+    message.includes("network request timed out") ||
+    message.includes("timed out") ||
+    message.includes("timeout") ||
+    message.includes("network request failed") ||
+    message.includes("failed to fetch") ||
+    message.includes("networkerror") ||
+    Number.isInteger(status) && (status === 408 || status === 429 || status >= 500)
+  );
+}
+
+function isDuplicateUploadError(metadata: {
+  error: string;
+  statusCode?: string | number;
+  details?: string;
+}): boolean {
+  const message = `${metadata.error} ${metadata.details ?? ""}`.toLowerCase();
+  const status =
+    typeof metadata.statusCode === "number"
+      ? metadata.statusCode
+      : typeof metadata.statusCode === "string"
+        ? Number.parseInt(metadata.statusCode, 10)
+        : NaN;
+
+  return status === 409 || message.includes("already exists") || message.includes("duplicate");
+}
+
+async function createUploadSuccess(
+  context: UploadContext,
+  uploadPath: string,
+  attempt: number,
+): Promise<UploadSuccess> {
+  const { data: signedData, error: signedError } = await supabase.storage
+    .from(INVENTORY_PHOTOS_BUCKET)
+    .createSignedUrl(uploadPath, SIGNED_URL_EXPIRY_SECS);
+  if (signedError) {
+    if (__DEV__) console.warn("[photoUpload] signed URL error:", signedError.message);
+  }
+
+  if (__DEV__) console.info("[storageUpload] signed URL step completed", {
+    bucket: INVENTORY_PHOTOS_BUCKET,
+    hasUploadPath: !!uploadPath,
+    source: context.source,
+    hasDisplayUrl: !!signedData?.signedUrl,
+    signedUrlError: signedError?.message ?? null,
+    attempt,
+  });
+
+  return {
+    ok: true,
+    path: uploadPath,
+    displayUrl: signedData?.signedUrl ?? null,
+  };
+}
+
 function createUploadFailure(
   context: UploadContext,
   userId: string,
@@ -242,7 +349,10 @@ function createUploadFailure(
     fileSize: file?.fileSize,
     source: context.source,
   };
-  if (__DEV__) console.error("[storageUpload] failed", failure);
+  if (__DEV__) console.error("[storageUpload] failed", {
+    ...failure,
+    uploadPath: failure.uploadPath === "not generated" ? failure.uploadPath : "[redacted]",
+  });
   return failure;
 }
 

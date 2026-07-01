@@ -1,5 +1,4 @@
 import { Feather } from "@expo/vector-icons";
-import { File } from "expo-file-system";
 import { Image } from "expo-image";
 import * as Haptics from "expo-haptics";
 import * as ImagePicker from "expo-image-picker";
@@ -273,28 +272,6 @@ async function insertScanReviewItem(
   return { ok: false, error: new Error("Item save failed after retry.") };
 }
 
-async function uriToBase64(uri: string): Promise<string> {
-  if (Platform.OS === "web") {
-    const response = await fetch(uri);
-    if (!response.ok) throw new Error(`Could not read generated video frame (${response.status}).`);
-    const blob = await response.blob();
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onerror = () => reject(reader.error ?? new Error("Could not read generated video frame."));
-      reader.onload = () => {
-        const result = reader.result;
-        if (typeof result !== "string") {
-          reject(new Error("Generated video frame did not produce base64 data."));
-          return;
-        }
-        resolve(result.slice(result.indexOf(",") + 1));
-      };
-      reader.readAsDataURL(blob);
-    });
-  }
-  return new File(uri).base64();
-}
-
 export default function ScanScreen() {
   const {
     fileId: paramFileId,
@@ -464,26 +441,24 @@ export default function ScanScreen() {
       allowsMultipleSelection: isMulti,
       selectionLimit: isMulti ? remainingMultiPhotos : 1,
       quality: 0.8,
-      base64: true,
+      base64: false,
     });
     scanLog("image processing completed", {
       source: "library",
       canceled: result.canceled,
       assetCount: result.canceled ? 0 : result.assets.length,
-      hasBase64: !result.canceled && result.assets.some((asset) => !!asset.base64),
+      hasUri: !result.canceled && result.assets.some((asset) => !!asset.uri),
     });
     if (!result.canceled) {
       const picked: ScanEncodedImage[] = result.assets
-        .filter((a) => !!a.base64)
+        .filter((a) => !!a.uri)
         .map((a) => ({
           uri: a.uri,
-          base64: a.base64!,
           mimeType: a.mimeType ?? "image/jpeg",
         }));
       scanLog("photo captured", {
         source: "library",
         imageCount: picked.length,
-        approxBase64Chars: picked.reduce((sum, image) => sum + image.base64.length, 0),
       });
       if (picked.length === 0) {
         setScanError("Could not prepare the selected photo for scanning. Please try another image.");
@@ -525,26 +500,24 @@ export default function ScanScreen() {
     scanLog("image processing started", { source: "camera", mode, autoStart });
     const result = await ImagePicker.launchCameraAsync({
       quality: 0.8,
-      base64: true,
+      base64: false,
     });
     scanLog("image processing completed", {
       source: "camera",
       canceled: result.canceled,
       assetCount: result.canceled ? 0 : result.assets.length,
-      hasBase64: !result.canceled && !!result.assets[0]?.base64,
+      hasUri: !result.canceled && !!result.assets[0]?.uri,
     });
-    if (!result.canceled && result.assets[0]?.base64) {
+    if (!result.canceled && result.assets[0]?.uri) {
       const a = result.assets[0];
       const capturedImage: ScanEncodedImage = {
         uri: a.uri,
-        base64: a.base64!,
         mimeType: a.mimeType ?? "image/jpeg",
       };
       const capturedImages = [capturedImage];
       scanLog("photo captured", {
         source: "camera",
         imageCount: capturedImages.length,
-        approxBase64Chars: capturedImage.base64.length,
         autoStart,
       });
       if (mode === "multi_photo_room") {
@@ -603,7 +576,6 @@ export default function ScanScreen() {
       });
       frames.push({
         uri: thumbnail.uri,
-        base64: await uriToBase64(thumbnail.uri),
         mimeType: "image/jpeg",
       });
     }
@@ -637,7 +609,6 @@ export default function ScanScreen() {
       scanLog("video frame extraction completed", {
         sessionId,
         frameCount: frames.length,
-        approxBase64Chars: frames.reduce((sum, frame) => sum + frame.base64.length, 0),
       });
       setImages(frames);
       await handleStartScan("video_room", frames);
