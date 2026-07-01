@@ -12,7 +12,6 @@ import {
 import { ItemPinMarker, PIN_MARKER_SIZE } from "@/components/ItemPinMarker";
 
 const LONG_PRESS_DELAY_MS = 450;
-const MOVE_CANCEL_PX = 8;
 const HIT_PADDING = 14;
 
 interface DraggablePinLayerProps {
@@ -29,6 +28,7 @@ interface DraggablePinLayerProps {
    */
   onTap?: () => void;
   pinColor?: string;
+  markerSize?: "sm" | "lg";
 }
 
 /**
@@ -44,8 +44,9 @@ export function DraggablePinLayer({
   onReposition,
   onTap,
   pinColor = "#1D9E75",
+  markerSize = "sm",
 }: DraggablePinLayerProps) {
-  const { w: pinW, h: pinH } = PIN_MARKER_SIZE.sm;
+  const { w: pinW, h: pinH } = PIN_MARKER_SIZE[markerSize];
 
   const [localPin, setLocalPin] = useState(pin);
   const [isDragging, setIsDragging] = useState(false);
@@ -85,7 +86,11 @@ export function DraggablePinLayer({
       // This prevents the parent Pressable from firing onPress when the user
       // long-presses; quick taps are forwarded via onTap inside onPanResponderRelease.
       onStartShouldSetPanResponder: () => !isSavingRef.current,
+      onStartShouldSetPanResponderCapture: () => !isSavingRef.current,
       onMoveShouldSetPanResponder: () => dragActive.current,
+      onMoveShouldSetPanResponderCapture: () => dragActive.current,
+      onPanResponderTerminationRequest: () => false,
+      onShouldBlockNativeResponder: () => true,
 
       onPanResponderGrant: () => {
         dragStartPin.current = { ...localPinRef.current };
@@ -104,16 +109,6 @@ export function DraggablePinLayer({
 
       onPanResponderMove: (_, gestureState) => {
         if (!dragActive.current) {
-          // Cancel long-press if finger drifts too far before activation
-          if (
-            Math.abs(gestureState.dx) > MOVE_CANCEL_PX ||
-            Math.abs(gestureState.dy) > MOVE_CANCEL_PX
-          ) {
-            if (longPressTimer.current) {
-              clearTimeout(longPressTimer.current);
-              longPressTimer.current = null;
-            }
-          }
           return;
         }
         const d = dimsRef.current;
@@ -227,6 +222,7 @@ export function DraggablePinLayer({
         <View
           style={[
             styles.tooltip,
+            { bottom: HIT_PADDING + pinH + 6 },
             showSuccess && styles.tooltipSuccess,
           ]}
         >
@@ -235,7 +231,7 @@ export function DraggablePinLayer({
       )}
 
       <Animated.View style={{ transform: [{ scale: scaleAnim }] }}>
-        <ItemPinMarker size="sm" color={markerColor} />
+        <ItemPinMarker size={markerSize} color={markerColor} />
       </Animated.View>
     </View>
   );
@@ -250,7 +246,6 @@ const styles = StyleSheet.create({
   },
   tooltip: {
     position: "absolute",
-    bottom: HIT_PADDING + PIN_MARKER_SIZE.sm.h + 6,
     alignSelf: "center",
     backgroundColor: "rgba(0,0,0,0.70)",
     paddingHorizontal: 8,

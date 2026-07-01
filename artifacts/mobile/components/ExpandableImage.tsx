@@ -36,6 +36,7 @@ interface ExpandableImageProps {
    * Only pass this on editable screens — read-only contexts should omit it.
    */
   onReposition?: (x: number, y: number) => Promise<void>;
+  onPermanentError?: () => void;
 }
 
 export function ExpandableImage({
@@ -52,6 +53,7 @@ export function ExpandableImage({
   pinColor = "#1D9E75",
   disabled = false,
   onReposition,
+  onPermanentError,
 }: ExpandableImageProps) {
   const [lightboxVisible, setLightboxVisible] = useState(false);
   const [dims, setDims] = useState({ w: 0, h: 0 });
@@ -132,20 +134,6 @@ export function ExpandableImage({
           }
           setLightboxVisible(true);
         }}
-        onLongPress={(event) => {
-          event.stopPropagation();
-          if (!hasPin || !onReposition) return;
-          suppressNextPress.current = true;
-          const { locationX, locationY } = event.nativeEvent;
-          const nextX = Math.max(0, Math.min(1, locationX / dims.w));
-          const nextY = Math.max(0, Math.min(1, locationY / dims.h));
-          void onReposition(nextX, nextY).finally(() => {
-            setTimeout(() => {
-              suppressNextPress.current = false;
-            }, 700);
-          });
-        }}
-        delayLongPress={450}
         style={[style, { overflow: "hidden" }]}
         onLayout={(e) => {
           const { width, height } = e.nativeEvent.layout;
@@ -184,6 +172,7 @@ export function ExpandableImage({
               return;
             }
             setHasError(true);
+            onPermanentError?.();
           }}
         />
         {hasPin && onReposition ? (
@@ -215,6 +204,8 @@ export function ExpandableImage({
         pin={pin}
         pinPhotoIndex={initialPhotoIndex}
         pinColor={pinColor}
+        onPinReposition={onReposition}
+        onPermanentError={onPermanentError}
       />
     </>
   );

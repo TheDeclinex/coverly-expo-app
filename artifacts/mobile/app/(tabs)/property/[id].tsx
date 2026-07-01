@@ -37,7 +37,7 @@ import { ENABLE_RECOMMENDED_ACTIONS } from "@/constants/recommendedActions";
 import { getRoomPlaceholderIcon } from "@/constants/roomVisuals";
 import { useAuth } from "@/context/AuthContext";
 import { useColors } from "@/hooks/useColors";
-import { useSignedUrl, useSignedUrls } from "@/hooks/useSignedUrls";
+import { useSignedImageRecovery, useSignedUrl, useSignedUrls } from "@/hooks/useSignedUrls";
 import {
   buildSparklinePoints,
   calcPropertyStats,
@@ -1216,6 +1216,7 @@ function RoomCard({
   completionPulse,
   colors,
   resolvedCoverUrl,
+  onCoverImagePermanentError,
 }: {
   item: InventoryRoom;
   propertyName: string;
@@ -1227,6 +1228,7 @@ function RoomCard({
   colors: ReturnType<typeof import("@/hooks/useColors").useColors>;
   /** Pre-resolved signed URL from the parent's batch useSignedUrls() call. */
   resolvedCoverUrl?: string | null;
+  onCoverImagePermanentError?: () => void;
 }) {
   const handlePress = async () => {
     await Haptics.selectionAsync();
@@ -1367,6 +1369,7 @@ function RoomCard({
               uri={resolvedCoverUrl}
               style={styles.roomThumb}
               contentFit="cover"
+              onPermanentError={onCoverImagePermanentError}
               fallback={
                 <View
                   style={[
@@ -2031,6 +2034,7 @@ export default function PropertyDetailScreen() {
   // Signed URL for the property cover photo (path → 1-hr signed URL).
   // localCoverUrl overrides while the optimistic displayUrl is still fresh.
   const signedCoverUrl = useSignedUrl(property?.property_cover_image_url);
+  const recoverPropertyCoverUrl = useSignedImageRecovery([property?.property_cover_image_url]);
 
   // Batch-resolve room thumbnail paths → signed URLs in one round-trip.
   // Derived from `rooms` (not `stats`) so URLs start resolving as soon as
@@ -2041,6 +2045,7 @@ export default function PropertyDetailScreen() {
     [rooms],
   );
   const roomCoverSignedUrls = useSignedUrls(roomCoverPaths);
+  const recoverRoomCoverUrl = useSignedImageRecovery(roomCoverPaths);
 
   // Map room.id → resolved signed URL, for clean O(1) lookup in renderItem.
   const roomSignedUrlById = useMemo(() => {
@@ -2229,6 +2234,7 @@ export default function PropertyDetailScreen() {
                 uri={localCoverUrl ?? signedCoverUrl}
                 style={StyleSheet.absoluteFill}
                 contentFit="cover"
+                onPermanentError={() => recoverPropertyCoverUrl(property?.property_cover_image_url)}
                 fallback={
                   <View
                     style={[
@@ -2835,6 +2841,7 @@ export default function PropertyDetailScreen() {
                 completionPulse={completedPulseRoomIds.has(rs.room.id)}
                 colors={colors}
                 resolvedCoverUrl={roomSignedUrlById.get(rs.room.id) ?? null}
+                onCoverImagePermanentError={() => recoverRoomCoverUrl(rs.room.cover_photo_url)}
               />
             </View>
           )}

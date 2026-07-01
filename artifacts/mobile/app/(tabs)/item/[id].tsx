@@ -31,7 +31,7 @@ import {
 import { useToast } from "@/components/Toast";
 import { useAuth } from "@/context/AuthContext";
 import { useColors } from "@/hooks/useColors";
-import { useSignedUrls } from "@/hooks/useSignedUrls";
+import { useSignedImageRecovery, useSignedUrls } from "@/hooks/useSignedUrls";
 import { formatCurrencyFull, getItemUnitPrice } from "@/lib/inventory-mappers";
 import { supabase } from "@/lib/supabase";
 import { buildVoiceItemUpdatePayload } from "@/lib/voice-item-update";
@@ -42,6 +42,38 @@ import type { VoiceItemField, VoiceItemPatch } from "@/types/voice";
 const ITEM_REVIEW_EDIT_TRIAL = true;
 
 type InlineField = "name" | "quantity" | "unit_estimated_price" | "brand_maker";
+
+type ProductPurchaseDraft = {
+  brandMaker: string;
+  modelSeries: string;
+  conditionLabel: string;
+  purchaseSource: string;
+  purchaseYearApprox: string;
+  originalPurchasePrice: string;
+  notes: string;
+};
+
+const emptyProductPurchaseDraft: ProductPurchaseDraft = {
+  brandMaker: "",
+  modelSeries: "",
+  conditionLabel: "",
+  purchaseSource: "",
+  purchaseYearApprox: "",
+  originalPurchasePrice: "",
+  notes: "",
+};
+
+function productPurchaseDraftFromItem(item: InventoryItem): ProductPurchaseDraft {
+  return {
+    brandMaker: item.brand_maker ?? "",
+    modelSeries: item.model_series ?? "",
+    conditionLabel: item.condition_label ?? "",
+    purchaseSource: item.purchase_source ?? "",
+    purchaseYearApprox: item.purchase_year_approx ?? "",
+    originalPurchasePrice: item.original_purchase_price != null ? String(item.original_purchase_price) : "",
+    notes: item.notes ?? "",
+  };
+}
 
 function DetailRow({
   label,
@@ -108,6 +140,201 @@ function Section({
         {title}
       </Text>
       {children}
+    </View>
+  );
+}
+
+function ProductPurchaseDetailsSection({
+  expanded,
+  colors,
+  draft,
+  saving,
+  onToggle,
+  onChange,
+  onSave,
+  onCancel,
+}: {
+  expanded: boolean;
+  colors: ReturnType<typeof import("@/hooks/useColors").useColors>;
+  draft: ProductPurchaseDraft;
+  saving: boolean;
+  onToggle: () => void;
+  onChange: (patch: Partial<ProductPurchaseDraft>) => void;
+  onSave: () => void;
+  onCancel: () => void;
+}) {
+  return (
+    <View
+      style={[
+        styles.section,
+        {
+          backgroundColor: colors.card,
+          borderRadius: colors.radius,
+          borderColor: colors.border,
+        },
+      ]}
+    >
+      <Pressable
+        accessibilityRole="button"
+        accessibilityState={{ expanded }}
+        accessibilityLabel={`${expanded ? "Hide" : "Show"} product and purchase details`}
+        onPress={onToggle}
+        style={styles.productDetailsHeader}
+      >
+        <View style={styles.productDetailsHeaderCopy}>
+          <Text style={[styles.sectionTitle, styles.productDetailsTitle, { color: colors.mutedForeground }]}>
+            PRODUCT & PURCHASE DETAILS
+          </Text>
+          <Text style={[styles.productDetailsHint, { color: colors.mutedForeground }]}>
+            Optional details for claim evidence and item identification
+          </Text>
+        </View>
+        <Feather name={expanded ? "chevron-up" : "chevron-down"} size={18} color={colors.mutedForeground} />
+      </Pressable>
+      {expanded ? (
+        <View style={styles.productDetailsBody}>
+          <ProductDetailInput
+            label="Brand / Maker"
+            value={draft.brandMaker}
+            onChangeText={(value) => onChange({ brandMaker: value })}
+            placeholder="e.g. Samsung"
+            colors={colors}
+            editable={!saving}
+          />
+          <ProductDetailInput
+            label="Model / Series"
+            value={draft.modelSeries}
+            onChangeText={(value) => onChange({ modelSeries: value })}
+            placeholder="e.g. QN90B"
+            colors={colors}
+            editable={!saving}
+          />
+          <ProductDetailInput
+            label="Condition"
+            value={draft.conditionLabel}
+            onChangeText={(value) => onChange({ conditionLabel: value })}
+            placeholder="e.g. Good"
+            colors={colors}
+            editable={!saving}
+          />
+          <ProductDetailInput
+            label="Purchased from"
+            value={draft.purchaseSource}
+            onChangeText={(value) => onChange({ purchaseSource: value })}
+            placeholder="e.g. Harvey Norman"
+            colors={colors}
+            editable={!saving}
+          />
+          <View style={styles.productDetailsTwoCol}>
+            <ProductDetailInput
+              label="Purchase year"
+              value={draft.purchaseYearApprox}
+              onChangeText={(value) => onChange({ purchaseYearApprox: value })}
+              placeholder="e.g. 2022"
+              colors={colors}
+              editable={!saving}
+              style={styles.productDetailsColumn}
+            />
+            <ProductDetailInput
+              label="Original price ($)"
+              value={draft.originalPurchasePrice}
+              onChangeText={(value) => onChange({ originalPurchasePrice: value })}
+              placeholder="0"
+              keyboardType="decimal-pad"
+              colors={colors}
+              editable={!saving}
+              style={styles.productDetailsColumn}
+            />
+          </View>
+          <ProductDetailInput
+            label="Notes"
+            value={draft.notes}
+            onChangeText={(value) => onChange({ notes: value })}
+            placeholder="Optional notes"
+            colors={colors}
+            editable={!saving}
+            multiline
+          />
+          <View style={styles.productDetailsActions}>
+            <Pressable
+              accessibilityRole="button"
+              onPress={onCancel}
+              disabled={saving}
+              style={({ pressed }) => [
+                styles.productDetailsButton,
+                { borderColor: colors.border, opacity: pressed || saving ? 0.68 : 1 },
+              ]}
+            >
+              <Text style={[styles.productDetailsButtonText, { color: colors.foreground }]}>Cancel</Text>
+            </Pressable>
+            <Pressable
+              accessibilityRole="button"
+              onPress={onSave}
+              disabled={saving}
+              style={({ pressed }) => [
+                styles.productDetailsButton,
+                {
+                  backgroundColor: colors.primary,
+                  borderColor: colors.primary,
+                  opacity: pressed || saving ? 0.72 : 1,
+                },
+              ]}
+            >
+              {saving ? (
+                <ActivityIndicator size="small" color={colors.primaryForeground} />
+              ) : (
+                <Text style={[styles.productDetailsButtonText, { color: colors.primaryForeground }]}>Save</Text>
+              )}
+            </Pressable>
+          </View>
+        </View>
+      ) : null}
+    </View>
+  );
+}
+
+function ProductDetailInput({
+  label,
+  value,
+  onChangeText,
+  placeholder,
+  colors,
+  editable,
+  keyboardType,
+  multiline = false,
+  style,
+}: {
+  label: string;
+  value: string;
+  onChangeText: (value: string) => void;
+  placeholder: string;
+  colors: ReturnType<typeof import("@/hooks/useColors").useColors>;
+  editable: boolean;
+  keyboardType?: "default" | "decimal-pad";
+  multiline?: boolean;
+  style?: object;
+}) {
+  return (
+    <View style={[styles.productDetailsField, style]}>
+      <Text style={[styles.productDetailsLabel, { color: colors.mutedForeground }]}>{label}</Text>
+      <TextInput
+        value={value}
+        onChangeText={onChangeText}
+        placeholder={placeholder}
+        placeholderTextColor={colors.mutedForeground}
+        editable={editable}
+        keyboardType={keyboardType}
+        multiline={multiline}
+        style={[
+          styles.productDetailsInput,
+          multiline ? styles.productDetailsTextArea : null,
+          {
+            color: colors.foreground,
+            backgroundColor: colors.background,
+            borderColor: colors.border,
+          },
+        ]}
+      />
     </View>
   );
 }
@@ -278,6 +505,9 @@ export default function ItemDetailScreen() {
   const [voiceInputOpen, setVoiceInputOpen] = React.useState(false);
   const [voiceTargetField, setVoiceTargetField] = React.useState<VoiceItemField | undefined>();
   const [deletingItem, setDeletingItem] = React.useState(false);
+  const [productDetailsExpanded, setProductDetailsExpanded] = React.useState(false);
+  const [productDetailsDraft, setProductDetailsDraft] = React.useState<ProductPurchaseDraft>(emptyProductPurchaseDraft);
+  const [savingProductDetails, setSavingProductDetails] = React.useState(false);
 
   const {
     data: item,
@@ -319,8 +549,23 @@ export default function ItemDetailScreen() {
   // While loading, signedUriMap is empty — use null so ExpandableImage shows its
   // placeholder rather than passing an invalid storage path to the Image component.
   const signedUriMap = useSignedUrls(rawPhotoUris);
+  const recoverItemImageUrl = useSignedImageRecovery(rawPhotoUris);
   const allPhotoUris = rawPhotoUris.map((u) => signedUriMap.get(u) ?? null).filter((u): u is string => u !== null);
   const primaryUri = allPhotoUris[0] ?? null;
+
+  React.useEffect(() => {
+    if (!item) return;
+    setProductDetailsDraft(productPurchaseDraftFromItem(item));
+  }, [
+    item?.id,
+    item?.brand_maker,
+    item?.model_series,
+    item?.condition_label,
+    item?.purchase_source,
+    item?.purchase_year_approx,
+    item?.original_purchase_price,
+    item?.notes,
+  ]);
 
   const handleEdit = () => {
     router.push({
@@ -543,6 +788,64 @@ export default function ItemDetailScreen() {
     }
   };
 
+  const updateProductDetailsDraft = React.useCallback((patch: Partial<ProductPurchaseDraft>) => {
+    setProductDetailsDraft((current) => ({ ...current, ...patch }));
+  }, []);
+
+  const cancelProductDetailsEdit = React.useCallback(() => {
+    if (item) setProductDetailsDraft(productPurchaseDraftFromItem(item));
+    setProductDetailsExpanded(false);
+  }, [item]);
+
+  const saveProductDetails = async () => {
+    if (!item || savingProductDetails) return;
+
+    const originalPriceDraft = productDetailsDraft.originalPurchasePrice.trim();
+    const originalPrice = originalPriceDraft ? parseMoneyDraft(originalPriceDraft) : null;
+    if (originalPriceDraft && originalPrice === null) {
+      Alert.alert("Check original price", "Enter a valid original price of zero or more.");
+      return;
+    }
+
+    const trimOrNull = (value: string) => value.trim() || null;
+    const updates: Partial<InventoryItem> = {
+      brand_maker: trimOrNull(productDetailsDraft.brandMaker),
+      model_series: trimOrNull(productDetailsDraft.modelSeries),
+      condition_label: trimOrNull(productDetailsDraft.conditionLabel),
+      purchase_source: trimOrNull(productDetailsDraft.purchaseSource),
+      purchase_year_approx: trimOrNull(productDetailsDraft.purchaseYearApprox),
+      original_purchase_price: originalPrice,
+      notes: trimOrNull(productDetailsDraft.notes),
+    };
+
+    setSavingProductDetails(true);
+    try {
+      const { data, error: updateError } = await supabase
+        .from("inventory_items")
+        .update(updates)
+        .eq("id", item.id)
+        .select("*")
+        .single();
+      if (updateError) throw updateError;
+
+      const updatedItem = data as InventoryItem;
+      queryClient.setQueryData(
+        ["item", id, session?.user.id],
+        updatedItem,
+      );
+      await invalidateItemCollections(updatedItem);
+      setProductDetailsExpanded(false);
+      showToast("Product details saved");
+    } catch (updateFailure) {
+      Alert.alert(
+        "Couldn't save details",
+        updateFailure instanceof Error ? updateFailure.message : "Please try again.",
+      );
+    } finally {
+      setSavingProductDetails(false);
+    }
+  };
+
   const handleApplyVoice = async (patch: VoiceItemPatch) => {
     if (!item) throw new Error("Item not loaded.");
 
@@ -647,6 +950,7 @@ export default function ItemDetailScreen() {
             initialPhotoIndex={0}
             pin={itemPin}
             onReposition={itemPin ? handleRepositionPin : undefined}
+            onPermanentError={() => recoverItemImageUrl(rawPrimaryUri)}
           />
           {itemPin && (
             <Text style={[styles.pinHint, { color: colors.mutedForeground }]}>
@@ -780,6 +1084,17 @@ export default function ItemDetailScreen() {
                   />
                 </Section>
 
+                <ProductPurchaseDetailsSection
+                  expanded={productDetailsExpanded}
+                  colors={colors}
+                  draft={productDetailsDraft}
+                  saving={savingProductDetails}
+                  onToggle={() => setProductDetailsExpanded((value) => !value)}
+                  onChange={updateProductDetailsDraft}
+                  onSave={() => void saveProductDetails()}
+                  onCancel={cancelProductDetailsEdit}
+                />
+
                 <Section title="ACTIONS" colors={colors}>
                   <Pressable
                     onPress={handleReplacementPricing}
@@ -835,6 +1150,16 @@ export default function ItemDetailScreen() {
               </>
             ) : (
               <>
+                <ProductPurchaseDetailsSection
+                  expanded={productDetailsExpanded}
+                  colors={colors}
+                  draft={productDetailsDraft}
+                  saving={savingProductDetails}
+                  onToggle={() => setProductDetailsExpanded((value) => !value)}
+                  onChange={updateProductDetailsDraft}
+                  onSave={() => void saveProductDetails()}
+                  onCancel={cancelProductDetailsEdit}
+                />
                 <Pressable
                   onPress={handleEdit}
                   style={({ pressed }) => [
@@ -931,39 +1256,7 @@ export default function ItemDetailScreen() {
                   {item.barcode || item.barcode_verified ? "Update barcode" : "Scan barcode"}
                 </Text>
               </Pressable>
-              <DetailRow label="Model / Series" value={item.model_series} colors={colors} />
-              <DetailRow label="Condition" value={item.condition_label} colors={colors} />
             </Section>
-
-            {(item.original_purchase_price ||
-              item.purchase_year_approx ||
-              item.purchase_source) && (
-              <Section title="PURCHASE HISTORY" colors={colors}>
-                <DetailRow
-                  label="Original price"
-                  value={formatCurrencyFull(item.original_purchase_price)}
-                  colors={colors}
-                />
-                <DetailRow
-                  label="Year purchased"
-                  value={item.purchase_year_approx}
-                  colors={colors}
-                />
-                <DetailRow
-                  label="Source"
-                  value={item.purchase_source}
-                  colors={colors}
-                />
-              </Section>
-            )}
-
-            {item.notes && (
-              <Section title="NOTES" colors={colors}>
-                <Text style={[styles.notes, { color: colors.foreground }]}>
-                  {item.notes}
-                </Text>
-              </Section>
-            )}
           </View>
         </ScrollView>
       ) : null}
@@ -1198,6 +1491,44 @@ const styles = StyleSheet.create({
     letterSpacing: 0.8,
     marginBottom: 12,
   },
+  productDetailsHeader: {
+    minHeight: 44,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
+  productDetailsHeaderCopy: { flex: 1, gap: 2 },
+  productDetailsTitle: { marginBottom: 0 },
+  productDetailsHint: { fontSize: 11, lineHeight: 16, fontFamily: "Inter_400Regular" },
+  productDetailsBody: { paddingTop: 12, gap: 10 },
+  productDetailsField: { gap: 5 },
+  productDetailsLabel: { fontSize: 11, fontFamily: "Inter_600SemiBold" },
+  productDetailsInput: {
+    minHeight: 42,
+    borderWidth: 1,
+    borderRadius: 9,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    fontSize: 14,
+    fontFamily: "Inter_400Regular",
+  },
+  productDetailsTextArea: {
+    minHeight: 76,
+    textAlignVertical: "top",
+  },
+  productDetailsTwoCol: { flexDirection: "row", gap: 10 },
+  productDetailsColumn: { flex: 1 },
+  productDetailsActions: { flexDirection: "row", justifyContent: "flex-end", gap: 9, paddingTop: 2 },
+  productDetailsButton: {
+    minWidth: 88,
+    minHeight: 40,
+    borderWidth: 1,
+    borderRadius: 9,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 12,
+  },
+  productDetailsButtonText: { fontSize: 13, fontFamily: "Inter_600SemiBold" },
   detailRow: {
     flexDirection: "row",
     justifyContent: "space-between",
@@ -1220,11 +1551,6 @@ const styles = StyleSheet.create({
   },
   detailLink: { flex: 1 },
   linkText: { textDecorationLine: "underline" },
-  notes: {
-    fontSize: 14,
-    fontFamily: "Inter_400Regular",
-    lineHeight: 22,
-  },
   pinHint: {
     fontSize: 11,
     fontFamily: "Inter_400Regular",

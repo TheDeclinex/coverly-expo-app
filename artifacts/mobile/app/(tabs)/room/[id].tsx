@@ -50,7 +50,7 @@ import {
   getItemUnitPrice,
   hasValue,
 } from "@/lib/inventory-mappers";
-import { useSignedUrl, useSignedUrls } from "@/hooks/useSignedUrls";
+import { useSignedImageRecovery, useSignedUrl, useSignedUrls } from "@/hooks/useSignedUrls";
 import { isStoragePath } from "@/lib/storage-helpers";
 import { formatUploadFailure, uploadCoverPhoto } from "@/lib/photo-upload";
 import { isRecentItem } from "@/lib/recent-items";
@@ -159,6 +159,7 @@ function ItemCard({
   parentPropertyName,
   colors,
   resolvedImageUrl,
+  onImagePermanentError,
   evidenceCount = 0,
   isNew = false,
   editingTarget,
@@ -174,6 +175,7 @@ function ItemCard({
   colors: ReturnType<typeof import("@/hooks/useColors").useColors>;
   /** Pre-resolved signed URL from the parent's batch useSignedUrls() call. */
   resolvedImageUrl?: string | null;
+  onImagePermanentError?: () => void;
   evidenceCount?: number;
   isNew?: boolean;
   editingTarget: CardEditTarget | null;
@@ -495,6 +497,7 @@ function ItemCard({
             placeholderBackgroundColor={colors.muted}
             pin={pin}
             disabled={selectionMode}
+            onPermanentError={onImagePermanentError}
           />
         </View>
 
@@ -964,6 +967,7 @@ function CompactItemCard({
   parentPropertyName,
   colors,
   resolvedImageUrl,
+  onImagePermanentError,
   isNew = false,
   selectionMode = false,
   isSelected = false,
@@ -974,6 +978,7 @@ function CompactItemCard({
   parentPropertyName: string;
   colors: ReturnType<typeof import("@/hooks/useColors").useColors>;
   resolvedImageUrl?: string | null;
+  onImagePermanentError?: () => void;
   isNew?: boolean;
   selectionMode?: boolean;
   isSelected?: boolean;
@@ -1039,6 +1044,7 @@ function CompactItemCard({
             uri={resolvedImageUrl}
             style={styles.gridThumb}
             contentFit="cover"
+            onPermanentError={onImagePermanentError}
             fallback={
               <View style={[styles.gridThumb, styles.gridThumbPlaceholder, { backgroundColor: colors.muted }]}>
                 <Feather name={placeholderIcon} size={24} color={TEAL} />
@@ -1085,6 +1091,7 @@ export default function ItemsScreen() {
   const { showToast } = useToast();
 
   const [coverUploading, setCoverUploading] = useState(false);
+  const [localCoverUrl, setLocalCoverUrl] = useState<string | null>(null);
   const [coverSavedTick, setCoverSavedTick] = useState(false);
   const [archivingRoom, setArchivingRoom] = useState(false);
   const [recentTick, setRecentTick] = useState(0);
@@ -1224,6 +1231,7 @@ export default function ItemsScreen() {
 
   // Signed URL for the room cover photo (resolves storage path → 1-hr signed URL)
   const signedCoverUrl = useSignedUrl(room?.cover_photo_url);
+  const recoverRoomCoverUrl = useSignedImageRecovery([room?.cover_photo_url]);
 
   // Batch-resolve item thumbnail paths → signed URLs in one round-trip.
   // Memoised so the array reference is stable between renders (avoids redundant key recomputation).
@@ -1232,6 +1240,7 @@ export default function ItemsScreen() {
     [items],
   );
   const itemSignedUrls = useSignedUrls(itemImagePaths);
+  const recoverItemImageUrl = useSignedImageRecovery(itemImagePaths);
   const roomCategoryOptions = React.useMemo(() => {
     const categorySet = new Set<string>();
     (items ?? []).forEach((item) => {
@@ -1622,19 +1631,23 @@ export default function ItemsScreen() {
       : await ImagePicker.launchCameraAsync(pickerOptions);
     if (result.canceled || !result.assets[0]) return;
     if (!session?.user.id) return;
+    const selectedUri = result.assets[0].uri;
     setCoverUploading(true);
+    setLocalCoverUrl(selectedUri);
     try {
       const uploaded = await uploadCoverPhoto(
-        result.assets[0].uri,
+        selectedUri,
         session.user.id,
         { source: "room_cover", fileId: fileId ?? undefined }
       );
       if (!uploaded.ok) {
         const diagnostic = formatUploadFailure(uploaded);
         if (__DEV__) console.error("[roomCover] Upload diagnostic\n" + diagnostic);
+        setLocalCoverUrl(null);
         Alert.alert("Room cover upload failed", diagnostic);
         return;
       }
+      setLocalCoverUrl(uploaded.displayUrl ?? selectedUri);
       // Store the durable storage path in the DB, not the short-lived signed URL.
       const { data: updatedRows, error: updateError } = await supabase
         .from("inventory_rooms")
@@ -1643,11 +1656,13 @@ export default function ItemsScreen() {
         .select("id");
       if (updateError) {
         if (__DEV__) console.error("[roomCover] DB update error:", updateError);
+        setLocalCoverUrl(null);
         Alert.alert("Save failed", updateError.message);
         return;
       }
       if (!updatedRows || updatedRows.length === 0) {
         if (__DEV__) console.error("[roomCover] DB update matched 0 rows — possible missing UPDATE RLS policy. Run supabase/migrations/add_update_policies.sql.");
+        setLocalCoverUrl(null);
         Alert.alert("Save failed", "Cover photo could not be saved. Please check your connection and try again.");
         return;
       }
@@ -1731,7 +1746,7 @@ export default function ItemsScreen() {
       </View>
     ) : null}
     <View style={[styles.coverContainer, { backgroundColor: colors.secondary }]}>
-      {signedCoverUrl ? (
+      {localCoverUrl ?? signedCoverUrl ? (
         /* Parallax image — taller than container so it can shift up */
         <Animated.View
           style={{
@@ -1744,9 +1759,10 @@ export default function ItemsScreen() {
           }}
         >
           <ReliableImage
-            uri={signedCoverUrl}
+            uri={localCoverUrl ?? signedCoverUrl}
             style={StyleSheet.absoluteFill}
             contentFit="cover"
+            onPermanentError={() => recoverRoomCoverUrl(room?.cover_photo_url)}
             fallback={
               <View style={styles.coverPlaceholder}>
                 <MaterialCommunityIcons
@@ -1932,6 +1948,7 @@ export default function ItemsScreen() {
           colors={colors}
           isNew={isRecentItem(item.id) && recentTick >= 0}
           resolvedImageUrl={itemSignedUrls.get(item.image_url ?? item.photo_url ?? "") ?? null}
+          onImagePermanentError={() => recoverItemImageUrl(item.image_url ?? item.photo_url)}
           selectionMode={selectionMode}
           isSelected={selectedItemIds.has(item.id)}
           onToggleSelected={() => toggleSelectedItem(item.id)}
@@ -1948,6 +1965,7 @@ export default function ItemsScreen() {
         evidenceCount={evidenceCounts[item.id] ?? 0}
         isNew={isRecentItem(item.id) && recentTick >= 0}
         resolvedImageUrl={itemSignedUrls.get(item.image_url ?? item.photo_url ?? "") ?? null}
+        onImagePermanentError={() => recoverItemImageUrl(item.image_url ?? item.photo_url)}
         editingTarget={activeEdit?.itemId === item.id ? activeEdit.target : null}
         selectionMode={selectionMode}
         isSelected={selectedItemIds.has(item.id)}

@@ -12,7 +12,7 @@ import Animated, {
 } from "react-native-reanimated";
 
 import { useColors } from "@/hooks/useColors";
-import { useSignedUrl } from "@/hooks/useSignedUrls";
+import { useSignedImageRecovery, useSignedUrl } from "@/hooks/useSignedUrls";
 import { ReliableImage } from "@/components/ReliableImage";
 
 export interface PhotoEntry {
@@ -97,6 +97,7 @@ function PhotoCard({
   // Resolve storage path → signed URL; local file:// URIs and legacy https:// URLs
   // pass through unchanged. undefined while loading → show broken state gracefully.
   const resolvedUrl = useSignedUrl(photo.url);
+  const recoverSignedPhotoUrl = useSignedImageRecovery([photo.url]);
 
   return (
     <GestureDetector gesture={panGesture}>
@@ -113,6 +114,7 @@ function PhotoCard({
             }}
             contentFit="cover"
             transition={150}
+            onPermanentError={() => recoverSignedPhotoUrl(photo.url)}
             fallback={
               <View
                 style={{

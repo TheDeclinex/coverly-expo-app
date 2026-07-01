@@ -1292,6 +1292,9 @@ export default function ScanScreen() {
     const PHOTO_W = Dimensions.get("window").width - 32;
     const PHOTO_H = Math.round(PHOTO_W * 0.72);
     const PIN_R = 11;
+    const REVIEW_THUMB_W = 76;
+    const REVIEW_THUMB_H = 110;
+    const REVIEW_THUMB_PIN_R = 7;
     const sourceUri = images[activeSourcePhotoIdx]?.uri ?? null;
     const visiblePins = detectedItems
       .map((item, idx) => ({ item, idx }))
@@ -1436,6 +1439,24 @@ export default function ScanScreen() {
               const isSaving = savingIds.has(index);
               const badge = confidenceBadgeStyle(item.confidence);
               const isActive = activePinIndex === index;
+              const thumbPinLeft = item.pin
+                ? Math.max(
+                    3,
+                    Math.min(
+                      REVIEW_THUMB_W - REVIEW_THUMB_PIN_R * 2 - 3,
+                      (item.pin.x / 100) * REVIEW_THUMB_W - REVIEW_THUMB_PIN_R,
+                    ),
+                  )
+                : 0;
+              const thumbPinTop = item.pin
+                ? Math.max(
+                    3,
+                    Math.min(
+                      REVIEW_THUMB_H - REVIEW_THUMB_PIN_R * 2 - 3,
+                      (item.pin.y / 100) * REVIEW_THUMB_H - REVIEW_THUMB_PIN_R,
+                    ),
+                  )
+                : 0;
               return (
                 <View
                   style={[
@@ -1457,7 +1478,10 @@ export default function ScanScreen() {
                       // matching pin is always visible after tapping a card.
                       setActiveSourcePhotoIdx(item.sourcePhotoIndex ?? 0);
                     }}
-                    style={{ position: "relative" }}
+                    style={[
+                      revStyles.thumbWrap,
+                      { borderTopLeftRadius: colors.radius, borderBottomLeftRadius: colors.radius },
+                    ]}
                   >
                     <ExpandableImage
                       uri={item.sourceImageUri}
@@ -1470,9 +1494,28 @@ export default function ScanScreen() {
                     />
                     {/* Pin number badge — only shown when item has a pin */}
                     {item.pin != null && (
-                      <View style={[pinStyles.cardBadge, { backgroundColor: isActive ? "#1D9E75" : "#334155" }]}>
-                        <Text style={pinStyles.cardBadgeLabel}>{index + 1}</Text>
-                      </View>
+                      <>
+                        <View
+                          pointerEvents="none"
+                          style={[
+                            pinStyles.cardPin,
+                            {
+                              left: thumbPinLeft,
+                              top: thumbPinTop,
+                              width: REVIEW_THUMB_PIN_R * 2,
+                              height: REVIEW_THUMB_PIN_R * 2,
+                              borderRadius: REVIEW_THUMB_PIN_R,
+                              backgroundColor: isActive ? "#1D9E75" : "#334155",
+                              transform: [{ scale: isActive ? 1.15 : 1 }],
+                            },
+                          ]}
+                        >
+                          <Text style={pinStyles.cardPinLabel}>{index + 1}</Text>
+                        </View>
+                        <View style={[pinStyles.cardBadge, { backgroundColor: isActive ? "#1D9E75" : "#334155" }]}>
+                          <Text style={pinStyles.cardBadgeLabel}>{index + 1}</Text>
+                        </View>
+                      </>
                     )}
                   </Pressable>
 
@@ -2457,6 +2500,7 @@ const revStyles = StyleSheet.create({
   headerNote: { fontSize: 13, fontFamily: "Inter_400Regular" },
   failureBanner: { borderWidth: 1, borderRadius: 8, padding: 10, flexDirection: "row", alignItems: "flex-start", gap: 8 },
   card: { borderWidth: 1, flexDirection: "row", alignItems: "stretch", overflow: "hidden" },
+  thumbWrap: { position: "relative", width: 76, height: 110, overflow: "hidden" },
   thumb: { width: 76, height: 110 },
   thumbPlaceholder: { width: 76, alignItems: "center", justifyContent: "center" },
   cardBody: { flex: 1, padding: 10, gap: 4 },
@@ -2579,5 +2623,22 @@ const pinStyles = StyleSheet.create({
     fontFamily: "Inter_700Bold",
     color: "#FFFFFF",
     lineHeight: 12,
+  },
+  cardPin: {
+    position: "absolute",
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
+    borderColor: "#FFFFFF",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.35,
+    shadowRadius: 1.5,
+  },
+  cardPinLabel: {
+    fontSize: 7,
+    fontFamily: "Inter_700Bold",
+    color: "#FFFFFF",
+    lineHeight: 9,
   },
 });

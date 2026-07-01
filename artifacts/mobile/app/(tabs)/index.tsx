@@ -31,7 +31,7 @@ import { useEntitlements } from "@/context/EntitlementsContext";
 import { ENABLE_RECOMMENDED_ACTIONS } from "@/constants/recommendedActions";
 import { propertyTypeLabel } from "@/constants/propertyTypes";
 import { useColors } from "@/hooks/useColors";
-import { useSignedUrl, useSignedUrls } from "@/hooks/useSignedUrls";
+import { useSignedImageRecovery, useSignedUrl, useSignedUrls } from "@/hooks/useSignedUrls";
 import { calcPortfolioStats } from "@/lib/dashboard-stats";
 import {
   calculateCoverageInsight,
@@ -321,6 +321,7 @@ function PropertyCard({
 
   // Resolve the storage path (or legacy signed URL) to a fresh display URL.
   const signedCoverUrl = useSignedUrl(item.property_cover_image_url);
+  const recoverSignedCoverUrl = useSignedImageRecovery([item.property_cover_image_url]);
 
   return (
     <Pressable
@@ -340,6 +341,7 @@ function PropertyCard({
           uri={signedCoverUrl}
           style={[styles.cardImage, { borderRadius: colors.radius }]}
           contentFit="cover"
+          onPermanentError={() => recoverSignedCoverUrl(item.property_cover_image_url)}
           fallback={
             <View
               style={[
@@ -565,6 +567,7 @@ export default function HomeScreen() {
     [allItems],
   );
   const globalSearchSignedUrls = useSignedUrls(globalSearchImagePaths);
+  const recoverGlobalSearchImageUrl = useSignedImageRecovery(globalSearchImagePaths);
   const normalizedGlobalSearch = globalSearchText.trim().toLowerCase();
   const globalSearchActive = normalizedGlobalSearch.length > 0 || globalReadinessFilter !== "all";
   const globalSearchResults = useMemo(() => {
@@ -925,6 +928,7 @@ export default function HomeScreen() {
                       uri={imageUri}
                       style={styles.globalResultThumb}
                       contentFit="cover"
+                      onPermanentError={() => recoverGlobalSearchImageUrl(imageRef)}
                       fallback={
                         <View style={[styles.globalResultThumb, styles.globalResultPlaceholder, { backgroundColor: colors.secondary }]}>
                           <Feather name="package" size={18} color={colors.primary} />

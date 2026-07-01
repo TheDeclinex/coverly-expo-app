@@ -5,18 +5,24 @@
  * so images keep loading without a visible reload.
  */
 
-import { useEffect, useMemo } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useCallback, useEffect, useMemo, useRef } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 
 import {
   INVENTORY_PHOTOS_BUCKET,
   getSignedDisplayUrl,
   getSignedDisplayUrls,
+  isStoragePath,
 } from "@/lib/storage-helpers";
 
 /** Re-fetch 5 min before the 1-hour signed URL expires. */
 const STALE_TIME_MS = 55 * 60 * 1000;
 const GC_TIME_MS    = 60 * 60 * 1000;
+
+function signedUrlsStableKey(pathsOrUrls: (string | null | undefined)[]): string {
+  const unique = [...new Set(pathsOrUrls.filter((p): p is string => !!p))];
+  return unique.sort().join("\n");
+}
 
 /**
  * Resolves a single storage path or legacy signed URL to a display URL.
@@ -53,10 +59,7 @@ export function useSignedUrls(
   pathsOrUrls: (string | null | undefined)[],
 ): Map<string, string> {
   // Stable, de-duped, sorted key so the query identity doesn't change on re-order.
-  const stableKey = useMemo(() => {
-    const unique = [...new Set(pathsOrUrls.filter((p): p is string => !!p))];
-    return unique.sort().join("\n");
-  }, [pathsOrUrls]);
+  const stableKey = useMemo(() => signedUrlsStableKey(pathsOrUrls), [pathsOrUrls]);
 
   const hasAny = stableKey.length > 0;
 
@@ -79,4 +82,46 @@ export function useSignedUrls(
   }, [data, stableKey]);
 
   return data ?? new Map<string, string>();
+}
+
+export function useSignedImageRecovery(
+  pathsOrUrls: (string | null | undefined)[],
+): (pathOrUrl: string | null | undefined) => void {
+  const queryClient = useQueryClient();
+  const stableKey = useMemo(() => signedUrlsStableKey(pathsOrUrls), [pathsOrUrls]);
+  const refreshedPathsRef = useRef<Set<string>>(new Set());
+
+  useEffect(() => {
+    refreshedPathsRef.current.clear();
+  }, [stableKey]);
+
+  return useCallback(
+    (pathOrUrl: string | null | undefined) => {
+      if (!pathOrUrl) return;
+      if (!isStoragePath(pathOrUrl)) return;
+      const storagePath = pathOrUrl;
+      if (refreshedPathsRef.current.has(storagePath)) return;
+      refreshedPathsRef.current.add(storagePath);
+
+      if (__DEV__) console.warn("[imageRecovery] signed URL refresh requested", {
+        query: stableKey ? "signed-urls" : "signed-url",
+        hasPath: true,
+      });
+
+      void Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["signed-url", storagePath] }),
+        stableKey
+          ? queryClient.invalidateQueries({ queryKey: ["signed-urls", stableKey] })
+          : Promise.resolve(),
+      ]).catch((error: unknown) => {
+        if (__DEV__) {
+          console.warn(
+            "[imageRecovery] signed URL refresh failed",
+            error instanceof Error ? error.message : String(error),
+          );
+        }
+      });
+    },
+    [queryClient, stableKey],
+  );
 }

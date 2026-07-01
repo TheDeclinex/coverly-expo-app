@@ -14,6 +14,7 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+import { DraggablePinLayer } from "@/components/DraggablePinLayer";
 import { ItemPinMarker, PIN_MARKER_SIZE } from "@/components/ItemPinMarker";
 import { ReliableImage } from "@/components/ReliableImage";
 
@@ -32,6 +33,8 @@ interface ImageViewerModalProps {
   pin?: { x: number; y: number } | null;
   pinPhotoIndex?: number;
   pinColor?: string;
+  onPinReposition?: (x: number, y: number) => Promise<void>;
+  onPermanentError?: () => void;
 }
 
 function ImagePage({
@@ -39,11 +42,15 @@ function ImagePage({
   onClose,
   pin,
   pinColor = "#1D9E75",
+  onPinReposition,
+  onPermanentError,
 }: {
   uri: string;
   onClose: () => void;
   pin?: { x: number; y: number } | null;
   pinColor?: string;
+  onPinReposition?: (x: number, y: number) => Promise<void>;
+  onPermanentError?: () => void;
 }) {
   const [imgSize, setImgSize] = useState<{ w: number; h: number } | null>(null);
   const [loading, setLoading] = useState(true);
@@ -60,18 +67,23 @@ function ImagePage({
    *   left = ox + pin.x * rw - pinW / 2
    *   top  = oy + pin.y * rh - pinH
    */
-  const pinPos = useMemo(() => {
+  const imageLayout = useMemo(() => {
     if (!pin || !imgSize) return null;
     const scale = Math.min(SCREEN_W / imgSize.w, SCREEN_H / imgSize.h);
     const rw = imgSize.w * scale;
     const rh = imgSize.h * scale;
     const ox = (SCREEN_W - rw) / 2;
     const oy = (SCREEN_H - rh) / 2;
+    return { ox, oy, rw, rh };
+  }, [pin, imgSize]);
+
+  const pinPos = useMemo(() => {
+    if (!pin || !imageLayout) return null;
     return {
-      left: ox + pin.x * rw - pinW / 2,
-      top: oy + pin.y * rh - pinH,
+      left: imageLayout.ox + pin.x * imageLayout.rw - pinW / 2,
+      top: imageLayout.oy + pin.y * imageLayout.rh - pinH,
     };
-  }, [pin, imgSize, pinW, pinH]);
+  }, [pin, imageLayout, pinW, pinH]);
 
   return (
     <Pressable style={styles.page} onPress={onClose}>
@@ -94,6 +106,7 @@ function ImagePage({
             onPermanentError={() => {
               setLoading(false);
               setError(true);
+              onPermanentError?.();
             }}
           />
           {loading && (
@@ -103,14 +116,36 @@ function ImagePage({
           )}
         </>
       )}
-      {pinPos && !error && (
+      {pin && imageLayout && !error && onPinReposition ? (
+        <View
+          pointerEvents="box-none"
+          style={[
+            styles.draggablePinFrame,
+            {
+              left: imageLayout.ox,
+              top: imageLayout.oy,
+              width: imageLayout.rw,
+              height: imageLayout.rh,
+            },
+          ]}
+        >
+          <DraggablePinLayer
+            pin={pin}
+            dims={{ w: imageLayout.rw, h: imageLayout.rh }}
+            onReposition={onPinReposition}
+            onTap={onClose}
+            pinColor={pinColor}
+            markerSize="lg"
+          />
+        </View>
+      ) : pinPos && !error ? (
         <View
           pointerEvents="none"
           style={[styles.pinWrap, { left: pinPos.left, top: pinPos.top }]}
         >
           <ItemPinMarker size="lg" color={pinColor} />
         </View>
-      )}
+      ) : null}
     </Pressable>
   );
 }
@@ -123,6 +158,8 @@ export function ImageViewerModal({
   pin,
   pinPhotoIndex,
   pinColor = "#1D9E75",
+  onPinReposition,
+  onPermanentError,
 }: ImageViewerModalProps) {
   const insets = useSafeAreaInsets();
   const [currentIndex, setCurrentIndex] = useState(initialIndex);
@@ -184,6 +221,8 @@ export function ImageViewerModal({
               onClose={onClose}
               pin={index === pinIdx ? pin : undefined}
               pinColor={pinColor}
+              onPinReposition={index === pinIdx ? onPinReposition : undefined}
+              onPermanentError={onPermanentError}
             />
           )}
         />
@@ -278,6 +317,9 @@ const styles = StyleSheet.create({
     fontFamily: "Inter_400Regular",
   },
   pinWrap: {
+    position: "absolute",
+  },
+  draggablePinFrame: {
     position: "absolute",
   },
   closeBtn: {
