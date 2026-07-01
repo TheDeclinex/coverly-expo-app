@@ -328,7 +328,7 @@ export async function runAiScan(input: ScanInput): Promise<ScanResult> {
       hasSessionError: !!sessionError,
     });
     if (sessionError || !accessToken || !userId) {
-      if (__DEV__) console.error("[Scan] function invoke failed", {
+      if (__DEV__) console.warn("[Scan] function invoke skipped; missing auth session", {
         message: sessionError?.message ?? "Missing Supabase session token",
       });
       return {
@@ -416,7 +416,7 @@ export async function runAiScan(input: ScanInput): Promise<ScanResult> {
     try {
       data = responseText ? JSON.parse(responseText) as ScanFunctionResponse : null;
     } catch {
-      if (__DEV__) console.error("[Scan] function invoke failed", {
+      if (__DEV__) console.warn("[Scan] function returned invalid JSON", {
         status: response.status,
         bodyChars: responseText.length,
         elapsedMs: Date.now() - invokeStartedAt,
@@ -431,7 +431,7 @@ export async function runAiScan(input: ScanInput): Promise<ScanResult> {
     }
 
     if (!response.ok) {
-      if (__DEV__) console.error("[Scan] function invoke failed", {
+      if (__DEV__) console.warn("[Scan] function returned error response", {
         status: response.status,
         errorCode: data?.errorCode,
         message: data?.message,

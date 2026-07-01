@@ -219,14 +219,13 @@ function ItemCard({
   // Structured diagnostic log: item id, raw DB values, detected type, resolved URL status.
   useEffect(() => {
     if (__DEV__) {
-      if (__DEV__) console.log("[ItemCard]", {
+      console.info("[ItemCard]", {
         id: item.id.slice(-8),
-        raw_image_url: item.image_url ? item.image_url.slice(0, 60) : null,
-        raw_photo_url: item.photo_url ? item.photo_url.slice(0, 60) : null,
-        rawImageRef: rawImageRef ? rawImageRef.slice(0, 60) : null,
+        hasImageUrl: Boolean(item.image_url),
+        hasPhotoUrl: Boolean(item.photo_url),
+        hasRawImageRef: Boolean(rawImageRef),
         type: imageRefType,
         resolved_present: !!resolvedImageUrl,
-        resolved_url: resolvedImageUrl ? resolvedImageUrl.slice(0, 70) : null,
       });
     }
   }, [item.id, rawImageRef, imageRefType, resolvedImageUrl]);
@@ -1642,7 +1641,7 @@ export default function ItemsScreen() {
       );
       if (!uploaded.ok) {
         const diagnostic = formatUploadFailure(uploaded);
-        if (__DEV__) console.error("[roomCover] Upload diagnostic\n" + diagnostic);
+        if (__DEV__) console.warn("[roomCover] Upload diagnostic\n" + diagnostic);
         setLocalCoverUrl(null);
         Alert.alert("Room cover upload failed", diagnostic);
         return;

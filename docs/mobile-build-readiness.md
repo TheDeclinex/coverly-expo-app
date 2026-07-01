@@ -25,6 +25,7 @@ This checklist is for preparing Coverly Expo builds for Android internal testing
 - Confirm no service-role keys or server secrets are present in mobile env files.
 - Confirm RevenueCat keys are present before testing paid entitlement behaviour.
 - Confirm privacy and terms URLs are set before wider TestFlight or store review.
+- Support is currently handled in-app through Account -> Feedback & support; there is no separate support URL env var in the mobile app.
 - Run TypeScript and Expo config checks before starting a cloud build.
 
 ## EAS environment variables

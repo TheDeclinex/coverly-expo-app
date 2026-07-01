@@ -38,6 +38,23 @@ interface EvidenceDiagnosticContext {
   uploadPath?: string;
 }
 
+function safeEvidenceContext(context: EvidenceDiagnosticContext) {
+  return {
+    userIdPresent: Boolean(context.userId),
+    fileIdPresent: Boolean(context.fileId),
+    itemIdPresent: Boolean(context.itemId),
+    evidenceIdPresent: Boolean(context.evidenceId),
+    uploadPathPresent: Boolean(context.uploadPath),
+  };
+}
+
+function friendlyEvidenceError(operation: EvidenceOperation): string {
+  if (operation === "claim-evidence storage upload") {
+    return "Evidence upload failed. Please check your connection and try again.";
+  }
+  return "Evidence could not be saved. Please try again.";
+}
+
 function errorMetadata(error: unknown) {
   const record = (typeof error === "object" && error !== null ? error : {}) as Record<string, unknown>;
   return {
@@ -58,7 +75,7 @@ function logEvidenceAttempt(
   if (__DEV__) console.info("[evidence] operation attempt", {
     operation,
     target,
-    ...context,
+    ...safeEvidenceContext(context),
     payload,
   });
 }
@@ -77,18 +94,12 @@ function evidenceOperationError(
   const diagnostic = {
     operation,
     target,
-    ...context,
+    ...safeEvidenceContext(context),
     payload,
     error: metadata,
   };
-  if (__DEV__) console.error("[evidence] operation failed", diagnostic);
-  const extras = [
-    metadata.code ? `code=${metadata.code}` : null,
-    metadata.status ? `status=${metadata.status}` : null,
-    metadata.details ? `details=${metadata.details}` : null,
-    metadata.hint ? `hint=${metadata.hint}` : null,
-  ].filter(Boolean).join("; ");
-  return new Error(`${operation} failed: ${metadata.message}${extras ? ` (${extras})` : ""}`);
+  if (__DEV__) console.warn("[evidence] operation failed", diagnostic);
+  return new Error(friendlyEvidenceError(operation));
 }
 
 function createEvidenceId(): string {
@@ -190,13 +201,13 @@ export async function addItemEvidence(input: AddEvidenceInput): Promise<ClaimEvi
     include_in_pack: true,
   };
   const evidenceDiagnostic = {
-    id: payload.id,
-    file_id: payload.file_id,
-    user_id: payload.user_id,
+    idPresent: Boolean(payload.id),
+    fileIdPresent: Boolean(payload.file_id),
+    userIdPresent: Boolean(payload.user_id),
     created_by_email_present: Boolean(payload.created_by_email),
     evidence_type: payload.evidence_type,
     filename: "[redacted]",
-    file_url: payload.file_url,
+    fileUrlPresent: Boolean(payload.file_url),
     upload_date: payload.upload_date,
     document_date: payload.document_date,
     caption_present: Boolean(payload.caption),
@@ -223,7 +234,8 @@ export async function addItemEvidence(input: AddEvidenceInput): Promise<ClaimEvi
   }
 
   const linkPayload = { evidence_id: evidenceId, item_id: input.itemId };
-  logEvidenceAttempt("claim_evidence_items insert", "public.claim_evidence_items", context, linkPayload);
+  const linkDiagnostic = { evidenceIdPresent: Boolean(evidenceId), itemIdPresent: Boolean(input.itemId) };
+  logEvidenceAttempt("claim_evidence_items insert", "public.claim_evidence_items", context, linkDiagnostic);
   const { error: linkError } = await supabase
     .from("claim_evidence_items")
     .insert(linkPayload);
@@ -235,7 +247,7 @@ export async function addItemEvidence(input: AddEvidenceInput): Promise<ClaimEvi
       "claim_evidence_items insert",
       "public.claim_evidence_items",
       context,
-      linkPayload,
+      linkDiagnostic,
       linkError,
     );
   }

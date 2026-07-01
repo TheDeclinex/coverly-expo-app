@@ -168,7 +168,7 @@ export async function submitFeedbackReport(input: FeedbackSubmitInput): Promise<
     logFeedbackStep("screenshot upload starting", {
       feedbackId,
       bucket: FEEDBACK_SCREENSHOTS_BUCKET,
-      uploadPath,
+      hasUploadPath: Boolean(uploadPath),
       contentType,
       fileSize: input.screenshot.fileSize ?? null,
     });
@@ -179,7 +179,7 @@ export async function submitFeedbackReport(input: FeedbackSubmitInput): Promise<
     } catch (readError) {
       logFeedbackWarning("screenshot file read failed", {
         feedbackId,
-        uploadPath,
+        hasUploadPath: Boolean(uploadPath),
         contentType,
       }, readError);
       throw readError;
@@ -195,7 +195,7 @@ export async function submitFeedbackReport(input: FeedbackSubmitInput): Promise<
       logFeedbackWarning("screenshot upload failed", {
         feedbackId,
         bucket: FEEDBACK_SCREENSHOTS_BUCKET,
-        uploadPath,
+        hasUploadPath: Boolean(uploadPath),
         contentType,
       }, uploadError);
       throw uploadError;
@@ -210,7 +210,7 @@ export async function submitFeedbackReport(input: FeedbackSubmitInput): Promise<
       logFeedbackWarning("screenshot_url update failed", {
         feedbackId,
         table: "feedback_reports",
-        uploadPath,
+        hasUploadPath: Boolean(uploadPath),
         userIdPresent: Boolean(input.userId),
       }, updateError);
       throw updateError;
@@ -219,7 +219,7 @@ export async function submitFeedbackReport(input: FeedbackSubmitInput): Promise<
     logFeedbackStep("screenshot attached", {
       feedbackId,
       bucket: FEEDBACK_SCREENSHOTS_BUCKET,
-      uploadPath,
+      hasUploadPath: Boolean(uploadPath),
     });
 
     return { id: feedbackId, screenshotAttached: true };
@@ -227,7 +227,7 @@ export async function submitFeedbackReport(input: FeedbackSubmitInput): Promise<
     logFeedbackWarning("feedback submitted without screenshot fallback", {
       feedbackId,
       bucket: FEEDBACK_SCREENSHOTS_BUCKET,
-      uploadPath,
+      hasUploadPath: Boolean(uploadPath),
     }, error);
     return {
       id: feedbackId,

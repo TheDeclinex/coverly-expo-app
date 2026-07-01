@@ -349,9 +349,17 @@ function createUploadFailure(
     fileSize: file?.fileSize,
     source: context.source,
   };
-  if (__DEV__) console.error("[storageUpload] failed", {
-    ...failure,
-    uploadPath: failure.uploadPath === "not generated" ? failure.uploadPath : "[redacted]",
+  if (__DEV__) console.warn("[storageUpload] failed", {
+    error: failure.error,
+    statusCode: failure.statusCode,
+    details: failure.details,
+    bucket: failure.bucket,
+    hasUploadPath: failure.uploadPath !== "not generated",
+    authenticatedUserIdPresent: failure.authenticatedUserIdPresent,
+    fileIdPresent: Boolean(failure.fileId),
+    contentType: failure.contentType,
+    fileSize: failure.fileSize,
+    source: failure.source,
   });
   return failure;
 }
@@ -364,9 +372,6 @@ export function formatUploadFailure(failure: UploadFailure): string {
     return "We couldn't upload the photo. Check your connection and try again.";
   }
 
-  const user = failure.authenticatedUserIdPresent
-    ? `present (${failure.userId ?? "unknown"})`
-    : "missing";
   const size = failure.fileSize != null
     ? `${Math.max(1, Math.round(failure.fileSize / 1024))} KB`
     : "unknown";
@@ -374,9 +379,9 @@ export function formatUploadFailure(failure: UploadFailure): string {
   return [
     `${failure.source}: ${failure.error}`,
     `Bucket: ${failure.bucket}`,
-    `Path: ${failure.uploadPath}`,
-    `Authenticated user: ${user}`,
-    `Property/file: ${failure.fileId ?? "not provided"}`,
+    `Path generated: ${failure.uploadPath !== "not generated" ? "yes" : "no"}`,
+    `Authenticated user: ${failure.authenticatedUserIdPresent ? "present" : "missing"}`,
+    `Property/file id: ${failure.fileId ? "present" : "not provided"}`,
     `Content: ${failure.contentType ?? "unknown"}, ${size}`,
     `Status/code: ${failure.statusCode ?? "not provided"}`,
     failure.details ? `Details: ${failure.details}` : null,

@@ -71,14 +71,14 @@ export function useSignedUrls(
     gcTime: GC_TIME_MS,
   });
 
-  // Log resolution results when the query settles.
+  // Dev-only diagnostics. Do not log paths or signed URLs.
   useEffect(() => {
     if (!data || data.size === 0) return;
     const requested = stableKey.split("\n").filter(Boolean);
-    const sample = requested[0] ? `| sample: ${requested[0].slice(0, 50)}` : "";
-    console.log(
-      `[useSignedUrls] resolved ${data.size}/${requested.length} paths ${sample}`,
-    );
+    if (__DEV__) console.info("[useSignedUrls] resolved image URLs", {
+      resolvedCount: data.size,
+      requestedCount: requested.length,
+    });
   }, [data, stableKey]);
 
   return data ?? new Map<string, string>();

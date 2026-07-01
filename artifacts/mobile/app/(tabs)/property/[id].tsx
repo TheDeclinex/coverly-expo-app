@@ -2141,7 +2141,7 @@ export default function PropertyDetailScreen() {
       );
       if (!uploaded.ok) {
         const diagnostic = formatUploadFailure(uploaded);
-        if (__DEV__) console.error("[propertyCover] Upload diagnostic\n" + diagnostic);
+        if (__DEV__) console.warn("[propertyCover] Upload diagnostic\n" + diagnostic);
         setLocalCoverUrl(null);
         Alert.alert("Property cover upload failed", diagnostic);
         return;

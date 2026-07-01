@@ -972,7 +972,7 @@ export default function ScanScreen() {
     });
     if (!uploaded.ok) {
       const diagnostic = formatUploadFailure(uploaded);
-      if (__DEV__) console.error("[Scan] Photo upload diagnostic\n" + diagnostic);
+      if (__DEV__) console.warn("[Scan] Photo upload diagnostic\n" + diagnostic);
       setScanSaveError(diagnostic);
       setSavingIds((prev) => { const n = new Set(prev); n.delete(index); return n; });
       return;
@@ -1079,7 +1079,7 @@ export default function ScanScreen() {
         } else {
           failedPhotoIndices.add(photoIdx);
           uploadFailureByPhotoIndex.set(photoIdx, uploaded);
-          if (__DEV__) console.error("[Scan] Photo upload diagnostic\n" + formatUploadFailure(uploaded));
+          if (__DEV__) console.warn("[Scan] Photo upload diagnostic\n" + formatUploadFailure(uploaded));
           scanLog("photo handling failed", {
             stage: "photo-handling",
             itemIndex: i,

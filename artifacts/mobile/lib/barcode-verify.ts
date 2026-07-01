@@ -65,7 +65,8 @@ export async function verifyBarcode(
   const session = sessionData.session;
   const diagnostic = {
     operation: "barcode_verify",
-    barcode: request.barcode,
+    barcodePresent: Boolean(request.barcode),
+    barcodeLength: request.barcode.length,
     functionName: BARCODE_FUNCTION_NAME,
     functionUrl: supabaseUrl
       ? `${supabaseUrl.replace(/\/$/, "")}/functions/v1/${BARCODE_FUNCTION_NAME}`
@@ -79,7 +80,7 @@ export async function verifyBarcode(
   if (__DEV__) console.info("[barcodeVerify] request", diagnostic);
 
   if (!session) {
-    if (__DEV__) console.error("[barcodeVerify] request blocked: no authenticated session", diagnostic);
+    if (__DEV__) console.warn("[barcodeVerify] request blocked: no authenticated session", diagnostic);
     throw new Error("No authenticated session is available for barcode verification.");
   }
 
@@ -93,7 +94,7 @@ export async function verifyBarcode(
 
   if (error) {
     const errorWithContext = error as typeof error & { context?: unknown };
-    if (__DEV__) console.error("[barcodeVerify] request failed", {
+    if (__DEV__) console.warn("[barcodeVerify] request failed", {
       ...diagnostic,
       errorName: error.name,
       errorMessage: error.message,
@@ -102,7 +103,7 @@ export async function verifyBarcode(
     throw new Error(error.message || "Barcode lookup failed.");
   }
   if (!data) {
-    if (__DEV__) console.error("[barcodeVerify] empty response", diagnostic);
+    if (__DEV__) console.warn("[barcodeVerify] empty response", diagnostic);
     throw new Error("Barcode lookup returned no response.");
   }
   if (__DEV__) console.info("[barcodeVerify] response", {

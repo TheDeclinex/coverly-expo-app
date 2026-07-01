@@ -41,6 +41,14 @@ export default function AppLayout() {
         <Stack.Screen name="profile-settings" options={{ title: "Profile & Preferences" }} />
         <Stack.Screen name="feedback" options={{ title: "Feedback & Support" }} />
         <Stack.Screen name="admin" options={{ title: "Admin" }} />
+        <Stack.Screen name="admin-users" options={{ title: "User lookup" }} />
+        <Stack.Screen name="admin-user/[id]" options={{ title: "User detail" }} />
+        <Stack.Screen name="admin-user-files/[id]" options={{ title: "User properties" }} />
+        <Stack.Screen name="admin-access" options={{ title: "Access grants" }} />
+        <Stack.Screen name="admin-entitlements" options={{ title: "Entitlement debug" }} />
+        <Stack.Screen name="admin-claim-packs" options={{ title: "Claim packs" }} />
+        <Stack.Screen name="admin-claim-pack/[id]" options={{ title: "Claim pack detail" }} />
+        <Stack.Screen name="admin-errors" options={{ title: "Recent errors" }} />
         <Stack.Screen name="admin-support" options={{ title: "Support inbox" }} />
       </Stack>
     </>

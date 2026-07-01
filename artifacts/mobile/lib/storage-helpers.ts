@@ -27,6 +27,18 @@ function wait(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function storageLogContext(bucket: string, pathOrUrl: string) {
+  return {
+    bucket,
+    hasValue: true,
+    valueKind: isStoragePath(pathOrUrl)
+      ? "storage_path"
+      : pathOrUrl.startsWith("http")
+        ? "remote_url"
+        : "local_uri",
+  };
+}
+
 /**
  * Returns true if `value` is a Supabase Storage object path (bare relative path).
  *
@@ -83,15 +95,15 @@ export async function getSignedDisplayUrl(
   // Legacy full URL or local device URI — pass through.
   if (!isStoragePath(pathOrUrl)) {
     if (pathOrUrl.startsWith("http")) {
-      if (__DEV__) console.log("[storage] legacy URL (pass-through):", pathOrUrl.slice(0, 70));
+      if (__DEV__) console.info("[storage] legacy URL pass-through", storageLogContext(bucket, pathOrUrl));
     } else {
-      if (__DEV__) console.log("[storage] local device URI (pass-through):", pathOrUrl.slice(0, 50));
+      if (__DEV__) console.info("[storage] local device URI pass-through", storageLogContext(bucket, pathOrUrl));
     }
     return pathOrUrl;
   }
 
   // Storage path — generate signed URL.
-  if (__DEV__) console.log("[storage] creating signed URL for path:", pathOrUrl.slice(0, 70));
+  if (__DEV__) console.info("[storage] creating signed URL", storageLogContext(bucket, pathOrUrl));
   let signedUrl: string | null = null;
   let lastErrorMessage: string | undefined;
 
@@ -108,36 +120,44 @@ export async function getSignedDisplayUrl(
     lastErrorMessage = error?.message;
     const retryDelayMs = SIGNED_URL_CREATE_RETRY_DELAYS_MS[attempt];
     if (retryDelayMs == null) break;
-    if (__DEV__) console.warn(
-      "[storage] createSignedUrl retrying | path:",
-      pathOrUrl.slice(0, 70),
-      "| error:",
-      lastErrorMessage,
-    );
+    if (__DEV__) console.warn("[storage] createSignedUrl retrying", {
+      ...storageLogContext(bucket, pathOrUrl),
+      error: lastErrorMessage,
+    });
     await wait(retryDelayMs);
   }
 
   if (!signedUrl) {
-    if (__DEV__) console.warn("[storage] createSignedUrl FAILED | path:", pathOrUrl, "| error:", lastErrorMessage);
+    if (__DEV__) console.warn("[storage] createSignedUrl failed", {
+      ...storageLogContext(bucket, pathOrUrl),
+      error: lastErrorMessage,
+    });
     return null;
   }
 
-  if (__DEV__) console.log("[storage] signed URL OK | path:", pathOrUrl.slice(0, 60));
+  if (__DEV__) console.info("[storage] signed URL created", storageLogContext(bucket, pathOrUrl));
 
   // DEV-only: HEAD-fetch the signed URL to verify the object actually exists in storage.
   if (__DEV__) {
     fetch(signedUrl, { method: "HEAD" })
       .then((r) => {
         if (r.ok) {
-          if (__DEV__) console.log(`[storage] HEAD verify ✓ ${r.status} | path: ${pathOrUrl.slice(0, 50)}`);
+          if (__DEV__) console.info("[storage] HEAD verify ok", {
+            ...storageLogContext(bucket, pathOrUrl),
+            status: r.status,
+          });
         } else {
-          if (__DEV__) console.warn(
-            `[storage] HEAD verify ✗ ${r.status} — object may not exist | path: ${pathOrUrl.slice(0, 50)}`,
-          );
+          if (__DEV__) console.warn("[storage] HEAD verify failed", {
+            ...storageLogContext(bucket, pathOrUrl),
+            status: r.status,
+          });
         }
       })
       .catch((e: unknown) => {
-        console.warn("[storage] HEAD check error:", e instanceof Error ? e.message : String(e));
+        if (__DEV__) console.warn("[storage] HEAD check error", {
+          ...storageLogContext(bucket, pathOrUrl),
+          error: e instanceof Error ? e.message : String(e),
+        });
       });
   }
 
