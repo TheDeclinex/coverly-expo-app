@@ -36,6 +36,7 @@ import { ContextBackButton } from "@/components/ContextBackButton";
 import { ErrorState } from "@/components/ErrorState";
 import { ExpandableImage } from "@/components/ExpandableImage";
 import { LoadingState } from "@/components/LoadingState";
+import { QuantityStepper } from "@/components/QuantityStepper";
 import { ReliableImage } from "@/components/ReliableImage";
 import { useToast } from "@/components/Toast";
 import { getCategoryColor } from "@/constants/categoryColors";
@@ -287,6 +288,7 @@ function ItemCard({
       onToggleSelected?.();
       return;
     }
+    Keyboard.dismiss();
     setNameDraft(item.name);
     setQuantityDraft(String(quantity));
     setUnitPriceDraft(String(unitPrice));
@@ -299,6 +301,7 @@ function ItemCard({
       onToggleSelected?.();
       return;
     }
+    Keyboard.dismiss();
     setNameDraft(item.name);
     setQuantityDraft(String(quantity));
     setUnitPriceDraft(String(unitPrice));
@@ -306,12 +309,17 @@ function ItemCard({
     void Haptics.selectionAsync().catch(() => undefined);
   };
 
+  const closeEdit = () => {
+    const target = editingTarget;
+    if (target) onCloseEdit(target);
+  };
+
   const cancelEdit = () => {
-    Keyboard.dismiss();
     setNameDraft(item.name);
     setQuantityDraft(String(quantity));
     setUnitPriceDraft(String(unitPrice));
-    if (editingTarget) onCloseEdit(editingTarget);
+    closeEdit();
+    Keyboard.dismiss();
     void Haptics.selectionAsync().catch(() => undefined);
   };
 
@@ -343,12 +351,15 @@ function ItemCard({
         : {}),
     };
 
-    Keyboard.dismiss();
     if (!nameChanged && !quantityChanged && !priceChanged) {
-      if (editingTarget) onCloseEdit(editingTarget);
+      closeEdit();
+      Keyboard.dismiss();
       return;
     }
-    if (await persistCardUpdate(updates) && editingTarget) onCloseEdit(editingTarget);
+    if (await persistCardUpdate(updates)) {
+      closeEdit();
+      Keyboard.dismiss();
+    }
   };
 
   const saveValuationEdit = saveItemEdit;
@@ -781,134 +792,113 @@ function ItemCard({
         animationType="fade"
         onRequestClose={cancelEdit}
       >
-        <KeyboardAvoidingView
-          style={styles.nameModalKeyboard}
-          behavior={Platform.OS === "ios" ? "padding" : undefined}
-        >
-          <Pressable style={styles.nameModalBackdrop} onPress={cancelEdit}>
-            <Pressable
-              accessibilityRole="none"
-              onPress={(event) => event.stopPropagation()}
-              style={[
-                styles.nameModalCard,
-                {
-                  backgroundColor: colors.card,
-                  borderColor: colors.border,
-                  borderRadius: colors.radius + 4,
-                },
-              ]}
-            >
-              <Text style={[styles.nameModalTitle, { color: colors.foreground }]}>Edit item</Text>
-              <View style={styles.editFieldGroup}>
-                <Text style={[styles.editFieldLabel, { color: colors.mutedForeground }]}>Name</Text>
-                <TextInput
-                  autoFocus={editingTarget === "name"}
-                  accessibilityLabel="Item name"
-                  value={nameDraft}
-                  onChangeText={setNameDraft}
-                  editable={!savingCard}
-                  disableFullscreenUI
-                  returnKeyType="next"
+        <Pressable style={styles.nameModalBackdrop} onPress={cancelEdit}>
+          <View
+            onStartShouldSetResponder={() => true}
+            style={[
+              styles.nameModalCard,
+              {
+                backgroundColor: colors.card,
+                borderColor: colors.border,
+                borderRadius: colors.radius + 4,
+              },
+            ]}
+          >
+            <Text style={[styles.nameModalTitle, { color: colors.foreground }]}>Edit item</Text>
+            <View style={styles.editFieldGroup}>
+              <Text style={[styles.editFieldLabel, { color: colors.mutedForeground }]}>Name</Text>
+              <TextInput
+                accessibilityLabel="Item name"
+                value={nameDraft}
+                onChangeText={setNameDraft}
+                editable={!savingCard}
+                disableFullscreenUI
+                returnKeyType="next"
+                style={[
+                  styles.editModalInput,
+                  {
+                    color: colors.foreground,
+                    backgroundColor: colors.background,
+                    borderColor: colors.border,
+                  },
+                ]}
+              />
+            </View>
+            <View style={styles.editModalRow}>
+              <View style={[styles.editFieldGroup, styles.editQuantityField]}>
+                <Text style={[styles.editFieldLabel, { color: colors.mutedForeground }]}>Quantity</Text>
+                <QuantityStepper
+                  value={quantityDraft}
+                  onChange={setQuantityDraft}
+                  disabled={savingCard}
+                />
+              </View>
+              <View style={[styles.editFieldGroup, styles.editPriceField]}>
+                <Text style={[styles.editFieldLabel, { color: colors.mutedForeground }]}>Replacement price</Text>
+                <View
                   style={[
-                    styles.editModalInput,
+                    styles.editPriceInputWrap,
                     {
-                      color: colors.foreground,
                       backgroundColor: colors.background,
                       borderColor: colors.border,
                     },
                   ]}
-                />
-              </View>
-              <View style={styles.editModalRow}>
-                <View style={[styles.editFieldGroup, styles.editQuantityField]}>
-                  <Text style={[styles.editFieldLabel, { color: colors.mutedForeground }]}>Quantity</Text>
+                >
+                  <Text style={[styles.editCurrencyPrefix, { color: colors.mutedForeground }]}>$</Text>
                   <TextInput
-                    accessibilityLabel="Quantity"
-                    value={quantityDraft}
-                    onChangeText={setQuantityDraft}
+                    accessibilityLabel="Replacement price"
+                    value={unitPriceDraft}
+                    onChangeText={setUnitPriceDraft}
                     editable={!savingCard}
-                    keyboardType="numeric"
-                    inputMode="numeric"
+                    keyboardType="decimal-pad"
+                    inputMode="decimal"
                     disableFullscreenUI
                     selectTextOnFocus
-                    style={[
-                      styles.editModalInput,
-                      {
-                        color: colors.foreground,
-                        backgroundColor: colors.background,
-                        borderColor: colors.border,
-                      },
-                    ]}
+                    onSubmitEditing={() => void saveItemEdit()}
+                    style={[styles.editPriceInput, { color: colors.foreground }]}
                   />
                 </View>
-                <View style={[styles.editFieldGroup, styles.editPriceField]}>
-                  <Text style={[styles.editFieldLabel, { color: colors.mutedForeground }]}>Replacement price</Text>
-                  <View
-                    style={[
-                      styles.editPriceInputWrap,
-                      {
-                        backgroundColor: colors.background,
-                        borderColor: colors.border,
-                      },
-                    ]}
-                  >
-                    <Text style={[styles.editCurrencyPrefix, { color: colors.mutedForeground }]}>$</Text>
-                    <TextInput
-                      autoFocus={editingTarget === "valuation"}
-                      accessibilityLabel="Replacement price"
-                      value={unitPriceDraft}
-                      onChangeText={setUnitPriceDraft}
-                      editable={!savingCard}
-                      keyboardType="decimal-pad"
-                      inputMode="decimal"
-                      disableFullscreenUI
-                      selectTextOnFocus
-                      onSubmitEditing={() => void saveItemEdit()}
-                      style={[styles.editPriceInput, { color: colors.foreground }]}
-                    />
-                  </View>
-                </View>
               </View>
-              {draftQuantity > 1 ? (
-                <Text style={[styles.editTotalPreview, { color: colors.mutedForeground }]}>
-                  Total {formatCurrencyFull(draftTotal)}
-                </Text>
-              ) : null}
-              <View style={styles.nameModalActions}>
-                <Pressable
-                  accessibilityRole="button"
-                  onPress={cancelEdit}
-                  disabled={savingCard}
-                  style={({ pressed }) => [
-                    styles.nameModalButton,
-                    { borderColor: colors.border, opacity: pressed ? 0.7 : 1 },
-                  ]}
-                >
-                  <Text style={[styles.nameModalButtonText, { color: colors.foreground }]}>Cancel</Text>
-                </Pressable>
-                <Pressable
-                  accessibilityRole="button"
-                  onPress={() => void saveItemEdit()}
-                  disabled={savingCard}
-                  style={({ pressed }) => [
-                    styles.nameModalButton,
-                    {
-                      backgroundColor: colors.primary,
-                      borderColor: colors.primary,
-                      opacity: savingCard || pressed ? 0.72 : 1,
-                    },
-                  ]}
-                >
-                  {savingCard ? (
-                    <ActivityIndicator size="small" color={colors.primaryForeground} />
-                  ) : (
-                    <Text style={[styles.nameModalButtonText, { color: colors.primaryForeground }]}>Save</Text>
-                  )}
-                </Pressable>
-              </View>
-            </Pressable>
-          </Pressable>
-        </KeyboardAvoidingView>
+            </View>
+            {draftQuantity > 1 ? (
+              <Text style={[styles.editTotalPreview, { color: colors.mutedForeground }]}>
+                Total {formatCurrencyFull(draftTotal)}
+              </Text>
+            ) : null}
+            <View style={styles.nameModalActions}>
+              <Pressable
+                accessibilityRole="button"
+                onPress={cancelEdit}
+                disabled={savingCard}
+                style={({ pressed }) => [
+                  styles.nameModalButton,
+                  { borderColor: colors.border, opacity: pressed ? 0.7 : 1 },
+                ]}
+              >
+                <Text style={[styles.nameModalButtonText, { color: colors.foreground }]}>Cancel</Text>
+              </Pressable>
+              <Pressable
+                accessibilityRole="button"
+                onPress={() => void saveItemEdit()}
+                disabled={savingCard}
+                style={({ pressed }) => [
+                  styles.nameModalButton,
+                  {
+                    backgroundColor: colors.primary,
+                    borderColor: colors.primary,
+                    opacity: savingCard || pressed ? 0.72 : 1,
+                  },
+                ]}
+              >
+                {savingCard ? (
+                  <ActivityIndicator size="small" color={colors.primaryForeground} />
+                ) : (
+                  <Text style={[styles.nameModalButtonText, { color: colors.primaryForeground }]}>Save</Text>
+                )}
+              </Pressable>
+            </View>
+          </View>
+        </Pressable>
       </Modal>
       <BarcodeScanFlow
         visible={barcodeScanOpen}
@@ -2757,11 +2747,12 @@ const styles = StyleSheet.create({
     height: 6,
     borderRadius: 3,
   },
-  nameModalKeyboard: { flex: 1 },
   nameModalBackdrop: {
     flex: 1,
     paddingHorizontal: 20,
-    justifyContent: "center",
+    paddingTop: Platform.OS === "ios" ? 128 : 104,
+    paddingBottom: 320,
+    justifyContent: "flex-start",
     backgroundColor: "rgba(15, 23, 42, 0.46)",
   },
   nameModalCard: {
