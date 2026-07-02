@@ -67,6 +67,16 @@ export default function AccountScreen() {
   };
 
   const confirmSignOut = () => {
+    if (Platform.OS === "web") {
+      const confirmed =
+        typeof window === "undefined"
+          ? true
+          : window.confirm("Sign out? You can sign back in at any time.");
+      if (!confirmed) return;
+      void signOut();
+      return;
+    }
+
     Alert.alert("Sign out?", "You can sign back in at any time.", [
       { text: "Cancel", style: "cancel" },
       {
@@ -131,6 +141,16 @@ export default function AccountScreen() {
         </View>
 
         <ClaimPacksSection onOpen={() => router.push("/(tabs)/claim-packs" as Href)} />
+
+        <AccountSection title="Help">
+          <AccountRow
+            icon="book-open"
+            title="User guide"
+            subtitle="How to use Coverly"
+            onPress={() => router.push("/user-guide" as Href)}
+            last
+          />
+        </AccountSection>
 
         <AccountSection title="Support">
           <AccountRow

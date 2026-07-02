@@ -38,6 +38,7 @@ export default function AppLayout() {
         }}
       >
         <Stack.Screen name="account" options={{ title: "Account" }} />
+        <Stack.Screen name="user-guide" options={{ title: "User guide" }} />
         <Stack.Screen name="profile-settings" options={{ title: "Profile & Preferences" }} />
         <Stack.Screen name="feedback" options={{ title: "Feedback & Support" }} />
         <Stack.Screen name="admin" options={{ title: "Admin" }} />

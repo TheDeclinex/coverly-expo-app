@@ -26,8 +26,9 @@
     "android": {
       "package": "nz.coverly.app",
       "versionCode": 1,
+      "icon": "./assets/brand/coverly-android-icon-safe.png",
       "adaptiveIcon": {
-        "foregroundImage": "./assets/brand/coverly-android-adaptive-foreground.png",
+        "foregroundImage": "./assets/brand/coverly-android-adaptive-foreground-safe.png",
         "backgroundColor": "#F6FBFA"
       },
       "permissions": [
