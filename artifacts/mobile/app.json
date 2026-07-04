@@ -20,7 +20,8 @@
       "bundleIdentifier": "nz.coverly.app",
       "buildNumber": "1",
       "infoPlist": {
-        "ITSAppUsesNonExemptEncryption": false
+        "ITSAppUsesNonExemptEncryption": false,
+        "NSMicrophoneUsageDescription": "Allow Coverly to use your microphone to add item details by voice."
       }
     },
     "android": {

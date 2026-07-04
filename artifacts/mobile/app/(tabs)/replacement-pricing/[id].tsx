@@ -250,13 +250,18 @@ export default function ReplacementPricingScreen() {
   const insets = useSafeAreaInsets();
   const queryClient = useQueryClient();
   const { showToast } = useToast();
-  const voice = useVoiceRecording(20);
+  const voice = useVoiceRecording(20, "replacement_price_voice_search");
   const {
+    permission: voicePermission,
+    requestPermission: requestVoicePermission,
+    isRequestingPermission: voiceIsRequestingPermission,
+    isStartingRecording: voiceIsStartingRecording,
     isRecording: voiceIsRecording,
     maxDurationReached: voiceMaxDurationReached,
     startRecording: startVoiceRecording,
     stopRecording: stopVoiceRecording,
     reset: resetVoiceRecording,
+    logDiagnostic: logVoiceDiagnostic,
   } = voice;
 
   const [searchQuery, setSearchQuery] = useState("");
@@ -266,6 +271,7 @@ export default function ReplacementPricingScreen() {
   const [searchError, setSearchError] = useState<string | null>(null);
   const [voiceProcessing, setVoiceProcessing] = useState(false);
   const [voiceError, setVoiceError] = useState<string | null>(null);
+  const [voiceNotice, setVoiceNotice] = useState<string | null>(null);
   const [limitModal, setLimitModal] = useState<NormalizedLimitError | null>(null);
   const [selectingPosition, setSelectingPosition] = useState<number | null>(null);
   const autoSearchedItemId = React.useRef<string | null>(null);
@@ -343,6 +349,7 @@ export default function ReplacementPricingScreen() {
 
   const stopAndTranscribeSearch = React.useCallback(async () => {
     setVoiceError(null);
+    setVoiceNotice(null);
     const recording = await stopVoiceRecording();
     if (!recording) {
       setVoiceError("Could not transcribe. Try again or type your search.");
@@ -374,17 +381,39 @@ export default function ReplacementPricingScreen() {
   }, [item?.category, item?.name, resetVoiceRecording, searchQuery, stopVoiceRecording]);
 
   const handleVoiceSearchDescription = React.useCallback(async () => {
-    if (searching || voiceProcessing) return;
+    if (searching || voiceProcessing || voiceIsRequestingPermission || voiceIsStartingRecording) return;
     setVoiceError(null);
+    setVoiceNotice(null);
     if (voiceIsRecording) {
       await stopAndTranscribeSearch();
+      return;
+    }
+    if (voicePermission !== "granted") {
+      logVoiceDiagnostic("voice_permission_button_pressed");
+      const granted = await requestVoicePermission();
+      if (granted) {
+        setVoiceNotice("Microphone enabled. Tap the mic again to speak your search.");
+      } else {
+        setVoiceError("Allow microphone access in your device settings to use voice search.");
+      }
       return;
     }
     const started = await startVoiceRecording();
     if (!started) {
       setVoiceError("Could not transcribe. Try again or type your search.");
     }
-  }, [searching, startVoiceRecording, stopAndTranscribeSearch, voiceIsRecording, voiceProcessing]);
+  }, [
+    logVoiceDiagnostic,
+    requestVoicePermission,
+    searching,
+    startVoiceRecording,
+    stopAndTranscribeSearch,
+    voiceIsRecording,
+    voiceIsRequestingPermission,
+    voiceIsStartingRecording,
+    voicePermission,
+    voiceProcessing,
+  ]);
 
   React.useEffect(() => {
     if (voiceMaxDurationReached) void stopAndTranscribeSearch();
@@ -618,6 +647,7 @@ export default function ReplacementPricingScreen() {
                 onChangeText={(value) => {
                   setSearchQuery(value);
                   setVoiceError(null);
+                  setVoiceNotice(null);
                 }}
                 placeholder="Brand, model, item"
                 placeholderTextColor={colors.mutedForeground}
@@ -634,17 +664,17 @@ export default function ReplacementPricingScreen() {
               <Pressable
                 accessibilityRole="button"
                 accessibilityLabel="Speak search description"
-                disabled={searching || voiceProcessing}
+                disabled={searching || voiceProcessing || voiceIsRequestingPermission || voiceIsStartingRecording}
                 onPress={() => void handleVoiceSearchDescription()}
                 style={({ pressed }) => [
                   styles.voiceButton,
                   {
                     backgroundColor: voiceIsRecording ? colors.primary : colors.secondary,
-                    opacity: searching || voiceProcessing ? 0.5 : pressed ? 0.72 : 1,
+                    opacity: searching || voiceProcessing || voiceIsRequestingPermission || voiceIsStartingRecording ? 0.5 : pressed ? 0.72 : 1,
                   },
                 ]}
               >
-                {voiceProcessing ? (
+                {voiceProcessing || voiceIsRequestingPermission || voiceIsStartingRecording ? (
                   <ActivityIndicator size="small" color={colors.primary} />
                 ) : (
                   <Feather name={voiceIsRecording ? "square" : "mic"} size={16} color={voiceIsRecording ? colors.primaryForeground : colors.primary} />
@@ -670,9 +700,9 @@ export default function ReplacementPricingScreen() {
             </Pressable>
           </View>
 
-          {voiceIsRecording || voiceProcessing || voiceError ? (
+          {voiceIsRecording || voiceProcessing || voiceError || voiceNotice ? (
             <Text style={[styles.voiceStatus, { color: voiceError ? colors.destructive : colors.mutedForeground }]}>
-              {voiceError ?? (voiceProcessing ? "Transcribing..." : "Listening... tap the mic to finish.")}
+              {voiceError ?? voiceNotice ?? (voiceProcessing ? "Transcribing..." : "Listening... tap the mic to finish.")}
             </Text>
           ) : null}
 

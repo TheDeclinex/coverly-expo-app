@@ -1,6 +1,9 @@
 import { friendlyNetworkErrorMessage } from "@/lib/network-errors";
-import { supabase } from "@/lib/supabase";
+import { debugSupabaseHost, debugSupabaseProjectRef, supabase } from "@/lib/supabase";
 import type { ClaimPackGenerateDraftPayload } from "@/lib/claim-pack-selection-model";
+
+export const CLAIM_PACK_GENERATE_FUNCTION_NAME = "generate-claim-pack";
+const EXPECTED_SUPABASE_PROJECT_REF = "jqijavrugjidqzbbgpag";
 
 export interface GenerateClaimPackPdfSuccess {
   success: true;
@@ -23,10 +26,28 @@ export interface GenerateClaimPackPdfFailure {
 export type GenerateClaimPackPdfResponse = GenerateClaimPackPdfSuccess | GenerateClaimPackPdfFailure;
 
 interface ClaimPackExportDiagnostics {
+  reason?: "prepare_failed" | "edge_function_error" | "network_error" | "unexpected_response";
   status?: number | null;
   errorCode?: string | null;
   message?: string | null;
   body?: unknown;
+}
+
+export interface ClaimPackPdfDiagnosticsContext {
+  fileId?: string | null;
+  clientDraftId?: string | null;
+  claimPackId?: string | number | null;
+  selectedRoomCount?: number | null;
+  selectedItemCount?: number | null;
+  evidenceCount?: number | null;
+  hasEvidence?: boolean | null;
+  functionName?: string;
+  supabaseProjectRef?: string | null;
+  supabaseProjectRefMatchesExpected?: boolean | null;
+  supabaseHost?: string | null;
+  status?: number | null;
+  errorCode?: string | null;
+  message?: string | null;
 }
 
 export class ClaimPackExportError extends Error {
@@ -65,7 +86,25 @@ function errorStatus(error: unknown): number | null {
   if (!error || typeof error !== "object") return null;
   const record = error as Record<string, unknown>;
   const status = record.status ?? record.statusCode;
-  return typeof status === "number" ? status : null;
+  if (typeof status === "number") return status;
+  const context = record.context;
+  if (context && typeof context === "object") {
+    const contextStatus = (context as Record<string, unknown>).status;
+    if (typeof contextStatus === "number") return contextStatus;
+  }
+  return null;
+}
+
+function isLikelyInvokeNetworkError(error: unknown): boolean {
+  if (friendlyNetworkErrorMessage(error)) return true;
+  const message = error instanceof Error ? error.message : String(error ?? "");
+  return /network|fetch|offline|timed out|timeout|connection/i.test(message);
+}
+
+function safeErrorMessage(error: unknown): string | null {
+  if (error instanceof Error && error.message.trim()) return error.message.trim();
+  if (typeof error === "string" && error.trim()) return error.trim();
+  return null;
 }
 
 async function readFunctionErrorBody(error: unknown): Promise<unknown> {
@@ -79,33 +118,78 @@ async function readFunctionErrorBody(error: unknown): Promise<unknown> {
   }
 }
 
-function logClaimPackExport(stage: string, details: Record<string, unknown>): void {
+function baseClaimPackDiagnostics(payload?: ClaimPackGenerateDraftPayload | null): ClaimPackPdfDiagnosticsContext {
+  return {
+    fileId: payload?.propertyId ?? null,
+    clientDraftId: payload?.clientDraftId ?? null,
+    selectedRoomCount: payload?.selectedRoomIds.length ?? null,
+    selectedItemCount: payload?.selectedItemIds.length ?? null,
+    functionName: CLAIM_PACK_GENERATE_FUNCTION_NAME,
+    supabaseProjectRef: debugSupabaseProjectRef,
+    supabaseProjectRefMatchesExpected: debugSupabaseProjectRef === EXPECTED_SUPABASE_PROJECT_REF,
+    supabaseHost: debugSupabaseHost,
+  };
+}
+
+function logClaimPackExport(stage: string, details: ClaimPackPdfDiagnosticsContext): void {
   if (!isDevelopment()) return;
   if (__DEV__) console.info("[claim-pack-export]", stage, details);
+}
+
+export function logClaimPackPdfDiagnostic(
+  stage:
+    | "claim_pack_pdf_button_pressed"
+    | "claim_pack_generate_prepare_started"
+    | "claim_pack_generate_prepare_failed"
+    | "claim_pack_generate_invoke_started"
+    | "claim_pack_generate_invoke_completed"
+    | "claim_pack_generate_invoke_failed",
+  details: ClaimPackPdfDiagnosticsContext,
+): void {
+  logClaimPackExport(stage, {
+    functionName: CLAIM_PACK_GENERATE_FUNCTION_NAME,
+    supabaseProjectRef: debugSupabaseProjectRef,
+    supabaseProjectRefMatchesExpected: debugSupabaseProjectRef === EXPECTED_SUPABASE_PROJECT_REF,
+    supabaseHost: debugSupabaseHost,
+    ...details,
+  });
 }
 
 export async function generateClaimPackPdf(
   payload: ClaimPackGenerateDraftPayload,
 ): Promise<GenerateClaimPackPdfSuccess> {
-  logClaimPackExport("invoke_request", {
-    propertyIdPresent: Boolean(payload.propertyId),
-    selectedRoomCount: payload.selectedRoomIds.length,
-    selectedItemCount: payload.selectedItemIds.length,
-    scope: payload.scope,
-    clientDraftIdPresent: Boolean(payload.clientDraftId),
-    claimNotePresent: Boolean(payload.claimNote),
-  });
+  const baseDiagnostics = baseClaimPackDiagnostics(payload);
+  if (!payload.propertyId || !payload.clientDraftId || payload.selectedItemIds.length === 0) {
+    const diagnostics = {
+      ...baseDiagnostics,
+      reason: "prepare_failed" as const,
+      errorCode: "INVALID_CLAIM_PACK_PAYLOAD",
+      message: "Claim pack PDF could not be prepared before the request was sent.",
+    };
+    logClaimPackPdfDiagnostic("claim_pack_generate_prepare_failed", diagnostics);
+    throw new ClaimPackExportError(diagnostics.message, diagnostics);
+  }
 
   let invokeResult: { data: GenerateClaimPackPdfResponse | null; error: Error | null };
   try {
     invokeResult = await supabase.functions.invoke<GenerateClaimPackPdfResponse>(
-      "generate-claim-pack",
+      CLAIM_PACK_GENERATE_FUNCTION_NAME,
       { body: payload },
     );
   } catch (error) {
     const friendlyMessage = friendlyNetworkErrorMessage(error);
-    if (friendlyMessage) throw new ClaimPackExportError(friendlyMessage, { errorCode: "NETWORK_UNAVAILABLE" });
-    throw error;
+    if (friendlyMessage || isLikelyInvokeNetworkError(error)) {
+      throw new ClaimPackExportError(friendlyMessage ?? "Network error while contacting claim pack generation.", {
+        reason: "network_error",
+        errorCode: "NETWORK_UNAVAILABLE",
+        message: safeErrorMessage(error),
+      });
+    }
+    throw new ClaimPackExportError("Claim pack PDF generation failed before the request could complete.", {
+      reason: "prepare_failed",
+      errorCode: "INVOKE_THROWN_BEFORE_RESPONSE",
+      message: safeErrorMessage(error),
+    });
   }
 
   const { data, error } = invokeResult;
@@ -113,18 +197,12 @@ export async function generateClaimPackPdf(
   if (error) {
     const body = await readFunctionErrorBody(error);
     const diagnostics = {
+      reason: "edge_function_error" as const,
       status: errorStatus(error),
       errorCode: errorCode(body),
       message: responseMessage(body) ?? error.message ?? null,
       body,
     };
-    logClaimPackExport("invoke_error", {
-      status: diagnostics.status,
-      errorCode: diagnostics.errorCode,
-      message: diagnostics.message,
-      exceptionName: error.name,
-      exceptionMessage: error.message,
-    });
     throw new ClaimPackExportError(
       diagnostics.message || "We couldn't generate your claim pack PDF. Please try again.",
       diagnostics,
@@ -133,29 +211,16 @@ export async function generateClaimPackPdf(
 
   if (!isSuccessResponse(data)) {
     const diagnostics = {
+      reason: "unexpected_response" as const,
       status: null,
       errorCode: errorCode(data),
       message: responseMessage(data),
       body: data,
     };
-    logClaimPackExport("unexpected_response", {
-      errorCode: diagnostics.errorCode,
-      message: diagnostics.message,
-      success: data?.success ?? null,
-    });
     throw new ClaimPackExportError(
       diagnostics.message ?? "We couldn't generate your claim pack PDF. Please try again.",
       diagnostics,
     );
   }
-
-  logClaimPackExport("invoke_success", {
-    claimPackIdPresent: data.claimPackId !== undefined && data.claimPackId !== null,
-    signedUrlPresent: Boolean(data.signedUrl),
-    filenamePresent: Boolean(data.filename),
-    rendererVersion: data.rendererVersion ?? null,
-    emailSent: data.emailSent ?? null,
-  });
-
   return data;
 }

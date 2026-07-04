@@ -109,6 +109,18 @@ function scanLog(message: string, details?: Record<string, unknown>) {
   }
 }
 
+function imageDiagnostic(image: ScanEncodedImage, index: number): Record<string, unknown> {
+  return {
+    imageIndex: index,
+    width: image.width ?? null,
+    height: image.height ?? null,
+    fileSize: image.fileSize ?? null,
+    hasStoragePath: Boolean(image.storagePath),
+    hasBase64Fallback: Boolean(image.base64),
+    compatibilityPrepared: Boolean(image.compatibilityPrepared),
+  };
+}
+
 function scanNetworkFailureMessage(error: unknown): string | null {
   const message = error instanceof Error ? error.message : String(error);
   const normalized = message.toLowerCase();
@@ -192,6 +204,7 @@ async function buildStorageFirstImagePayload(
 
   scanLog("scan pre-upload batch started", {
     imageCount: images.length,
+    images: images.map(imageDiagnostic),
   });
 
   for (let index = 0; index < images.length; index += 1) {
@@ -202,6 +215,10 @@ async function buildStorageFirstImagePayload(
     if (image.storagePath) {
       scanLog("per-photo upload skipped; existing storage ref present", {
         imageIndex: index,
+        width: image.width ?? null,
+        height: image.height ?? null,
+        fileSize: image.fileSize ?? null,
+        compatibilityPrepared: Boolean(image.compatibilityPrepared),
       });
       uploadedImages.push({
         id,
@@ -217,6 +234,10 @@ async function buildStorageFirstImagePayload(
         imageIndex: index,
         imageCount: images.length,
         maxAttempts: 3,
+        width: image.width ?? null,
+        height: image.height ?? null,
+        fileSize: image.fileSize ?? null,
+        compatibilityPrepared: Boolean(image.compatibilityPrepared),
       });
       const uploaded = await uploadScanPhoto(image.uri, userId, `${index}:${image.uri}`, {
         fileId,
@@ -245,6 +266,10 @@ async function buildStorageFirstImagePayload(
       scanLog("per-photo upload completed", {
         imageIndex: index,
         imageCount: images.length,
+        width: image.width ?? null,
+        height: image.height ?? null,
+        fileSize: image.fileSize ?? null,
+        compatibilityPrepared: Boolean(image.compatibilityPrepared),
       });
       uploadedImages.push({
         id,
@@ -315,6 +340,7 @@ export async function runAiScan(input: ScanInput): Promise<ScanResult> {
     scanLog("payload construction started", {
       mode: input.mode,
       imageCount: input.images.length,
+      images: input.images.map(imageDiagnostic),
     });
 
     const supabaseHost = new URL(debugSupabaseUrl).host;
@@ -413,6 +439,10 @@ export async function runAiScan(input: ScanInput): Promise<ScanResult> {
       bodyChars: responseText.length,
     });
     let data: ScanFunctionResponse | null = null;
+    scanLog("result parsing started", {
+      status: response.status,
+      bodyChars: responseText.length,
+    });
     try {
       data = responseText ? JSON.parse(responseText) as ScanFunctionResponse : null;
     } catch {
@@ -429,6 +459,12 @@ export async function runAiScan(input: ScanInput): Promise<ScanResult> {
         responseBody: responseText,
       };
     }
+    scanLog("result parsing completed", {
+      status: response.status,
+      success: data?.success ?? null,
+      itemCount: Array.isArray(data?.items) ? data.items.length : 0,
+      errorCode: data?.errorCode ?? null,
+    });
 
     if (!response.ok) {
       if (__DEV__) console.warn("[Scan] function returned error response", {
@@ -522,6 +558,12 @@ export async function runAiScan(input: ScanInput): Promise<ScanResult> {
           sourcePhotoIndex,
         };
       });
+
+    scanLog("result normalization completed", {
+      rawItemCount: rawItems.length,
+      normalizedItemCount: items.length,
+      mode: input.mode,
+    });
 
     return { status: "success", items: input.mode === "single_item" ? primarySingleItem(items) : items };
   } catch (err) {

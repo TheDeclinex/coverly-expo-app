@@ -28,5 +28,15 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
 export const debugSupabaseUrl: string = supabaseUrl;
 export const debugAnonKeyExists: boolean = supabaseAnonKey.length > 0;
 export const debugAnonKeyPrefix: string = supabaseAnonKey.slice(0, 8);
+export const debugSupabaseHost: string | null = (() => {
+  try {
+    return new URL(supabaseUrl).host;
+  } catch {
+    return null;
+  }
+})();
+export const debugSupabaseProjectRef: string | null = debugSupabaseHost?.endsWith(".supabase.co")
+  ? debugSupabaseHost.split(".")[0] || null
+  : null;
 // Exported for use in authenticated fetch calls (e.g. test button)
 export const anonKey: string = supabaseAnonKey;

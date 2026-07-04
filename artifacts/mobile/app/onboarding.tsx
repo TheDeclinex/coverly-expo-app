@@ -13,6 +13,7 @@ import {
   StyleSheet,
   Text,
   TextInput,
+  useWindowDimensions,
   View,
 } from "react-native";
 import Animated, {
@@ -26,6 +27,8 @@ import Animated, {
 } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+import { CoverlyAuthBackground, CoverlyAuthMark } from "@/components/auth/CoverlyAuthBrand";
+import { coverlyBrand } from "@/constants/brand";
 import { useAuth } from "@/context/AuthContext";
 import { useEntitlements } from "@/context/EntitlementsContext";
 import { PROPERTY_TYPES } from "@/constants/propertyTypes";
@@ -34,32 +37,9 @@ import { createProperty } from "@/lib/property-service";
 import { supabase } from "@/lib/supabase";
 
 // ─── Design tokens ─────────────────────────────────────────────────────────────
-const DARK_BG    = "#111C2A";
-const DOT_COLOR  = "rgba(255,255,255,0.07)";
-const BTN_TOP    = "#0F8F83";
-const BTN_BOT    = "#0B7468";
-const TEAL_TOP   = "#0D7A6F";
-const TEAL_BOT   = "#064E46";
-
-// ─── Dot grid — matches login aesthetic ───────────────────────────────────────
-function DotGrid() {
-  const COLS = 10, ROWS = 20, H = 38, V = 46;
-  const nodes: React.ReactNode[] = [];
-  for (let r = 0; r < ROWS; r++)
-    for (let c = 0; c < COLS; c++)
-      nodes.push(
-        <View
-          key={`${r}-${c}`}
-          style={{
-            position: "absolute",
-            width: 2, height: 2, borderRadius: 1,
-            backgroundColor: DOT_COLOR,
-            top: r * V, left: c * H,
-          }}
-        />
-      );
-  return <View style={StyleSheet.absoluteFill} pointerEvents="none">{nodes}</View>;
-}
+const BTN_TOP = coverlyBrand.teal;
+const BTN_BOT = coverlyBrand.tealDark;
+const RADIUS = 12;
 
 // ─── Progress dots ─────────────────────────────────────────────────────────────
 function ProgressDots({
@@ -82,7 +62,7 @@ function ProgressDots({
             borderRadius: 4,
             backgroundColor:
               i === activeIndex
-                ? light ? "rgba(255,255,255,0.9)" : "#0F8F83"
+                ? light ? "rgba(255,255,255,0.9)" : coverlyBrand.teal
                 : light ? "rgba(255,255,255,0.28)" : "#E2E8F0",
           }}
         />
@@ -97,6 +77,8 @@ export default function OnboardingScreen() {
   const { enforce } = useEntitlements();
   const colors = useColors();
   const insets = useSafeAreaInsets();
+  const { height } = useWindowDimensions();
+  const compact = height < 760;
 
   type Step = 0 | 1 | 2 | 3;
   const [step, setStep] = useState<Step>(0);
@@ -112,9 +94,9 @@ export default function OnboardingScreen() {
   const nameInputRef = useRef<TextInput>(null);
 
   // ── Animated values ─────────────────────────────────────────────────────────
-  // Step 0 — shield bounce
-  const shieldScale   = useSharedValue(0);
-  const shieldOpacity = useSharedValue(0);
+  // Step 0 brand mark bounce
+  const markScale   = useSharedValue(0);
+  const markOpacity = useSharedValue(0);
 
   // Step 1 — staggered feature rows
   const row1Y       = useSharedValue(20);
@@ -130,10 +112,10 @@ export default function OnboardingScreen() {
 
   useEffect(() => {
     if (step === 0) {
-      shieldScale.value = 0;
-      shieldOpacity.value = 0;
-      shieldScale.value   = withDelay(180, withSpring(1, { damping: 11, stiffness: 140 }));
-      shieldOpacity.value = withDelay(180, withTiming(1, { duration: 200 }));
+      markScale.value = 0;
+      markOpacity.value = 0;
+      markScale.value   = withDelay(180, withSpring(1, { damping: 11, stiffness: 140 }));
+      markOpacity.value = withDelay(180, withTiming(1, { duration: 200 }));
     } else if (step === 1) {
       row1Y.value = 20; row1Opacity.value = 0;
       row2Y.value = 20; row2Opacity.value = 0;
@@ -155,9 +137,9 @@ export default function OnboardingScreen() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [step]);
 
-  const shieldStyle = useAnimatedStyle(() => ({
-    transform: [{ scale: shieldScale.value }],
-    opacity: shieldOpacity.value,
+  const markStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: markScale.value }],
+    opacity: markOpacity.value,
   }));
   const row1Style = useAnimatedStyle(() => ({
     transform: [{ translateY: row1Y.value }],
@@ -235,28 +217,21 @@ export default function OnboardingScreen() {
   // ── Step renders ────────────────────────────────────────────────────────────
 
   const renderStep0 = () => (
-    <View style={[StyleSheet.absoluteFill, { backgroundColor: DARK_BG }]}>
-      <DotGrid />
-      {/* Ambient glows */}
-      <View style={{ position: "absolute", top: -80, right: -80, width: 240, height: 240, borderRadius: 120, backgroundColor: "rgba(29,158,117,0.11)" }} />
-      <View style={{ position: "absolute", bottom: 80, left: -100, width: 260, height: 260, borderRadius: 130, backgroundColor: "rgba(8,28,68,0.5)" }} />
-
-      <View style={[styles.stepContainer, { paddingTop: insets.top + 16, paddingBottom: insets.bottom + 32 }]}>
-        <View style={{ flex: 1, justifyContent: "center", alignItems: "center" }}>
-          <Animated.View style={shieldStyle}>
-            <View style={styles.shieldOuter}>
-              <Feather name="shield" size={36} color="#FFFFFF" />
-            </View>
+    <View style={StyleSheet.absoluteFill}>
+      <View style={[styles.stepContainer, { paddingTop: insets.top + (compact ? 10 : 18), paddingBottom: insets.bottom + (compact ? 14 : 24) }]}>
+        <View style={[styles.heroCard, { padding: compact ? 18 : 22 }]}>
+          <Animated.View style={markStyle}>
+            <CoverlyAuthMark style={styles.heroMark} />
           </Animated.View>
 
           <Text style={styles.heroAppName}>Coverly</Text>
           <Text style={styles.heroTagline}>Know what you own</Text>
           <Text style={styles.heroBody}>
-            Build a complete home inventory so you're ready when it matters most — for insurance claims, moving, or peace of mind.
+            Build a complete home inventory so you're ready when it matters most: insurance claims, moving, or peace of mind.
           </Text>
         </View>
 
-        <View style={{ gap: 14 }}>
+        <View style={styles.actionStack}>
           <Pressable
             onPress={() => advanceTo(1)}
             style={({ pressed }) => [styles.primaryBtn, { opacity: pressed ? 0.82 : 1 }]}
@@ -267,7 +242,7 @@ export default function OnboardingScreen() {
             </LinearGradient>
           </Pressable>
           <Pressable onPress={() => void handleSkipOnboarding()} style={({ pressed }) => [styles.skipLink, { opacity: pressed ? 0.5 : 1 }]}>
-            <Text style={{ color: "rgba(255,255,255,0.5)", fontSize: 14, fontFamily: "Inter_400Regular" }}>
+            <Text style={styles.skipLinkText}>
               Skip for now
             </Text>
           </Pressable>
@@ -277,52 +252,52 @@ export default function OnboardingScreen() {
   );
 
   const renderStep1 = () => (
-    <View style={[StyleSheet.absoluteFill, { backgroundColor: colors.card }]}>
-      <View style={[styles.stepContainer, { paddingTop: insets.top + 36, paddingBottom: insets.bottom + 28 }]}>
-        <View>
-          <Text style={[styles.stepHeading, { color: colors.foreground }]}>What Coverly does</Text>
-          <Text style={[styles.stepSubheading, { color: colors.mutedForeground }]}>
+    <View style={StyleSheet.absoluteFill}>
+      <View style={[styles.stepContainer, { paddingTop: insets.top + (compact ? 10 : 18), paddingBottom: insets.bottom + (compact ? 14 : 24) }]}>
+        <View style={[styles.contentCard, { padding: compact ? 18 : 22 }]}>
+          <Text style={styles.stepHeading}>What Coverly does</Text>
+          <Text style={styles.stepSubheading}>
             Everything you need to protect what you own.
           </Text>
+
+          <View style={styles.featureStack}>
+            <Animated.View style={[styles.featureRow, row1Style]}>
+              <View style={styles.featureIcon}>
+                <Feather name="zap" size={19} color={coverlyBrand.teal} />
+              </View>
+              <View style={{ flex: 1, gap: 3 }}>
+                <Text style={styles.featureLabel}>AI Scanning</Text>
+                <Text style={styles.featureDesc}>
+                  Scan a room photo and let Coverly identify items for you.
+                </Text>
+              </View>
+            </Animated.View>
+
+            <Animated.View style={[styles.featureRow, row2Style]}>
+              <View style={styles.featureIcon}>
+                <Feather name="home" size={19} color={coverlyBrand.teal} />
+              </View>
+              <View style={{ flex: 1, gap: 3 }}>
+                <Text style={styles.featureLabel}>Room by room</Text>
+                <Text style={styles.featureDesc}>
+                  Organise your inventory by property, room, and item.
+                </Text>
+              </View>
+            </Animated.View>
+
+            <Animated.View style={[styles.featureRow, row3Style]}>
+              <View style={styles.featureIcon}>
+                <Feather name="tag" size={19} color={coverlyBrand.teal} />
+              </View>
+              <View style={{ flex: 1, gap: 3 }}>
+                <Text style={styles.featureLabel}>Replacement pricing</Text>
+                <Text style={styles.featureDesc}>Find comparable NZ listings and keep your item values current.</Text>
+              </View>
+            </Animated.View>
+          </View>
         </View>
 
-        <View style={{ flex: 1, justifyContent: "center", gap: 10, marginTop: 12 }}>
-          <Animated.View style={[styles.featureRow, { backgroundColor: colors.background, borderColor: colors.border, borderRadius: colors.radius }, row1Style]}>
-            <View style={[styles.featureIcon, { backgroundColor: "#EEF9F6" }]}>
-              <Feather name="zap" size={22} color="#0F766E" />
-            </View>
-            <View style={{ flex: 1, gap: 3 }}>
-              <Text style={[styles.featureLabel, { color: colors.foreground }]}>AI Scanning</Text>
-              <Text style={[styles.featureDesc, { color: colors.mutedForeground }]}>
-                Scan a room photo and let Coverly identify items for you.
-              </Text>
-            </View>
-          </Animated.View>
-
-          <Animated.View style={[styles.featureRow, { backgroundColor: colors.background, borderColor: colors.border, borderRadius: colors.radius }, row2Style]}>
-            <View style={[styles.featureIcon, { backgroundColor: "#EEF9F6" }]}>
-              <Feather name="home" size={22} color="#0F766E" />
-            </View>
-            <View style={{ flex: 1, gap: 3 }}>
-              <Text style={[styles.featureLabel, { color: colors.foreground }]}>Room by room</Text>
-              <Text style={[styles.featureDesc, { color: colors.mutedForeground }]}>
-                Organise your inventory by property, room, and item.
-              </Text>
-            </View>
-          </Animated.View>
-
-          <Animated.View style={[styles.featureRow, { backgroundColor: colors.background, borderColor: colors.border, borderRadius: colors.radius }, row3Style]}>
-            <View style={[styles.featureIcon, { backgroundColor: "#FEF3C7" }]}>
-              <Feather name="tag" size={22} color="#D97706" />
-            </View>
-            <View style={{ flex: 1, gap: 3 }}>
-              <Text style={[styles.featureLabel, { color: colors.foreground }]}>Replacement pricing</Text>
-              <Text style={[styles.featureDesc, { color: colors.mutedForeground }]}>Find comparable NZ listings and keep your item values current.</Text>
-            </View>
-          </Animated.View>
-        </View>
-
-        <View style={{ gap: 16 }}>
+        <View style={styles.actionStack}>
           <ProgressDots activeIndex={0} total={3} />
           <Pressable
             onPress={() => advanceTo(2)}
@@ -334,7 +309,7 @@ export default function OnboardingScreen() {
             </LinearGradient>
           </Pressable>
           <Pressable onPress={() => void handleSkipOnboarding()} style={({ pressed }) => [styles.skipLink, { opacity: pressed ? 0.5 : 1 }]}>
-            <Text style={{ color: colors.mutedForeground, fontSize: 14, fontFamily: "Inter_400Regular" }}>
+            <Text style={styles.skipLinkText}>
               Skip for now
             </Text>
           </Pressable>
@@ -344,39 +319,38 @@ export default function OnboardingScreen() {
   );
 
   const renderStep2 = () => (
-    <View style={[StyleSheet.absoluteFill, { backgroundColor: colors.background }]}>
+    <View style={StyleSheet.absoluteFill}>
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : "height"}>
         <ScrollView
-          contentContainerStyle={[styles.scrollContent, { paddingTop: insets.top + 36, paddingBottom: insets.bottom + 28 }]}
+          contentContainerStyle={[styles.scrollContent, { paddingTop: insets.top + (compact ? 10 : 18), paddingBottom: insets.bottom + (compact ? 14 : 24) }]}
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
         >
-          <View>
-            <Text style={[styles.stepHeading, { color: colors.foreground }]}>
+          <View style={[styles.contentCard, { padding: compact ? 18 : 22 }]}>
+            <Text style={styles.stepHeading}>
               Set up your first property
             </Text>
-            <Text style={[styles.stepSubheading, { color: colors.mutedForeground }]}>
+            <Text style={styles.stepSubheading}>
               You can always add more later.
             </Text>
-          </View>
 
-          <View style={{ gap: 20, marginTop: 32 }}>
-            <View style={{ gap: 8 }}>
-              <Text style={[styles.fieldLabel, { color: colors.mutedForeground }]}>PROPERTY NAME</Text>
-              <TextInput
-                ref={nameInputRef}
-                style={[styles.nameInput, { backgroundColor: colors.card, borderColor: colors.border, color: colors.foreground }]}
-                value={propertyName}
-                onChangeText={(v) => { setPropertyName(v); setCreateError(null); }}
-                placeholder="e.g. My home, Beach house…"
-                placeholderTextColor={colors.mutedForeground}
-                autoCapitalize="words"
-                returnKeyType="done"
-              />
-            </View>
+            <View style={styles.formStack}>
+              <View style={{ gap: 8 }}>
+                <Text style={styles.fieldLabel}>PROPERTY NAME</Text>
+                <TextInput
+                  ref={nameInputRef}
+                  style={styles.nameInput}
+                  value={propertyName}
+                  onChangeText={(v) => { setPropertyName(v); setCreateError(null); }}
+                  placeholder="e.g. My home, Beach house..."
+                  placeholderTextColor={coverlyBrand.mutedText}
+                  autoCapitalize="words"
+                  returnKeyType="done"
+                />
+              </View>
 
             <View style={{ gap: 8 }}>
-              <Text style={[styles.fieldLabel, { color: colors.mutedForeground }]}>PROPERTY TYPE</Text>
+              <Text style={styles.fieldLabel}>PROPERTY TYPE</Text>
               <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingHorizontal: 2, paddingRight: 12 }}>
                 {PROPERTY_TYPES.map((pt) => {
                   const sel = propertyType === pt.value;
@@ -389,12 +363,12 @@ export default function OnboardingScreen() {
                         paddingVertical: 9,
                         borderRadius: colors.radius,
                         borderWidth: 1.5,
-                        borderColor: sel ? colors.primary : colors.border,
-                        backgroundColor: sel ? colors.primary : colors.card,
+                        borderColor: sel ? coverlyBrand.teal : coverlyBrand.border,
+                        backgroundColor: sel ? coverlyBrand.teal : coverlyBrand.inputBackground,
                         opacity: pressed ? 0.8 : 1,
                       })}
                     >
-                      <Text style={{ fontSize: 14, fontFamily: sel ? "Inter_600SemiBold" : "Inter_400Regular", color: sel ? colors.primaryForeground : colors.foreground }}>
+                      <Text style={{ fontSize: 14, fontFamily: sel ? "Inter_600SemiBold" : "Inter_400Regular", color: sel ? coverlyBrand.white : coverlyBrand.slate }}>
                         {pt.label}
                       </Text>
                     </Pressable>
@@ -404,71 +378,38 @@ export default function OnboardingScreen() {
             </View>
 
             <View style={{ gap: 8 }}>
-              <Text style={[styles.fieldLabel, { color: colors.mutedForeground }]}>CONTENTS COVER AMOUNT</Text>
-              <View
-                style={{
-                  flexDirection: "row",
-                  alignItems: "center",
-                  borderWidth: 1.5,
-                  borderRadius: colors.radius,
-                  borderColor: colors.border,
-                  backgroundColor: colors.card,
-                  overflow: "hidden",
-                }}
-              >
-                <Text
-                  style={{
-                    paddingLeft: 14,
-                    paddingRight: 2,
-                    fontSize: 17,
-                    fontFamily: "Inter_400Regular",
-                    color: colors.mutedForeground,
-                  }}
-                >
+              <Text style={styles.fieldLabel}>CONTENTS COVER AMOUNT</Text>
+              <View style={styles.moneyInputRow}>
+                <Text style={styles.moneyPrefix}>
                   $
                 </Text>
                 <TextInput
-                  style={{
-                    flex: 1,
-                    paddingVertical: 14,
-                    paddingRight: 14,
-                    fontSize: 17,
-                    fontFamily: "Inter_400Regular",
-                    color: colors.foreground,
-                  }}
+                  style={styles.moneyInput}
                   value={coverAmount}
                   onChangeText={(v) => setCoverAmount(v.replace(/[^0-9.]/g, ""))}
                   placeholder="e.g. 75000"
-                  placeholderTextColor={colors.mutedForeground}
+                  placeholderTextColor={coverlyBrand.mutedText}
                   keyboardType="decimal-pad"
                   returnKeyType="done"
                 />
               </View>
-              <Text
-                style={{
-                  fontSize: 12,
-                  fontFamily: "Inter_400Regular",
-                  color: colors.mutedForeground,
-                  lineHeight: 18,
-                }}
-              >
-                Optional — add your current contents cover so Coverly can compare it with your documented inventory later.
+              <Text style={styles.helperText}>
+                Optional: add your current contents cover so Coverly can compare it with your documented inventory later.
               </Text>
             </View>
 
             {createError ? (
-              <View style={[styles.errorBox, { backgroundColor: "#FEF2F2", borderRadius: colors.radius }]}>
+              <View style={styles.errorBox}>
                 <Feather name="alert-circle" size={14} color="#DC2626" />
                 <Text style={{ flex: 1, fontSize: 13, fontFamily: "Inter_400Regular", color: "#DC2626" }}>
                   {createError}
                 </Text>
               </View>
             ) : null}
+            </View>
           </View>
 
-          <View style={{ flex: 1, minHeight: 32 }} />
-
-          <View style={{ gap: 16 }}>
+          <View style={styles.actionStack}>
             <ProgressDots activeIndex={1} total={3} />
             <Pressable
               onPress={handleCreateProperty}
@@ -496,18 +437,18 @@ export default function OnboardingScreen() {
   );
 
   const renderStep3 = () => (
-    <LinearGradient colors={[TEAL_TOP, TEAL_BOT]} start={{ x: 0.5, y: 0 }} end={{ x: 0.5, y: 1 }} style={StyleSheet.absoluteFill}>
-      <View style={[styles.stepContainer, { paddingTop: insets.top + 16, paddingBottom: insets.bottom + 32 }]}>
-        <View style={{ flex: 1, justifyContent: "center", alignItems: "center", gap: 0 }}>
+    <View style={StyleSheet.absoluteFill}>
+      <View style={[styles.stepContainer, { paddingTop: insets.top + (compact ? 10 : 18), paddingBottom: insets.bottom + (compact ? 14 : 24) }]}>
+        <View style={[styles.contentCard, styles.successCard, { padding: compact ? 18 : 22 }]}>
           <Animated.View style={[styles.checkCircle, checkStyle]}>
-            <Feather name="check" size={36} color="#FFFFFF" />
+            <Feather name="check" size={32} color={coverlyBrand.teal} />
           </Animated.View>
 
           <Text style={[styles.celebHeading, { marginTop: 28 }]}>You're all set</Text>
 
           {newPropertyName ? (
             <View style={styles.propertyPill}>
-              <Feather name="home" size={14} color={TEAL_TOP} />
+              <Feather name="home" size={14} color={coverlyBrand.teal} />
               <Text style={styles.propertyPillText}>{newPropertyName}</Text>
             </View>
           ) : null}
@@ -517,35 +458,37 @@ export default function OnboardingScreen() {
           </Text>
         </View>
 
-        <View style={{ gap: 16 }}>
-          <ProgressDots activeIndex={2} total={3} light />
+        <View style={styles.actionStack}>
+          <ProgressDots activeIndex={2} total={3} />
           <Pressable
             onPress={handleComplete}
             style={({ pressed }) => [styles.lightBtn, { opacity: pressed ? 0.85 : 1 }]}
           >
             <Text style={styles.lightBtnText}>Let's go</Text>
-            <Feather name="arrow-right" size={16} color={TEAL_TOP} />
+            <Feather name="arrow-right" size={16} color={coverlyBrand.teal} />
           </Pressable>
         </View>
       </View>
-    </LinearGradient>
+    </View>
   );
 
   // ── Root render ─────────────────────────────────────────────────────────────
   return (
-    <View style={{ flex: 1, backgroundColor: DARK_BG }}>
-      <StatusBar style={step === 0 ? "light" : "dark"} />
-      <Animated.View
-        key={step}
-        entering={FadeIn.duration(260)}
-        exiting={FadeOut.duration(180)}
-        style={StyleSheet.absoluteFill}
-      >
-        {step === 0 && renderStep0()}
-        {step === 1 && renderStep1()}
-        {step === 2 && renderStep2()}
-        {step === 3 && renderStep3()}
-      </Animated.View>
+    <View style={{ flex: 1, backgroundColor: "#F8FEFF" }}>
+      <StatusBar style="dark" />
+      <CoverlyAuthBackground style={StyleSheet.absoluteFill}>
+        <Animated.View
+          key={step}
+          entering={FadeIn.duration(260)}
+          exiting={FadeOut.duration(180)}
+          style={StyleSheet.absoluteFill}
+        >
+          {step === 0 && renderStep0()}
+          {step === 1 && renderStep1()}
+          {step === 2 && renderStep2()}
+          {step === 3 && renderStep3()}
+        </Animated.View>
+      </CoverlyAuthBackground>
     </View>
   );
 }
@@ -554,68 +497,97 @@ export default function OnboardingScreen() {
 const styles = StyleSheet.create({
   stepContainer: {
     flex: 1,
-    paddingHorizontal: 28,
+    paddingHorizontal: 24,
     justifyContent: "space-between",
+    gap: 14,
   },
   scrollContent: {
     flexGrow: 1,
-    paddingHorizontal: 28,
+    paddingHorizontal: 24,
+    gap: 14,
   },
-
-  // Step 0 — hero
-  shieldOuter: {
-    width: 84,
-    height: 84,
-    borderRadius: 24,
-    backgroundColor: "rgba(255,255,255,0.08)",
+  heroCard: {
+    backgroundColor: "rgba(255,255,255,0.96)",
+    borderRadius: 26,
     borderWidth: 1,
-    borderColor: "rgba(29,158,117,0.45)",
+    borderColor: "rgba(224, 234, 240, 0.95)",
     alignItems: "center",
     justifyContent: "center",
-    marginBottom: 28,
+    shadowColor: "#0F2A3C",
+    shadowOffset: { width: 0, height: 14 },
+    shadowOpacity: 0.1,
+    shadowRadius: 26,
+    elevation: 8,
+  },
+  contentCard: {
+    backgroundColor: "rgba(255,255,255,0.96)",
+    borderRadius: 26,
+    borderWidth: 1,
+    borderColor: "rgba(224, 234, 240, 0.95)",
+    shadowColor: "#0F2A3C",
+    shadowOffset: { width: 0, height: 14 },
+    shadowOpacity: 0.1,
+    shadowRadius: 26,
+    elevation: 8,
+  },
+  successCard: {
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  heroMark: {
+    width: 84,
+    height: 84,
+    marginBottom: 4,
   },
   heroAppName: {
-    fontSize: 40,
+    fontSize: 41,
     fontFamily: "Inter_700Bold",
-    color: "#FFFFFF",
-    letterSpacing: -0.5,
-    marginBottom: 8,
+    color: coverlyBrand.navy,
+    letterSpacing: 0,
+    marginBottom: 5,
   },
   heroTagline: {
-    fontSize: 21,
-    fontFamily: "Inter_600SemiBold",
-    color: "rgba(255,255,255,0.88)",
-    marginBottom: 14,
+    fontSize: 17,
+    fontFamily: "Inter_500Medium",
+    color: coverlyBrand.teal,
+    letterSpacing: 0,
+    marginBottom: 12,
   },
   heroBody: {
-    fontSize: 15,
+    fontSize: 14,
     fontFamily: "Inter_400Regular",
-    color: "rgba(255,255,255,0.58)",
+    color: coverlyBrand.mutedText,
     textAlign: "center",
-    lineHeight: 23,
+    lineHeight: 21,
     maxWidth: 300,
   },
-
-  // Shared step headings
   stepHeading: {
-    fontSize: 28,
+    fontSize: 22,
     fontFamily: "Inter_700Bold",
-    letterSpacing: -0.3,
-    marginBottom: 8,
+    color: coverlyBrand.slate,
+    letterSpacing: 0,
+    marginBottom: 4,
   },
   stepSubheading: {
-    fontSize: 15,
+    fontSize: 14,
     fontFamily: "Inter_400Regular",
-    lineHeight: 22,
+    color: coverlyBrand.mutedText,
+    lineHeight: 20,
   },
-
-  // Buttons
+  actionStack: {
+    gap: 12,
+  },
   primaryBtn: {
-    borderRadius: 14,
+    borderRadius: RADIUS,
     overflow: "hidden",
+    shadowColor: "#0B7468",
+    shadowOffset: { width: 0, height: 5 },
+    shadowOpacity: 0.18,
+    shadowRadius: 13,
+    elevation: 6,
   },
   primaryBtnInner: {
-    height: 54,
+    height: 50,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
@@ -623,26 +595,36 @@ const styles = StyleSheet.create({
   },
   primaryBtnText: {
     fontSize: 16,
-    fontFamily: "Inter_600SemiBold",
-    color: "#FFFFFF",
+    fontFamily: "Inter_700Bold",
+    color: coverlyBrand.white,
+    letterSpacing: 0,
   },
   skipLink: {
     alignItems: "center",
-    paddingVertical: 4,
+    paddingVertical: 6,
   },
-
-  // Step 1 — feature rows
+  skipLinkText: {
+    color: coverlyBrand.mutedText,
+    fontSize: 14,
+    fontFamily: "Inter_400Regular",
+  },
+  featureStack: {
+    gap: 10,
+    marginTop: 18,
+  },
   featureRow: {
     flexDirection: "row",
     alignItems: "flex-start",
-    gap: 14,
-    padding: 16,
+    gap: 12,
+    paddingVertical: 12,
     borderWidth: 1,
+    borderColor: "transparent",
   },
   featureIcon: {
-    width: 46,
-    height: 46,
-    borderRadius: 13,
+    width: 34,
+    height: 34,
+    borderRadius: 10,
+    backgroundColor: coverlyBrand.inputBackground,
     alignItems: "center",
     justifyContent: "center",
     flexShrink: 0,
@@ -650,93 +632,121 @@ const styles = StyleSheet.create({
   featureLabel: {
     fontSize: 15,
     fontFamily: "Inter_600SemiBold",
+    color: coverlyBrand.slate,
   },
   featureDesc: {
     fontSize: 13,
     fontFamily: "Inter_400Regular",
     lineHeight: 18,
+    color: coverlyBrand.mutedText,
   },
-  comingSoon: {
-    backgroundColor: "#FEF3C7",
-    borderRadius: 6,
-    paddingHorizontal: 7,
-    paddingVertical: 2,
+  formStack: {
+    gap: 18,
+    marginTop: 20,
   },
-  comingSoonText: {
-    fontSize: 9,
-    fontFamily: "Inter_700Bold",
-    color: "#D97706",
-    letterSpacing: 0.5,
-  },
-
-  // Step 2 — form
   fieldLabel: {
     fontSize: 11,
     fontFamily: "Inter_600SemiBold",
     letterSpacing: 0.7,
+    color: coverlyBrand.mutedText,
   },
   nameInput: {
     borderWidth: 1.5,
     borderRadius: 12,
     paddingHorizontal: 14,
     paddingVertical: 14,
-    fontSize: 17,
+    fontSize: 16,
     fontFamily: "Inter_400Regular",
+    backgroundColor: coverlyBrand.inputBackground,
+    borderColor: coverlyBrand.border,
+    color: coverlyBrand.slate,
+  },
+  moneyInputRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    borderWidth: 1.5,
+    borderRadius: 12,
+    borderColor: coverlyBrand.border,
+    backgroundColor: coverlyBrand.inputBackground,
+    overflow: "hidden",
+  },
+  moneyPrefix: {
+    paddingLeft: 14,
+    paddingRight: 2,
+    fontSize: 16,
+    fontFamily: "Inter_400Regular",
+    color: coverlyBrand.mutedText,
+  },
+  moneyInput: {
+    flex: 1,
+    paddingVertical: 14,
+    paddingRight: 14,
+    fontSize: 16,
+    fontFamily: "Inter_400Regular",
+    color: coverlyBrand.slate,
+  },
+  helperText: {
+    fontSize: 12,
+    fontFamily: "Inter_400Regular",
+    color: coverlyBrand.mutedText,
+    lineHeight: 18,
   },
   errorBox: {
     flexDirection: "row",
     alignItems: "center",
     gap: 8,
     padding: 12,
+    backgroundColor: "#FEF2F2",
+    borderRadius: 8,
   },
-
-  // Step 3 — celebration
   checkCircle: {
-    width: 92,
-    height: 92,
-    borderRadius: 46,
-    backgroundColor: "rgba(255,255,255,0.16)",
-    borderWidth: 2,
-    borderColor: "rgba(255,255,255,0.38)",
+    width: 76,
+    height: 76,
+    borderRadius: 38,
+    backgroundColor: coverlyBrand.inputBackground,
+    borderWidth: 1,
+    borderColor: coverlyBrand.border,
     alignItems: "center",
     justifyContent: "center",
   },
   celebHeading: {
-    fontSize: 32,
+    fontSize: 26,
     fontFamily: "Inter_700Bold",
-    color: "#FFFFFF",
+    color: coverlyBrand.slate,
     textAlign: "center",
-    letterSpacing: -0.3,
+    letterSpacing: 0,
   },
   propertyPill: {
     flexDirection: "row",
     alignItems: "center",
     gap: 6,
-    backgroundColor: "#FFFFFF",
+    backgroundColor: coverlyBrand.white,
     borderRadius: 20,
     paddingHorizontal: 14,
     paddingVertical: 8,
     marginTop: 14,
+    borderWidth: 1,
+    borderColor: coverlyBrand.border,
   },
   propertyPillText: {
     fontSize: 14,
     fontFamily: "Inter_600SemiBold",
-    color: "#0F766E",
+    color: coverlyBrand.teal,
   },
   celebBody: {
     fontSize: 15,
     fontFamily: "Inter_400Regular",
-    color: "rgba(255,255,255,0.72)",
+    color: coverlyBrand.mutedText,
     textAlign: "center",
     lineHeight: 22,
     maxWidth: 280,
   },
   lightBtn: {
-    height: 54,
-    borderRadius: 14,
-    borderWidth: 2,
-    borderColor: "rgba(255,255,255,0.65)",
-    backgroundColor: "rgba(255,255,255,0.11)",
+    height: 50,
+    borderRadius: RADIUS,
+    borderWidth: 1,
+    borderColor: coverlyBrand.border,
+    backgroundColor: "rgba(255,255,255,0.96)",
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
@@ -745,6 +755,6 @@ const styles = StyleSheet.create({
   lightBtnText: {
     fontSize: 16,
     fontFamily: "Inter_600SemiBold",
-    color: "#FFFFFF",
+    color: coverlyBrand.teal,
   },
 });

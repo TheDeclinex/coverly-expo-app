@@ -7,8 +7,6 @@ import {
   ActivityIndicator,
   Animated,
   Easing,
-  Image,
-  ImageBackground,
   Keyboard,
   KeyboardAvoidingView,
   Platform,
@@ -22,6 +20,7 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+import { CoverlyAuthBackground, CoverlyAuthMark } from "@/components/auth/CoverlyAuthBrand";
 import { coverlyBrand } from "@/constants/brand";
 import { useAuth } from "@/context/AuthContext";
 import { useColors } from "@/hooks/useColors";
@@ -38,8 +37,6 @@ const HERO_TEXT   = coverlyBrand.navy;
 const BTN_TOP     = coverlyBrand.teal;
 const BTN_BOT     = coverlyBrand.tealDark;
 const RADIUS      = 12;
-const COVERLY_MARK = require("../assets/brand/coverly-login-mark-tight.png");
-const AUTH_BACKGROUND = require("../assets/brand/coverly-login-background.png");
 
 // Set true only to debug Supabase connectivity in dev builds.
 const SHOW_CONNECTION_DEBUG = false;
@@ -356,20 +353,8 @@ export default function LoginScreen() {
 
   return (
     <View style={styles.root}>
-      <ImageBackground
-        source={AUTH_BACKGROUND}
-        resizeMode="contain"
-        style={StyleSheet.absoluteFill}
-        imageStyle={styles.backgroundImage}
-      />
-      <LinearGradient
-        pointerEvents="none"
-        colors={["rgba(255,255,255,0.08)", "rgba(255,255,255,0.22)", "rgba(255,255,255,0.05)"]}
-        locations={[0, 0.52, 1]}
-        style={StyleSheet.absoluteFill}
-      />
-
-      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : "height"}>
+      <CoverlyAuthBackground style={StyleSheet.absoluteFill}>
+        <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : "height"}>
         <ScrollView
           contentContainerStyle={[
             styles.scroll,
@@ -397,12 +382,7 @@ export default function LoginScreen() {
                 },
               ]}
             >
-              <Image
-                source={COVERLY_MARK}
-                style={styles.iconImage}
-                resizeMode="contain"
-                accessibilityIgnoresInvertColors
-              />
+              <CoverlyAuthMark style={styles.iconImage} />
             </Animated.View>
             <Animated.View style={[styles.heroTextWrap, { opacity: titleOpacity }]}>
               <Text style={styles.appName}>Coverly</Text>
@@ -637,7 +617,8 @@ export default function LoginScreen() {
             )}
           </Animated.View>
         </ScrollView>
-      </KeyboardAvoidingView>
+        </KeyboardAvoidingView>
+      </CoverlyAuthBackground>
     </View>
   );
 }
@@ -679,8 +660,6 @@ function InboxState({
 // ─── Styles ───────────────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: "#F8FEFF" },
-  backgroundImage: { opacity: 1 },
-
   scroll: { flexGrow: 1, justifyContent: "center", paddingHorizontal: 24 },
 
   // Hero

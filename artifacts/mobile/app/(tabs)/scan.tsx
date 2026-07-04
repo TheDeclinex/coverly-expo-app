@@ -1,6 +1,9 @@
 import { Feather } from "@expo/vector-icons";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import { File } from "expo-file-system";
 import { Image } from "expo-image";
 import * as Haptics from "expo-haptics";
+import * as ImageManipulator from "expo-image-manipulator";
 import * as ImagePicker from "expo-image-picker";
 import * as VideoThumbnails from "expo-video-thumbnails";
 import { Stack, router, useLocalSearchParams, type Href } from "expo-router";
@@ -9,6 +12,7 @@ import React, { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
+  AppState,
   Dimensions,
   FlatList,
   InteractionManager,
@@ -63,6 +67,14 @@ import type {
 const VIDEO_SCAN_USED_DURATION_MS = 10_000;
 const VIDEO_SCAN_USED_SECONDS = VIDEO_SCAN_USED_DURATION_MS / 1000;
 const VIDEO_SCAN_LIMIT_COPY = `Record or upload a room walkthrough. Coverly will scan up to the first ${VIDEO_SCAN_USED_SECONDS} seconds.`;
+const ANDROID_SCAN_STATE_STORAGE_KEY = "coverly:android-scan-state:v1";
+const ANDROID_SCAN_STATE_MAX_AGE_MS = 30 * 60 * 1000;
+const EXTREME_IMAGE_MAX_DIMENSION = 5200;
+const EXTREME_IMAGE_MAX_MEGA_PIXELS = 20;
+const COMPAT_IMAGE_MAX_DIMENSION = 1600;
+const COMPAT_IMAGE_COMPRESSION = 0.72;
+const COMPATIBILITY_ERROR_COPY =
+  "This phone had trouble processing the photo. Try again in compatibility mode or choose a photo from gallery.";
 
 interface ScanModeCard {
   mode: ScanMode;
@@ -125,6 +137,36 @@ interface SaveInsertResult {
   error?: unknown;
 }
 
+interface ScanAssetMetadata {
+  uriScheme: string | null;
+  width: number | null;
+  height: number | null;
+  fileSize: number | null;
+}
+
+type ScanInputSource = "camera" | "library" | "video";
+
+interface CompatibilityPrompt {
+  reason: string;
+  message: string;
+}
+
+interface StartScanOptions {
+  compatibilityMode?: boolean;
+  compatibilityReason?: string;
+}
+
+interface PersistedAndroidScanState {
+  version: 1;
+  savedAt: number;
+  selectedMode: ScanMode | null;
+  selectedFileId: string;
+  selectedRoomId: string;
+  newRoomName: string;
+  images: ScanEncodedImage[];
+  scanStatus: ScanStatus;
+}
+
 function scanLog(message: string, details?: Record<string, unknown>) {
   if (!__DEV__) return;
   if (details) {
@@ -132,6 +174,212 @@ function scanLog(message: string, details?: Record<string, unknown>) {
   } else {
     console.info(`[Scan] ${message}`);
   }
+}
+
+function uriScheme(uri: string | null | undefined): string | null {
+  if (!uri) return null;
+  const match = uri.match(/^([a-zA-Z][a-zA-Z0-9+.-]*):/);
+  return match?.[1]?.toLowerCase() ?? null;
+}
+
+function platformConstant(name: string): string {
+  const constants = Platform.constants as Record<string, unknown> | undefined;
+  const value = constants?.[name];
+  return typeof value === "string" ? value : "";
+}
+
+function androidDeviceSummary(): Record<string, unknown> {
+  if (Platform.OS !== "android") return { platform: Platform.OS };
+  const brand = platformConstant("Brand") || platformConstant("brand");
+  const manufacturer = platformConstant("Manufacturer") || platformConstant("manufacturer");
+  const model = platformConstant("Model") || platformConstant("model");
+  return {
+    platform: Platform.OS,
+    brand: brand || null,
+    manufacturer: manufacturer || null,
+    model: model || null,
+  };
+}
+
+function isKnownProblemAndroidDevice(): boolean {
+  if (Platform.OS !== "android") return false;
+  const haystack = [
+    platformConstant("Brand"),
+    platformConstant("brand"),
+    platformConstant("Manufacturer"),
+    platformConstant("manufacturer"),
+    platformConstant("Model"),
+    platformConstant("model"),
+  ].join(" ").toLowerCase();
+
+  return (
+    haystack.includes("galaxy a05") ||
+    haystack.includes("sm-a055") ||
+    haystack.includes("sm-a057")
+  );
+}
+
+function isExtremeImage(image: ScanEncodedImage): boolean {
+  const width = image.width ?? 0;
+  const height = image.height ?? 0;
+  const longestEdge = Math.max(width, height);
+  const megaPixels = width > 0 && height > 0 ? (width * height) / 1_000_000 : 0;
+  return longestEdge >= EXTREME_IMAGE_MAX_DIMENSION || megaPixels >= EXTREME_IMAGE_MAX_MEGA_PIXELS;
+}
+
+function hasCompatibilityCandidate(imagesToCheck: ScanEncodedImage[]): boolean {
+  return (
+    Platform.OS === "android" &&
+    imagesToCheck.some((image) => !!image.uri && !image.compatibilityPrepared)
+  );
+}
+
+function compatibilityReasonFor(imagesToCheck: ScanEncodedImage[], fallbackReason = "manual_retry"): string | null {
+  if (!hasCompatibilityCandidate(imagesToCheck)) return null;
+  if (isKnownProblemAndroidDevice()) return "known_problem_android_device";
+  if (imagesToCheck.some(isExtremeImage)) return "extreme_image_size";
+  return fallbackReason;
+}
+
+function safeImageDiagnostics(image: ScanEncodedImage, index: number): Record<string, unknown> {
+  return {
+    index,
+    uriScheme: uriScheme(image.uri),
+    width: image.width ?? null,
+    height: image.height ?? null,
+    fileSize: image.fileSize ?? null,
+    mimeType: image.mimeType,
+    compatibilityPrepared: Boolean(image.compatibilityPrepared),
+  };
+}
+
+async function localFileSize(uri: string): Promise<number | null> {
+  if (Platform.OS === "web") return null;
+  try {
+    const file = new File(uri);
+    return typeof file.size === "number" && Number.isFinite(file.size) ? file.size : null;
+  } catch {
+    return null;
+  }
+}
+
+async function metadataForAsset(asset: ImagePicker.ImagePickerAsset): Promise<ScanAssetMetadata> {
+  const assetRecord = asset as ImagePicker.ImagePickerAsset & { fileSize?: number | null };
+  return {
+    uriScheme: uriScheme(asset.uri),
+    width: typeof asset.width === "number" && Number.isFinite(asset.width) ? asset.width : null,
+    height: typeof asset.height === "number" && Number.isFinite(asset.height) ? asset.height : null,
+    fileSize:
+      typeof assetRecord.fileSize === "number" && Number.isFinite(assetRecord.fileSize)
+        ? assetRecord.fileSize
+        : await localFileSize(asset.uri),
+  };
+}
+
+async function imageFromPickerAsset(
+  asset: ImagePicker.ImagePickerAsset,
+  source: ScanInputSource,
+  index: number,
+): Promise<ScanEncodedImage | null> {
+  if (!asset.uri) return null;
+  const metadata = await metadataForAsset(asset);
+  scanLog("selected asset metadata", {
+    source,
+    assetIndex: index,
+    uriScheme: metadata.uriScheme,
+    width: metadata.width,
+    height: metadata.height,
+    fileSize: metadata.fileSize,
+    mimeType: asset.mimeType ?? "image/jpeg",
+  });
+  return {
+    uri: asset.uri,
+    mimeType: asset.mimeType ?? "image/jpeg",
+    width: metadata.width,
+    height: metadata.height,
+    fileSize: metadata.fileSize,
+  };
+}
+
+async function prepareImageForCompatibility(
+  image: ScanEncodedImage,
+  index: number,
+  reason: string,
+): Promise<ScanEncodedImage> {
+  const width = image.width ?? 0;
+  const height = image.height ?? 0;
+  const longestEdge = Math.max(width, height);
+  const shouldResize = longestEdge > COMPAT_IMAGE_MAX_DIMENSION || longestEdge === 0;
+  const resizeAction = shouldResize
+    ? [{ resize: width >= height ? { width: COMPAT_IMAGE_MAX_DIMENSION } : { height: COMPAT_IMAGE_MAX_DIMENSION } }]
+    : [];
+
+  scanLog("resize/manipulation start", {
+    imageIndex: index,
+    reason,
+    uriScheme: uriScheme(image.uri),
+    originalWidth: image.width ?? null,
+    originalHeight: image.height ?? null,
+    originalFileSize: image.fileSize ?? null,
+    targetMaxDimension: COMPAT_IMAGE_MAX_DIMENSION,
+    compression: COMPAT_IMAGE_COMPRESSION,
+    willResize: shouldResize,
+  });
+
+  const result = await ImageManipulator.manipulateAsync(
+    image.uri,
+    resizeAction,
+    {
+      compress: COMPAT_IMAGE_COMPRESSION,
+      format: ImageManipulator.SaveFormat.JPEG,
+      base64: false,
+    },
+  );
+  const fileSize = await localFileSize(result.uri);
+  scanLog("resize/manipulation success", {
+    imageIndex: index,
+    reason,
+    uriScheme: uriScheme(result.uri),
+    width: result.width,
+    height: result.height,
+    fileSize,
+  });
+
+  return {
+    ...image,
+    uri: result.uri,
+    mimeType: "image/jpeg",
+    width: result.width,
+    height: result.height,
+    fileSize,
+    compatibilityPrepared: true,
+  };
+}
+
+async function prepareImagesForCompatibility(
+  scanImages: ScanEncodedImage[],
+  reason: string,
+): Promise<ScanEncodedImage[]> {
+  const prepared: ScanEncodedImage[] = [];
+  for (let index = 0; index < scanImages.length; index += 1) {
+    const image = scanImages[index];
+    if (!image.uri || image.compatibilityPrepared) {
+      prepared.push(image);
+      continue;
+    }
+    try {
+      prepared.push(await prepareImageForCompatibility(image, index, reason));
+    } catch (error) {
+      scanLog("resize/manipulation failure", {
+        imageIndex: index,
+        reason,
+        uriScheme: uriScheme(image.uri),
+        message: errorMessage(error),
+      });
+      throw error;
+    }
+  }
+  return prepared;
 }
 
 function errorMessage(error: unknown): string {
@@ -299,6 +547,7 @@ export default function ScanScreen() {
   const [scanStatus, setScanStatus] = useState<ScanStatus>("idle");
   const [detectedItems, setDetectedItems] = useState<ScanDetectedItem[]>([]);
   const [scanError, setScanError] = useState<string | null>(null);
+  const [compatibilityPrompt, setCompatibilityPrompt] = useState<CompatibilityPrompt | null>(null);
   const [limitModal, setLimitModal] = useState<NormalizedLimitError | null>(null);
   const [savingIds, setSavingIds] = useState<Set<number>>(new Set());
   const [scanSaveError, setScanSaveError] = useState<string | null>(null);
@@ -320,6 +569,7 @@ export default function ScanScreen() {
   const videoProcessingRef = useRef<{ key: string; sessionId: number } | null>(null);
   const videoProcessingSessionRef = useRef(0);
   const saveAllInFlightRef = useRef(false);
+  const restoredAndroidScanStateRef = useRef(false);
 
   useEffect(() => () => {
     if (multiPhotoCameraTimerRef.current) {
@@ -327,6 +577,100 @@ export default function ScanScreen() {
     }
     multiPhotoCameraInteractionRef.current?.cancel();
   }, []);
+
+  const persistAndroidScanState = async (reason: string) => {
+    if (Platform.OS !== "android") return;
+    if (!selectedMode && images.length === 0) {
+      await AsyncStorage.removeItem(ANDROID_SCAN_STATE_STORAGE_KEY);
+      return;
+    }
+
+    const payload: PersistedAndroidScanState = {
+      version: 1,
+      savedAt: Date.now(),
+      selectedMode,
+      selectedFileId,
+      selectedRoomId,
+      newRoomName,
+      images,
+      scanStatus,
+    };
+    await AsyncStorage.setItem(ANDROID_SCAN_STATE_STORAGE_KEY, JSON.stringify(payload));
+    scanLog("android scan state persisted", {
+      reason,
+      mode: selectedMode,
+      imageCount: images.length,
+      scanStatus,
+    });
+  };
+
+  const clearAndroidScanState = async (reason: string) => {
+    if (Platform.OS !== "android") return;
+    await AsyncStorage.removeItem(ANDROID_SCAN_STATE_STORAGE_KEY);
+    scanLog("android scan state cleared", { reason });
+  };
+
+  useEffect(() => {
+    if (Platform.OS !== "android" || restoredAndroidScanStateRef.current) return;
+    restoredAndroidScanStateRef.current = true;
+
+    void AsyncStorage.getItem(ANDROID_SCAN_STATE_STORAGE_KEY).then((raw) => {
+      if (!raw) return;
+      let parsed: PersistedAndroidScanState | null = null;
+      try {
+        parsed = JSON.parse(raw) as PersistedAndroidScanState;
+      } catch {
+        void clearAndroidScanState("restore_parse_error");
+        return;
+      }
+
+      const isFresh = Date.now() - parsed.savedAt < ANDROID_SCAN_STATE_MAX_AGE_MS;
+      const routeFileMatches = !paramFileId || parsed.selectedFileId === paramFileId;
+      const routeRoomMatches = !paramRoomId || parsed.selectedRoomId === paramRoomId;
+      if (!isFresh || !routeFileMatches || !routeRoomMatches || parsed.images.length === 0 || selectedMode || images.length > 0) {
+        if (!isFresh) void clearAndroidScanState("restore_expired");
+        return;
+      }
+
+      scanLog("android scan state restored", {
+        mode: parsed.selectedMode,
+        imageCount: parsed.images.length,
+        previousScanStatus: parsed.scanStatus,
+      });
+      setSelectedMode(parsed.selectedMode);
+      setSelectedFileId(parsed.selectedFileId);
+      setSelectedRoomId(parsed.selectedRoomId);
+      setNewRoomName(parsed.newRoomName);
+      setImages(parsed.images);
+      setScanStatus("error");
+      setScanError("Coverly restored your photo after Android paused the app. Try the scan again, or choose a photo from gallery.");
+      setCompatibilityPrompt({
+        reason: "android_lifecycle_restore",
+        message: COMPATIBILITY_ERROR_COPY,
+      });
+    }).catch((error) => {
+      scanLog("android scan state restore failed", { message: errorMessage(error) });
+    });
+  }, [images.length, paramFileId, paramRoomId, selectedMode]);
+
+  useEffect(() => {
+    if (Platform.OS !== "android") return;
+    void persistAndroidScanState("state_change").catch((error) => {
+      scanLog("android scan state persist failed", { message: errorMessage(error) });
+    });
+  }, [selectedMode, selectedFileId, selectedRoomId, newRoomName, images, scanStatus]);
+
+  useEffect(() => {
+    if (Platform.OS !== "android") return;
+    const subscription = AppState.addEventListener("change", (state) => {
+      if (state === "background" || state === "inactive") {
+        void persistAndroidScanState(`appstate_${state}`).catch((error) => {
+          scanLog("android scan state persist failed", { message: errorMessage(error) });
+        });
+      }
+    });
+    return () => subscription.remove();
+  }, [selectedMode, selectedFileId, selectedRoomId, newRoomName, images, scanStatus]);
 
   const { data: properties, isLoading: propertiesLoading } = useQuery({
     queryKey: ["properties", session?.user.id],
@@ -377,9 +721,11 @@ export default function ScanScreen() {
     setSelectedMode(null);
     setImages([]);
     setScanError(null);
+    setCompatibilityPrompt(null);
     setLimitModal(null);
     setMultiPhotoPromptVisible(false);
     aiScanEntitlementCheckedRef.current = false;
+    void clearAndroidScanState("clear_capture_state");
   };
 
   const selectedPropertyName =
@@ -436,6 +782,7 @@ export default function ScanScreen() {
       return;
     }
     scanLog("image processing started", { source: "library", mode: selectedMode });
+    setCompatibilityPrompt(null);
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
       allowsMultipleSelection: isMulti,
@@ -443,22 +790,21 @@ export default function ScanScreen() {
       quality: 0.8,
       base64: false,
     });
-    scanLog("image processing completed", {
+    scanLog("image picker returned", {
       source: "library",
+      mode: selectedMode,
       canceled: result.canceled,
       assetCount: result.canceled ? 0 : result.assets.length,
       hasUri: !result.canceled && result.assets.some((asset) => !!asset.uri),
     });
     if (!result.canceled) {
-      const picked: ScanEncodedImage[] = result.assets
-        .filter((a) => !!a.uri)
-        .map((a) => ({
-          uri: a.uri,
-          mimeType: a.mimeType ?? "image/jpeg",
-        }));
+      const picked = (
+        await Promise.all(result.assets.map((asset, index) => imageFromPickerAsset(asset, "library", index)))
+      ).filter((image): image is ScanEncodedImage => image !== null);
       scanLog("photo captured", {
         source: "library",
         imageCount: picked.length,
+        images: picked.map(safeImageDiagnostics),
       });
       if (picked.length === 0) {
         setScanError("Could not prepare the selected photo for scanning. Please try another image.");
@@ -472,6 +818,9 @@ export default function ScanScreen() {
         setImages(singleImage);
         await handleStartScan(selectedMode, singleImage);
       }
+    }
+    if (result.canceled) {
+      scanLog("image picker cancelled", { source: "library", mode: selectedMode });
     }
   };
 
@@ -498,27 +847,31 @@ export default function ScanScreen() {
       }
     }
     scanLog("image processing started", { source: "camera", mode, autoStart });
+    setCompatibilityPrompt(null);
     const result = await ImagePicker.launchCameraAsync({
       quality: 0.8,
       base64: false,
     });
-    scanLog("image processing completed", {
+    scanLog("image picker returned", {
       source: "camera",
+      mode,
       canceled: result.canceled,
       assetCount: result.canceled ? 0 : result.assets.length,
       hasUri: !result.canceled && !!result.assets[0]?.uri,
     });
     if (!result.canceled && result.assets[0]?.uri) {
       const a = result.assets[0];
-      const capturedImage: ScanEncodedImage = {
-        uri: a.uri,
-        mimeType: a.mimeType ?? "image/jpeg",
-      };
+      const capturedImage = await imageFromPickerAsset(a, "camera", 0);
+      if (!capturedImage) {
+        setScanError("Could not prepare the captured photo for scanning. Please try again.");
+        return;
+      }
       const capturedImages = [capturedImage];
       scanLog("photo captured", {
         source: "camera",
         imageCount: capturedImages.length,
         autoStart,
+        images: capturedImages.map(safeImageDiagnostics),
       });
       if (mode === "multi_photo_room") {
         setImages((current) => [...current, capturedImage].slice(0, MAX_MULTI_PHOTO_IMAGES));
@@ -531,6 +884,8 @@ export default function ScanScreen() {
       }
     } else if (!result.canceled) {
       setScanError("Could not prepare the captured photo for scanning. Please try again.");
+    } else {
+      scanLog("image picker cancelled", { source: "camera", mode });
     }
   };
 
@@ -574,9 +929,22 @@ export default function ScanScreen() {
         time,
         quality: 0.8,
       });
+      const fileSize = await localFileSize(thumbnail.uri);
+      scanLog("selected asset metadata", {
+        source: "video",
+        assetIndex: index,
+        uriScheme: uriScheme(thumbnail.uri),
+        width: thumbnail.width ?? null,
+        height: thumbnail.height ?? null,
+        fileSize,
+        mimeType: "image/jpeg",
+      });
       frames.push({
         uri: thumbnail.uri,
         mimeType: "image/jpeg",
+        width: thumbnail.width ?? null,
+        height: thumbnail.height ?? null,
+        fileSize,
       });
     }
 
@@ -609,12 +977,13 @@ export default function ScanScreen() {
       scanLog("video frame extraction completed", {
         sessionId,
         frameCount: frames.length,
+        images: frames.map(safeImageDiagnostics),
       });
       setImages(frames);
       await handleStartScan("video_room", frames);
     } catch (error) {
       if (__DEV__) console.error("[Scan] video frame extraction failed", error);
-      setScanStatus("idle");
+      setScanStatus("error");
       setScanError(error instanceof Error ? error.message : "Could not prepare video frames. Try a shorter or clearer video.");
     } finally {
       if (videoProcessingRef.current?.sessionId === sessionId) {
@@ -638,8 +1007,17 @@ export default function ScanScreen() {
       quality: 0.8,
       allowsMultipleSelection: false,
     });
+    scanLog("image picker returned", {
+      source: "video_library",
+      mode: "video_room",
+      canceled: result.canceled,
+      assetCount: result.canceled ? 0 : result.assets.length,
+      hasUri: !result.canceled && !!result.assets[0]?.uri,
+    });
     if (!result.canceled && result.assets[0]) {
       await scanVideoAsset(result.assets[0]);
+    } else if (result.canceled) {
+      scanLog("image picker cancelled", { source: "video_library", mode: "video_room" });
     }
   };
 
@@ -660,8 +1038,17 @@ export default function ScanScreen() {
       quality: 0.8,
       videoMaxDuration: VIDEO_SCAN_USED_SECONDS,
     });
+    scanLog("image picker returned", {
+      source: "video_camera",
+      mode: "video_room",
+      canceled: result.canceled,
+      assetCount: result.canceled ? 0 : result.assets.length,
+      hasUri: !result.canceled && !!result.assets[0]?.uri,
+    });
     if (!result.canceled && result.assets[0]) {
       await scanVideoAsset(result.assets[0]);
+    } else if (result.canceled) {
+      scanLog("image picker cancelled", { source: "video_camera", mode: "video_room" });
     }
   };
 
@@ -671,7 +1058,7 @@ export default function ScanScreen() {
       VIDEO_SCAN_LIMIT_COPY,
       [
         { text: "Record video", onPress: () => void recordVideo() },
-        { text: "Choose from library", onPress: () => void pickVideo() },
+        { text: "Choose from gallery", onPress: () => void pickVideo() },
         { text: "Cancel", style: "cancel" },
       ],
     );
@@ -689,6 +1076,13 @@ export default function ScanScreen() {
 
   const chooseScanMode = (mode: ScanMode, comingSoon?: boolean) => {
     if (comingSoon) return;
+    scanLog("mode selected", {
+      mode,
+      hasFileId: Boolean(selectedFileId),
+      hasRoomId: Boolean(selectedRoomId),
+      device: androidDeviceSummary(),
+      knownProblemAndroidDevice: isKnownProblemAndroidDevice(),
+    });
     if (!selectedFileId || !selectedRoomId) {
       setScanError("Choose a property and room before selecting a scan type.");
       return;
@@ -796,9 +1190,31 @@ export default function ScanScreen() {
     }
   };
 
+  const showRecoverableScanError = (
+    message: string,
+    scanImages: ScanEncodedImage[],
+    reason: string,
+  ) => {
+    const compatibilityReason = compatibilityReasonFor(scanImages, reason);
+    scanLog("scan failure surfaced", {
+      reason,
+      message,
+      canRetryCompatibility: Boolean(compatibilityReason),
+      imageCount: scanImages.length,
+    });
+    setScanStatus("error");
+    setScanError(compatibilityReason ? COMPATIBILITY_ERROR_COPY : message);
+    setCompatibilityPrompt(
+      compatibilityReason
+        ? { reason: compatibilityReason, message: COMPATIBILITY_ERROR_COPY }
+        : null,
+    );
+  };
+
   const handleStartScan = async (
     modeOverride?: ScanMode,
     imagesOverride?: ScanEncodedImage[],
+    options: StartScanOptions = {},
   ) => {
     const mode = modeOverride ?? selectedMode;
     const scanImages = imagesOverride ?? images;
@@ -809,19 +1225,55 @@ export default function ScanScreen() {
     if (!aiScanEntitlementCheckedRef.current && !enforce("ai_scan")) return;
 
     setScanError(null);
+    setCompatibilityPrompt(null);
+    scanLog("scan start requested", {
+      mode,
+      imageCount: scanImages.length,
+      compatibilityMode: Boolean(options.compatibilityMode),
+      compatibilityReason: options.compatibilityReason ?? null,
+      device: androidDeviceSummary(),
+      images: scanImages.map(safeImageDiagnostics),
+    });
+
+    let imagesForScan = scanImages;
+    const shouldUseCompatibility =
+      options.compatibilityMode ||
+      (Platform.OS === "android" && scanImages.some(isExtremeImage));
+
+    if (shouldUseCompatibility) {
+      const reason =
+        options.compatibilityReason ??
+        compatibilityReasonFor(scanImages, "extreme_image_size") ??
+        "compatibility_mode";
+      setScanStatus("picking");
+      try {
+        imagesForScan = await prepareImagesForCompatibility(scanImages, reason);
+        setImages(imagesForScan);
+      } catch (error) {
+        showRecoverableScanError(
+          "This phone had trouble preparing the photo. Try again in compatibility mode or choose a photo from gallery.",
+          scanImages,
+          "image_preparation_failed",
+        );
+        return;
+      }
+    }
 
     const input = {
       mode,
       fileId: selectedFileId,
       roomId: selectedRoomId,
       roomName: getDestRoomName(selectedRoomId) ?? undefined,
-      images: scanImages,
+      images: imagesForScan,
     };
 
     const validationError = validateScanInput(input);
     if (validationError) { setScanError(validationError); return; }
 
     setScanStatus("scanning");
+    void persistAndroidScanState("scan_started").catch((error) => {
+      scanLog("android scan state persist failed", { message: errorMessage(error) });
+    });
 
     let result;
     try {
@@ -830,13 +1282,16 @@ export default function ScanScreen() {
       const message = error instanceof Error ? error.message : "Scan failed. Please try again.";
       const expectedNetworkFailure = /timed out|network request failed|network request timed out|failed to fetch/i.test(message);
       if (__DEV__ && !expectedNetworkFailure) console.error("[Scan] unexpected scan failure", error);
-      setScanStatus("error");
-      setScanError(expectedNetworkFailure ? "We couldn't complete the scan. Check your connection and try again." : message);
+      showRecoverableScanError(
+        expectedNetworkFailure ? "We couldn't complete the scan. Check your connection and try again." : message,
+        imagesForScan,
+        expectedNetworkFailure ? "scan_request_network_failure" : "scan_request_unexpected_failure",
+      );
       return;
     }
 
     if (result.status === "not_configured") {
-      setScanStatus("idle");
+      setScanStatus("error");
       setScanError("AI scan is not available right now. Please try again later.");
       return;
     }
@@ -844,42 +1299,99 @@ export default function ScanScreen() {
     if (result.status === "error") {
       const normalizedLimit = normalizeLimitError({
         status: result.httpStatus,
-        errorCode: result.errorCode,
+        errorCode: result.errorCode ?? (result.httpStatus === 402 ? "AI_SCAN_LIMIT_REACHED" : undefined),
         responseBody: result.responseBody,
       });
       if (normalizedLimit) {
         setScanStatus("idle");
         setScanError(null);
+        setCompatibilityPrompt(null);
         setLimitModal(normalizedLimit);
         return;
       }
-      setScanStatus("error");
-      setScanError(result.errorMessage ?? "AI scan failed. No items were saved. Please try again.");
+      const statusReason =
+        result.httpStatus === 401 || result.httpStatus === 403
+          ? "scan_auth_error"
+          : result.httpStatus === 402
+            ? "scan_entitlement_error"
+            : result.errorCode ?? "scan_result_error";
+      const message = result.errorMessage ?? "AI scan failed. No items were saved. Please try again.";
+      if (result.httpStatus === 401 || result.httpStatus === 403) {
+        setScanStatus("error");
+        setScanError(message || "You must be signed in to scan items.");
+        setCompatibilityPrompt(null);
+        return;
+      }
+      showRecoverableScanError(message, imagesForScan, String(statusReason));
       return;
     }
 
     if (result.items.length === 0) {
-      setScanStatus("idle");
-      setScanError("No items were detected. Try a clearer shot or a different angle.");
+      showRecoverableScanError(
+        "No items were detected. Try a clearer shot or a different angle.",
+        imagesForScan,
+        "no_usable_items",
+      );
       return;
     }
 
-    // Attach source image thumbnails for review cards.
-    // Use sourcePhotoIndex returned by Edge Function to route each item to the correct source photo.
-    const fallbackUri = scanImages[0]?.uri ?? null;
-    const itemsWithThumbs: ScanDetectedItem[] = result.items.map((item) => ({
-      ...item,
-      sourceImageUri:
-        item.sourcePhotoIndex != null
-          ? (scanImages[item.sourcePhotoIndex]?.uri ?? fallbackUri)
-          : (item.sourceImageUri ?? fallbackUri),
-    }));
+    try {
+      // Attach source image thumbnails for review cards.
+      // Use sourcePhotoIndex returned by Edge Function to route each item to the correct source photo.
+      const fallbackUri = imagesForScan[0]?.uri ?? null;
+      const itemsWithThumbs: ScanDetectedItem[] = result.items.map((item) => ({
+        ...item,
+        sourceImageUri:
+          item.sourcePhotoIndex != null
+            ? (imagesForScan[item.sourcePhotoIndex]?.uri ?? fallbackUri)
+            : (item.sourceImageUri ?? fallbackUri),
+      }));
 
-    setActiveSourcePhotoIdx(0);
-    setActivePinIndex(null);
-    setDetectedItems(itemsWithThumbs);
-    setScanStatus("reviewing");
-    void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      scanLog("navigation/state transition to review screen", {
+        mode,
+        itemCount: itemsWithThumbs.length,
+        imageCount: imagesForScan.length,
+        compatibilityMode: imagesForScan.some((image) => image.compatibilityPrepared),
+      });
+      setActiveSourcePhotoIdx(0);
+      setActivePinIndex(null);
+      setDetectedItems(itemsWithThumbs);
+      setScanStatus("reviewing");
+      setCompatibilityPrompt(null);
+      void clearAndroidScanState("scan_reviewing");
+      void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    } catch (error) {
+      scanLog("navigation/state transition to review screen failed", {
+        mode,
+        imageCount: imagesForScan.length,
+        itemCount: result.items.length,
+        message: errorMessage(error),
+      });
+      showRecoverableScanError(
+        "Coverly found scan results but had trouble opening the review screen. Try again in compatibility mode or choose a photo from gallery.",
+        imagesForScan,
+        "review_transition_failed",
+      );
+    }
+  };
+
+  const retryCurrentScan = () => {
+    if (!selectedMode) return;
+    void handleStartScan(selectedMode, images);
+  };
+
+  const retryCompatibilityScan = () => {
+    if (!selectedMode) return;
+    const reason = compatibilityPrompt?.reason ?? compatibilityReasonFor(images, "manual_retry") ?? "manual_retry";
+    void handleStartScan(selectedMode, images, {
+      compatibilityMode: true,
+      compatibilityReason: reason,
+    });
+  };
+
+  const chooseGalleryFallback = () => {
+    if (!selectedMode) return;
+    void pickImages();
   };
 
   const handleDiscardItem = (index: number) => {
@@ -1202,6 +1714,7 @@ export default function ScanScreen() {
     setDetectedItems([]);
     setScanStatus("idle");
     setScanError(null);
+    setCompatibilityPrompt(null);
     setLimitModal(null);
     setScanSaveError(null);
     setPartialFailures([]);
@@ -1209,6 +1722,7 @@ export default function ScanScreen() {
     setActiveSourcePhotoIdx(0);
     aiScanEntitlementCheckedRef.current = false;
     clearScanPhotoUploadCache();
+    void clearAndroidScanState("reset_scan");
   };
 
   const goBackToRoom = () => {
@@ -2230,7 +2744,7 @@ export default function ScanScreen() {
                   ]}
                 >
                   <Feather name="image" size={20} color={colors.primary} />
-                  <Text style={[styles.photoBtnText, { color: colors.primary }]}>Library</Text>
+                  <Text style={[styles.photoBtnText, { color: colors.primary }]}>Gallery</Text>
                 </Pressable>
               </View>
             )}
@@ -2263,7 +2777,7 @@ export default function ScanScreen() {
                 ]}
               >
                 <Feather name="film" size={20} color={colors.primary} />
-                <Text style={[styles.photoBtnText, { color: colors.primary }]}>Library</Text>
+                <Text style={[styles.photoBtnText, { color: colors.primary }]}>Gallery</Text>
               </Pressable>
             </View>
           </View>
@@ -2272,8 +2786,61 @@ export default function ScanScreen() {
         {/* Inline error */}
         {scanError && (
           <View style={[styles.errorCard, { backgroundColor: "#FEF2F2", borderColor: "#FCA5A5", borderRadius: colors.radius }]}>
-            <Feather name="alert-circle" size={15} color="#DC2626" />
-            <Text style={[styles.errorText, { color: "#991B1B" }]}>{scanError}</Text>
+            <View style={styles.errorHeader}>
+              <Feather name="alert-circle" size={15} color="#DC2626" />
+              <Text style={[styles.errorText, { color: "#991B1B" }]}>{scanError}</Text>
+            </View>
+            {scanStatus === "error" && selectedMode && images.length > 0 ? (
+              <View style={styles.errorActions}>
+                <Pressable
+                  onPress={retryCurrentScan}
+                  style={({ pressed }) => [
+                    styles.errorActionButton,
+                    {
+                      backgroundColor: colors.card,
+                      borderColor: "#FCA5A5",
+                      borderRadius: colors.radius,
+                      opacity: pressed ? 0.76 : 1,
+                    },
+                  ]}
+                >
+                  <Feather name="refresh-cw" size={14} color="#991B1B" />
+                  <Text style={[styles.errorActionText, { color: "#991B1B" }]}>Retry</Text>
+                </Pressable>
+                {compatibilityPrompt ? (
+                  <Pressable
+                    onPress={retryCompatibilityScan}
+                    style={({ pressed }) => [
+                      styles.errorActionButton,
+                      {
+                        backgroundColor: colors.primary,
+                        borderColor: colors.primary,
+                        borderRadius: colors.radius,
+                        opacity: pressed ? 0.82 : 1,
+                      },
+                    ]}
+                  >
+                    <Feather name="tool" size={14} color={colors.primaryForeground} />
+                    <Text style={[styles.errorActionText, { color: colors.primaryForeground }]}>Compatibility mode</Text>
+                  </Pressable>
+                ) : null}
+                <Pressable
+                  onPress={chooseGalleryFallback}
+                  style={({ pressed }) => [
+                    styles.errorActionButton,
+                    {
+                      backgroundColor: colors.card,
+                      borderColor: "#FCA5A5",
+                      borderRadius: colors.radius,
+                      opacity: pressed ? 0.76 : 1,
+                    },
+                  ]}
+                >
+                  <Feather name="image" size={14} color="#991B1B" />
+                  <Text style={[styles.errorActionText, { color: "#991B1B" }]}>Choose from gallery</Text>
+                </Pressable>
+              </View>
+            ) : null}
           </View>
         )}
 
@@ -2447,8 +3014,20 @@ const styles = StyleSheet.create({
   preparingTitle: { fontSize: 18, fontFamily: "Inter_700Bold", textAlign: "center" },
   preparingText: { fontSize: 13, lineHeight: 19, fontFamily: "Inter_400Regular", textAlign: "center" },
   videoHelper: { fontSize: 13, lineHeight: 18, fontFamily: "Inter_400Regular" },
-  errorCard: { borderWidth: 1, padding: 12, flexDirection: "row", alignItems: "flex-start", gap: 8 },
+  errorCard: { borderWidth: 1, padding: 12, gap: 10 },
+  errorHeader: { flexDirection: "row", alignItems: "flex-start", gap: 8 },
   errorText: { fontSize: 13, fontFamily: "Inter_400Regular", lineHeight: 18, flex: 1 },
+  errorActions: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
+  errorActionButton: {
+    minHeight: 38,
+    borderWidth: 1,
+    paddingHorizontal: 11,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+  },
+  errorActionText: { fontSize: 12, fontFamily: "Inter_600SemiBold" },
   scanBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, paddingVertical: 15, marginTop: 4 },
   scanBtnText: { fontSize: 16, fontFamily: "Inter_600SemiBold" },
   captureModalBackdrop: {

@@ -23,6 +23,14 @@ export interface ScanEncodedImage {
   mimeType: string;
   /** Durable Supabase Storage path uploaded before scan invoke */
   storagePath?: string;
+  /** Picker-reported or probed image width, used only for diagnostics/adaptive preparation */
+  width?: number | null;
+  /** Picker-reported or probed image height, used only for diagnostics/adaptive preparation */
+  height?: number | null;
+  /** Picker-reported or probed local file size in bytes, never logged with a full URI/path */
+  fileSize?: number | null;
+  /** True when this image was prepared by the Android compatibility path */
+  compatibilityPrepared?: boolean;
 }
 
 export interface ScanInput {

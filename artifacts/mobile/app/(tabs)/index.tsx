@@ -43,8 +43,8 @@ import { supabase } from "@/lib/supabase";
 import type { InventoryFile, InventoryItem, InventoryRoom } from "@/types";
 
 const HOME_ITEMS_PAGE_SIZE = 1000;
-const HOME_SUMMARY_BACKGROUND = "#F6FBFA";
-const HOME_SUMMARY_BORDER = "#D7E7E4";
+const HOME_SUMMARY_BACKGROUND = "#F4F8F7";
+const HOME_SUMMARY_BORDER = "#DCE9E6";
 const countFormatter = new Intl.NumberFormat("en-NZ");
 type GlobalReadinessFilter = "all" | "needs_review" | "missing_photo" | "missing_value";
 
@@ -690,8 +690,14 @@ export default function HomeScreen() {
 
   const renderHeader = () => {
     if (!portfolio || !properties || properties.length === 0) return null;
+    const roomCount = allRooms?.length ?? 0;
+    const portfolioCoverPercent =
+      portfolio.totalRecordedCover > 0
+        ? (portfolio.totalInventoryValue / portfolio.totalRecordedCover) * 100
+        : null;
+
     return (
-      <View style={{ gap: 12, paddingHorizontal: 16, paddingTop: 16 }}>
+      <View style={{ gap: 14, paddingHorizontal: 16, paddingTop: 16 }}>
         {/* Welcome header */}
         <View style={{ paddingBottom: 2 }}>
           <Text style={{ fontSize: 17, fontFamily: "Inter_600SemiBold", color: "#1E293B" }}>
@@ -708,46 +714,79 @@ export default function HomeScreen() {
             { backgroundColor: HOME_SUMMARY_BACKGROUND, borderColor: HOME_SUMMARY_BORDER, borderRadius: colors.radius },
           ]}
         >
-          <View style={styles.summaryTitleRow}>
-            <View style={[styles.summaryTitleIcon, { backgroundColor: colors.secondary }]}>
-              <Feather name="home" size={12} color={colors.primary} />
+          <View style={styles.statusHeader}>
+            <View>
+              <Text style={[styles.statusEyebrow, { color: colors.primary }]}>
+                Status
+              </Text>
+              <Text style={[styles.statusTitle, { color: colors.foreground }]}>
+                Your home inventory
+              </Text>
             </View>
-            <Text style={[styles.sectionLabel, styles.summarySectionLabel, { color: colors.mutedForeground }]}>
-              YOUR HOME INVENTORY
+            <View style={[styles.summaryTitleIcon, { backgroundColor: colors.card, borderColor: colors.border }]}>
+              <Feather name="home" size={14} color={colors.primary} />
+            </View>
+          </View>
+
+          <View style={styles.statusValueBlock}>
+            <Text
+              style={[styles.bigValue, { color: colors.foreground }]}
+              numberOfLines={1}
+              adjustsFontSizeToFit
+            >
+              {formatCurrency(portfolio.totalInventoryValue || null)}
+            </Text>
+            <Text style={[styles.bigLabel, { color: colors.mutedForeground }]}>
+              Total inventory value
             </Text>
           </View>
-          <View style={styles.statsRow}>
+
+          <View style={[styles.statsRow, { borderColor: colors.border }]}>
             <View style={styles.statCell}>
-              <Text style={[styles.bigValue, { color: colors.foreground }]}>
-                {formatCurrency(portfolio.totalInventoryValue || null)}
-              </Text>
-              <Text style={[styles.bigLabel, { color: colors.mutedForeground }]}>
-                Total inventory value
-              </Text>
-            </View>
-            <View style={[styles.statDivider, { backgroundColor: colors.border }]} />
-            <View style={styles.statCell}>
-              <Text style={[styles.bigValue, { color: colors.foreground }]}>
+              <Text style={[styles.statValue, { color: colors.foreground }]}>
                 {formatCount(portfolio.totalItems)}
               </Text>
-              <Text style={[styles.bigLabel, { color: colors.mutedForeground }]}>
-                Total items
+              <Text style={[styles.statLabel, { color: colors.mutedForeground }]}>
+                Items
               </Text>
             </View>
             <View style={[styles.statDivider, { backgroundColor: colors.border }]} />
             <View style={styles.statCell}>
-              <Text style={[styles.bigValue, { color: colors.foreground }]}>
+              <Text style={[styles.statValue, { color: colors.foreground }]}>
                 {formatCount(portfolio.propertyCount)}
               </Text>
-              <Text style={[styles.bigLabel, { color: colors.mutedForeground }]}>
+              <Text style={[styles.statLabel, { color: colors.mutedForeground }]}>
                 Properties
               </Text>
             </View>
+            <View style={[styles.statDivider, { backgroundColor: colors.border }]} />
+            <View style={styles.statCell}>
+              <Text style={[styles.statValue, { color: colors.foreground }]}>
+                {formatCount(roomCount)}
+              </Text>
+              <Text style={[styles.statLabel, { color: colors.mutedForeground }]}>
+                Rooms
+              </Text>
+            </View>
+            <View style={[styles.statDivider, { backgroundColor: colors.border }]} />
+            <View style={styles.statCell}>
+              <Text
+                style={[
+                  styles.statValue,
+                  { color: portfolioCoverPercent == null ? colors.mutedForeground : getCoverageColor(portfolioCoverPercent) },
+                ]}
+              >
+                {portfolioCoverPercent == null ? "Set" : `${Math.round(portfolioCoverPercent)}%`}
+              </Text>
+              <Text style={[styles.statLabel, { color: colors.mutedForeground }]}>
+                Cover
+              </Text>
+            </View>
           </View>
-          {portfolio.totalRecordedCover > 0 && portfolio.totalInventoryValue > 0 && (
-            <View style={{ marginTop: 12 }}>
+          {portfolioCoverPercent != null && portfolio.totalInventoryValue > 0 && (
+            <View style={styles.coverProgressWrap}>
               <CoverageBar
-                percent={(portfolio.totalInventoryValue / portfolio.totalRecordedCover) * 100}
+                percent={portfolioCoverPercent}
                 inventoryValue={portfolio.totalInventoryValue}
                 coverValue={portfolio.totalRecordedCover}
                 colors={colors}
@@ -763,7 +802,7 @@ export default function HomeScreen() {
 
         {homeRecommendedAction ? <RecommendedActionCard {...homeRecommendedAction} /> : null}
 
-        <View style={{ flexDirection: "row", gap: 10 }}>
+        <View style={styles.actionRow}>
           <Pressable
             onPress={handleScanItems}
             style={({ pressed }) => [
@@ -1090,9 +1129,9 @@ function FirstUseEmptyState({ onAddProperty }: { onAddProperty: () => void }) {
   const colors = useColors();
   const steps: Array<{ icon: keyof typeof Feather.glyphMap; title: string; body: string }> = [
     { icon: "home", title: "Add your property", body: "Create the place you want to inventory." },
-    { icon: "zap", title: "Scan a room", body: "Capture visible items from photos." },
-    { icon: "paperclip", title: "Add evidence", body: "Attach receipts, photos, and notes." },
-    { icon: "package", title: "Create a claim pack", body: "Export selected items when needed." },
+    { icon: "camera", title: "Scan rooms or add items", body: "Capture visible items or enter them manually." },
+    { icon: "paperclip", title: "Add evidence", body: "Attach receipts, photos, notes, and proof." },
+    { icon: "file-text", title: "Create a claim pack", body: "Export organised evidence when needed." },
   ];
 
   return (
@@ -1124,18 +1163,24 @@ function FirstUseEmptyState({ onAddProperty }: { onAddProperty: () => void }) {
         </Pressable>
       </LinearGradient>
 
-      <View style={styles.firstUseSteps}>
-        {steps.map((step) => (
-          <View key={step.title} style={[styles.firstUseStep, { backgroundColor: colors.card, borderColor: colors.border, borderRadius: colors.radius }]}>
-            <View style={[styles.firstUseStepIcon, { backgroundColor: colors.secondary }]}>
-              <Feather name={step.icon} size={16} color={colors.primary} />
+      <View style={styles.firstUseGuide}>
+        <Text style={[styles.firstUseGuideTitle, { color: colors.foreground }]}>How Coverly works</Text>
+        <View style={styles.firstUseSteps}>
+          {steps.map((step, index) => (
+            <View key={step.title} style={styles.firstUseStep}>
+              <View style={[styles.firstUseStepNumber, { backgroundColor: colors.secondary }]}>
+                <Text style={[styles.firstUseStepNumberText, { color: colors.primary }]}>{index + 1}</Text>
+              </View>
+              <View style={[styles.firstUseStepIcon, { backgroundColor: colors.muted }]}>
+                <Feather name={step.icon} size={13} color={colors.primary} />
+              </View>
+              <View style={styles.firstUseStepCopy}>
+                <Text style={[styles.firstUseStepTitle, { color: colors.foreground }]}>{step.title}</Text>
+                <Text style={[styles.firstUseStepBody, { color: colors.mutedForeground }]}>{step.body}</Text>
+              </View>
             </View>
-            <View style={styles.firstUseStepCopy}>
-              <Text style={[styles.firstUseStepTitle, { color: colors.foreground }]}>{step.title}</Text>
-              <Text style={[styles.firstUseStepBody, { color: colors.mutedForeground }]}>{step.body}</Text>
-            </View>
-          </View>
-        ))}
+          ))}
+        </View>
       </View>
     </View>
   );
@@ -1279,31 +1324,38 @@ const styles = StyleSheet.create({
     textAlign: "center",
   },
   statsCard: {
-    borderWidth: 1.5,
+    borderWidth: 1,
     padding: 16,
-    gap: 4,
-  },
-  summaryTitleRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 7,
-    marginBottom: 8,
+    gap: 0,
   },
   summaryTitleIcon: {
-    width: 22,
-    height: 22,
-    borderRadius: 11,
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    borderWidth: 1,
     alignItems: "center",
     justifyContent: "center",
   },
-  sectionLabel: {
-    fontSize: 11,
-    fontFamily: "Inter_600SemiBold",
-    letterSpacing: 0.8,
-    marginBottom: 8,
+  statusHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+    marginBottom: 14,
   },
-  summarySectionLabel: {
-    marginBottom: 0,
+  statusEyebrow: {
+    fontSize: 11,
+    fontFamily: "Inter_700Bold",
+    letterSpacing: 0.8,
+    textTransform: "uppercase",
+  },
+  statusTitle: {
+    marginTop: 3,
+    fontSize: 17,
+    fontFamily: "Inter_700Bold",
+  },
+  statusValueBlock: {
+    gap: 3,
   },
   sectionHeading: {
     fontSize: 18,
@@ -1314,6 +1366,9 @@ const styles = StyleSheet.create({
   statsRow: {
     flexDirection: "row",
     alignItems: "center",
+    marginTop: 15,
+    paddingTop: 14,
+    borderTopWidth: StyleSheet.hairlineWidth,
   },
   statCell: {
     flex: 1,
@@ -1321,31 +1376,47 @@ const styles = StyleSheet.create({
     gap: 2,
   },
   statDivider: {
-    width: 1,
-    height: 36,
-    marginHorizontal: 4,
+    width: StyleSheet.hairlineWidth,
+    height: 30,
+    marginHorizontal: 3,
   },
   bigValue: {
-    fontSize: 20,
+    fontSize: 32,
+    lineHeight: 38,
     fontFamily: "Inter_700Bold",
   },
   bigLabel: {
-    fontSize: 11,
+    fontSize: 12,
     fontFamily: "Inter_400Regular",
-    textAlign: "center",
+  },
+  coverProgressWrap: {
+    marginTop: 14,
+    paddingTop: 13,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: HOME_SUMMARY_BORDER,
   },
   coverFallbackText: {
-    marginTop: 12,
+    marginTop: 13,
+    paddingTop: 13,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: HOME_SUMMARY_BORDER,
     fontSize: 11,
     lineHeight: 16,
     fontFamily: "Inter_400Regular",
   },
+  actionRow: {
+    flexDirection: "row",
+    gap: 10,
+    marginTop: 2,
+  },
   quickAction: {
+    minHeight: 46,
     flexDirection: "row",
     alignItems: "center",
+    justifyContent: "center",
     gap: 6,
-    paddingHorizontal: 10,
-    paddingVertical: 11,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
   },
   quickActionText: {
     fontSize: 14,
@@ -1395,19 +1466,38 @@ const styles = StyleSheet.create({
     fontFamily: "Inter_700Bold",
   },
   firstUseSteps: {
-    gap: 10,
+    gap: 8,
+  },
+  firstUseGuide: {
+    gap: 9,
+    paddingHorizontal: 2,
+  },
+  firstUseGuideTitle: {
+    fontSize: 15,
+    fontFamily: "Inter_700Bold",
   },
   firstUseStep: {
-    borderWidth: 1,
-    padding: 12,
+    paddingVertical: 8,
     flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 8,
+  },
+  firstUseStepNumber: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
     alignItems: "center",
-    gap: 10,
+    justifyContent: "center",
+    marginTop: 1,
+  },
+  firstUseStepNumberText: {
+    fontSize: 11,
+    fontFamily: "Inter_700Bold",
   },
   firstUseStepIcon: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
+    width: 24,
+    height: 24,
+    borderRadius: 12,
     alignItems: "center",
     justifyContent: "center",
   },

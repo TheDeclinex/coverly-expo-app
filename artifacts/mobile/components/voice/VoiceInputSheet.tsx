@@ -50,32 +50,50 @@ export function VoiceInputSheet({
 }) {
   const colors = useColors();
   const insets = useSafeAreaInsets();
-  const voice = useVoiceRecording();
+  const voice = useVoiceRecording(undefined, targetField ? "inline_voice_field" : "edit_item_full_voice");
   const [phase, setPhase] = useState<VoiceInputPhase>("permission");
   const [transcript, setTranscript] = useState("");
   const [changes, setChanges] = useState<VoiceMappedChange[]>([]);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const processingRef = useRef(false);
+  const visibleRef = useRef(visible);
+
+  useEffect(() => {
+    visibleRef.current = visible;
+  }, [visible]);
 
   useEffect(() => {
     if (!visible) return;
-    setPhase(voice.permission === "granted" ? "ready" : "permission");
+    let cancelled = false;
+    setPhase("permission");
     setTranscript("");
     setChanges([]);
     setSelectedIds(new Set());
     setErrorMessage(null);
-  }, [visible]);
+    void voice.checkPermission().then((granted) => {
+      if (!cancelled && visibleRef.current) setPhase(granted ? "ready" : "permission");
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [visible, voice.checkPermission]);
 
   const closeAndClean = async () => {
     processingRef.current = false;
-    await voice.reset();
-    onClose();
+    try {
+      await voice.reset();
+    } finally {
+      onClose();
+    }
   };
 
   const requestPermission = async () => {
+    if (voice.isRequestingPermission) return;
+    voice.logDiagnostic("voice_permission_button_pressed");
     setErrorMessage(null);
     const granted = await voice.requestPermission();
+    if (!visibleRef.current) return;
     if (granted) setPhase("ready");
     else {
       setPhase("permission");
@@ -84,8 +102,16 @@ export function VoiceInputSheet({
   };
 
   const startRecording = async () => {
+    if (voice.isStartingRecording || voice.isRecording) return;
     setErrorMessage(null);
-    if (await voice.startRecording()) setPhase("recording");
+    if (voice.permission !== "granted") {
+      setPhase("permission");
+      setErrorMessage("Tap Allow microphone first, then start recording.");
+      return;
+    }
+    if (await voice.startRecording()) {
+      if (visibleRef.current) setPhase("recording");
+    }
     else {
       setPhase("error");
       setErrorMessage(voice.error ?? "Could not start recording.");
@@ -97,53 +123,62 @@ export function VoiceInputSheet({
     processingRef.current = true;
     setPhase("processing");
     setErrorMessage(null);
-    const recording = await voice.stopRecording();
-    if (!recording) {
+    try {
+      const recording = await voice.stopRecording();
+      if (!visibleRef.current) return;
+      if (!recording) {
+        setPhase("error");
+        setErrorMessage(voice.error ?? "Could not finish recording.");
+        return;
+      }
+
+      const result = await callVoiceDescribe(recording, {
+        ...context,
+        mode: "item_edit",
+        targetField,
+        currentValues,
+      });
+      if (!visibleRef.current) return;
+
+      if (!result.response) {
+        setPhase("error");
+        setErrorMessage(result.networkError ?? "Voice input could not be processed.");
+        return;
+      }
+      if (!result.response.success) {
+        setPhase("error");
+        setErrorMessage(result.response.error);
+        return;
+      }
+      setTranscript(result.response.transcript);
+      if (!result.response.extraction) {
+        setPhase("error");
+        setErrorMessage(result.response.extractionError ?? "No supported item details were found.");
+        return;
+      }
+
+      const nextChanges = mapVoiceItemExtraction({
+        transcript: result.response.transcript,
+        extraction: result.response.extraction,
+        currentValues,
+        targetField,
+      });
+      if (nextChanges.length === 0) {
+        setPhase("error");
+        setErrorMessage("No supported item changes were found. Try saying the field and value clearly.");
+        return;
+      }
+      setChanges(nextChanges);
+      setSelectedIds(new Set(nextChanges.filter((change) => change.selectedByDefault).map((change) => change.id)));
+      setPhase("review");
+    } catch {
+      if (visibleRef.current) {
+        setPhase("error");
+        setErrorMessage("Voice input could not be processed. Please try again.");
+      }
+    } finally {
       processingRef.current = false;
-      setPhase("error");
-      setErrorMessage(voice.error ?? "Could not finish recording.");
-      return;
     }
-
-    const result = await callVoiceDescribe(recording, {
-      ...context,
-      mode: "item_edit",
-      targetField,
-      currentValues,
-    });
-    processingRef.current = false;
-
-    if (!result.response) {
-      setPhase("error");
-      setErrorMessage(result.networkError ?? "Voice input could not be processed.");
-      return;
-    }
-    if (!result.response.success) {
-      setPhase("error");
-      setErrorMessage(result.response.error);
-      return;
-    }
-    setTranscript(result.response.transcript);
-    if (!result.response.extraction) {
-      setPhase("error");
-      setErrorMessage(result.response.extractionError ?? "No supported item details were found.");
-      return;
-    }
-
-    const nextChanges = mapVoiceItemExtraction({
-      transcript: result.response.transcript,
-      extraction: result.response.extraction,
-      currentValues,
-      targetField,
-    });
-    if (nextChanges.length === 0) {
-      setPhase("error");
-      setErrorMessage("No supported item changes were found. Try saying the field and value clearly.");
-      return;
-    }
-    setChanges(nextChanges);
-    setSelectedIds(new Set(nextChanges.filter((change) => change.selectedByDefault).map((change) => change.id)));
-    setPhase("review");
   };
 
   useEffect(() => {
@@ -204,14 +239,14 @@ export function VoiceInputSheet({
                 <Text style={[styles.stateTitle, { color: colors.foreground }]}>Microphone access</Text>
                 <Text style={[styles.stateText, { color: colors.mutedForeground }]}>Coverly needs microphone access only while you record voice input.</Text>
                 {errorMessage && <Text style={[styles.errorText, { color: colors.destructive }]}>{errorMessage}</Text>}
-                <PrimaryButton label="Allow microphone" onPress={() => void requestPermission()} />
+                <PrimaryButton label={voice.isRequestingPermission ? "Checking access" : "Allow microphone"} disabled={voice.isRequestingPermission} onPress={() => void requestPermission()} />
               </View>
             )}
 
             {phase === "ready" && (
               <View style={styles.centerState}>
                 <Feather name="mic" size={34} color={colors.primary} />
-                <Text style={[styles.stateTitle, { color: colors.foreground }]}>Ready to listen</Text>
+                <Text style={[styles.stateTitle, { color: colors.foreground }]}>Microphone enabled</Text>
                 <Text style={[styles.stateText, { color: colors.mutedForeground }]}>Speak naturally. You will review the transcript and suggested changes next.</Text>
                 <View style={[styles.exampleBox, { backgroundColor: colors.secondary, borderColor: colors.border, borderRadius: colors.radius }]}>
                   <Text style={[styles.exampleLabel, { color: colors.mutedForeground }]}>EXAMPLE</Text>
@@ -219,7 +254,7 @@ export function VoiceInputSheet({
                     Sony Bravia 3 65 inch bought from Noel Leeming for $1700
                   </Text>
                 </View>
-                <PrimaryButton label="Start recording" onPress={() => void startRecording()} />
+                <PrimaryButton label={voice.isStartingRecording ? "Starting" : "Start recording"} disabled={voice.isStartingRecording} onPress={() => void startRecording()} />
               </View>
             )}
 
@@ -286,10 +321,24 @@ export function VoiceInputSheet({
   );
 }
 
-function PrimaryButton({ label, icon = "mic", onPress }: { label: string; icon?: React.ComponentProps<typeof Feather>["name"]; onPress: () => void }) {
+function PrimaryButton({
+  label,
+  icon = "mic",
+  disabled = false,
+  onPress,
+}: {
+  label: string;
+  icon?: React.ComponentProps<typeof Feather>["name"];
+  disabled?: boolean;
+  onPress: () => void;
+}) {
   const colors = useColors();
   return (
-    <Pressable onPress={onPress} style={({ pressed }) => [styles.primaryButton, { backgroundColor: colors.primary, opacity: pressed ? 0.82 : 1 }]}>
+    <Pressable
+      disabled={disabled}
+      onPress={onPress}
+      style={({ pressed }) => [styles.primaryButton, { backgroundColor: colors.primary, opacity: disabled ? 0.5 : pressed ? 0.82 : 1 }]}
+    >
       <Feather name={icon} size={16} color={colors.primaryForeground} />
       <Text style={[styles.primaryText, { color: colors.primaryForeground }]}>{label}</Text>
     </Pressable>

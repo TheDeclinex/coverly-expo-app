@@ -31,7 +31,9 @@ import {
 } from "@/lib/claim-pack-draft-storage";
 import {
   ClaimPackExportError,
+  CLAIM_PACK_GENERATE_FUNCTION_NAME,
   generateClaimPackPdf,
+  logClaimPackPdfDiagnostic,
   type GenerateClaimPackPdfSuccess,
 } from "@/lib/claim-pack-export";
 import {
@@ -87,6 +89,28 @@ function safeClaimPackExportError(error: unknown): string {
   const fallback = "We couldn't generate your claim pack PDF. Please try again.";
   if (!(error instanceof Error) || !error.message.trim()) return fallback;
   const message = error.message.trim();
+  if (error instanceof ClaimPackExportError) {
+    if (error.diagnostics.reason === "prepare_failed") {
+      return "We couldn't prepare the claim pack PDF request, so it was not sent. Please refresh the draft and try again.";
+    }
+    if (error.diagnostics.reason === "network_error") {
+      return "We couldn't reach claim pack generation. Check your connection and try again.";
+    }
+    if (error.diagnostics.reason === "edge_function_error") {
+      if (/unauthorized|invalid or expired session|missing authentication/i.test(message)) {
+        return "Claim pack generation reached Coverly, but your session was rejected. Please sign in again, then try generating your claim pack PDF.";
+      }
+      if (/entitlement|payment|required|subscription|plan|402|claim.pack.*limit/i.test(message)) {
+        return "Claim pack generation reached Coverly, but PDF export needs paid access. You can keep editing this draft or view plan options.";
+      }
+      return message
+        ? `Claim pack generation reached Coverly but returned an error: ${message}`
+        : "Claim pack generation reached Coverly but returned an error. Please try again.";
+    }
+    if (error.diagnostics.reason === "unexpected_response") {
+      return "Claim pack generation returned an unexpected response. Please try again.";
+    }
+  }
   if (/unauthorized|invalid or expired session|missing authentication/i.test(message)) {
     return "Please sign in again, then try generating your claim pack PDF.";
   }
@@ -106,6 +130,23 @@ function safeClaimPackExportError(error: unknown): string {
     return "We couldn't prepare the PDF download link. Please try again.";
   }
   return fallback;
+}
+
+function claimPackErrorReason(error: unknown) {
+  return error instanceof ClaimPackExportError ? error.diagnostics.reason ?? null : null;
+}
+
+function claimPackErrorStatus(error: unknown) {
+  return error instanceof ClaimPackExportError ? error.diagnostics.status ?? null : null;
+}
+
+function claimPackErrorCode(error: unknown) {
+  return error instanceof ClaimPackExportError ? error.diagnostics.errorCode ?? null : null;
+}
+
+function claimPackErrorMessage(error: unknown) {
+  if (error instanceof ClaimPackExportError) return error.diagnostics.message ?? error.message;
+  return error instanceof Error ? error.message : String(error ?? "Unknown claim pack error");
 }
 
 function itemCompactWarning(item: InventoryItem) {
@@ -317,6 +358,23 @@ export default function ClaimPackDraftScreen() {
         claimNote,
       })
     : null;
+  const claimPackPdfDiagnostics = useMemo(() => ({
+    fileId,
+    clientDraftId,
+    selectedRoomCount: futureGeneratePayload?.selectedRoomIds.length ?? summary.selectedRoomsCount,
+    selectedItemCount: futureGeneratePayload?.selectedItemIds.length ?? summary.selectedItemsCount,
+    evidenceCount: summary.includedEvidenceCount,
+    hasEvidence: summary.includedEvidenceCount > 0,
+    functionName: CLAIM_PACK_GENERATE_FUNCTION_NAME,
+  }), [
+    clientDraftId,
+    fileId,
+    futureGeneratePayload?.selectedItemIds.length,
+    futureGeneratePayload?.selectedRoomIds.length,
+    summary.includedEvidenceCount,
+    summary.selectedItemsCount,
+    summary.selectedRoomsCount,
+  ]);
 
   const itemsByRoomId = useMemo(() => {
     const map = new Map<string, InventoryItem[]>();
@@ -469,9 +527,38 @@ export default function ClaimPackDraftScreen() {
   };
 
   const generatePdf = async () => {
-    if (!futureGeneratePayload || isGeneratingPdf) return;
+    logClaimPackPdfDiagnostic("claim_pack_pdf_button_pressed", claimPackPdfDiagnostics);
+    if (isGeneratingPdf) return;
+    logClaimPackPdfDiagnostic("claim_pack_generate_prepare_started", claimPackPdfDiagnostics);
+    if (!futureGeneratePayload) {
+      const message = "We couldn't prepare the claim pack PDF request, so it was not sent. Please refresh the draft and try again.";
+      logClaimPackPdfDiagnostic("claim_pack_generate_prepare_failed", {
+        ...claimPackPdfDiagnostics,
+        errorCode: "MISSING_CLAIM_PACK_PAYLOAD",
+        message,
+      });
+      setGeneratedPdf(null);
+      setGenerateError(message);
+      return;
+    }
+    if (futureGeneratePayload.selectedItemIds.length === 0) {
+      const message = "Select at least one item before generating your claim pack PDF.";
+      logClaimPackPdfDiagnostic("claim_pack_generate_prepare_failed", {
+        ...claimPackPdfDiagnostics,
+        errorCode: "NO_SELECTED_ITEMS",
+        message,
+      });
+      setGeneratedPdf(null);
+      setGenerateError(message);
+      return;
+    }
     if (!canExportClaimPack) {
       const message = "Claim pack PDF export is included with paid access. You can keep editing this draft, or view plan options when you are ready to export.";
+      logClaimPackPdfDiagnostic("claim_pack_generate_prepare_failed", {
+        ...claimPackPdfDiagnostics,
+        errorCode: "CLAIM_PACK_EXPORT_NOT_ENTITLED",
+        message,
+      });
       setGenerateError(message);
       Alert.alert("Claim pack export", message, [
         { text: "Not now", style: "cancel" },
@@ -482,7 +569,13 @@ export default function ClaimPackDraftScreen() {
     setIsGeneratingPdf(true);
     setGenerateError(null);
     try {
+      logClaimPackPdfDiagnostic("claim_pack_generate_invoke_started", claimPackPdfDiagnostics);
       const result = await generateClaimPackPdf(futureGeneratePayload);
+      logClaimPackPdfDiagnostic("claim_pack_generate_invoke_completed", {
+        ...claimPackPdfDiagnostics,
+        claimPackId: result.claimPackId,
+        status: 200,
+      });
       setGeneratedPdf(result);
       clearClaimPackDraftSnapshot(clientDraftId);
       if (session?.user.id) {
@@ -494,6 +587,12 @@ export default function ClaimPackDraftScreen() {
       ]);
     } catch (error) {
       setGeneratedPdf(null);
+      logClaimPackPdfDiagnostic("claim_pack_generate_invoke_failed", {
+        ...claimPackPdfDiagnostics,
+        status: claimPackErrorStatus(error),
+        errorCode: claimPackErrorCode(error) ?? claimPackErrorReason(error),
+        message: claimPackErrorMessage(error),
+      });
       setGenerateError(safeClaimPackExportError(error));
     } finally {
       setIsGeneratingPdf(false);
