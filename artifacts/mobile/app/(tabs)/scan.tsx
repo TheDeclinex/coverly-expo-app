@@ -1347,7 +1347,7 @@ export default function ScanScreen() {
             : (item.sourceImageUri ?? fallbackUri),
       }));
 
-      scanLog("navigation/state transition to review screen", {
+      scanLog("scan auto-save started", {
         mode,
         itemCount: itemsWithThumbs.length,
         imageCount: imagesForScan.length,
@@ -1356,21 +1356,21 @@ export default function ScanScreen() {
       setActiveSourcePhotoIdx(0);
       setActivePinIndex(null);
       setDetectedItems(itemsWithThumbs);
-      setScanStatus("reviewing");
+      setScanStatus("saving");
       setCompatibilityPrompt(null);
-      void clearAndroidScanState("scan_reviewing");
-      void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      void clearAndroidScanState("scan_auto_saving");
+      await saveDetectedItems(itemsWithThumbs, "auto");
     } catch (error) {
-      scanLog("navigation/state transition to review screen failed", {
+      scanLog("scan auto-save transition failed", {
         mode,
         imageCount: imagesForScan.length,
         itemCount: result.items.length,
         message: errorMessage(error),
       });
       showRecoverableScanError(
-        "Coverly found scan results but had trouble opening the review screen. Try again in compatibility mode or choose a photo from gallery.",
+        "Coverly found scan results but had trouble saving them. Try again in compatibility mode or choose a photo from gallery.",
         imagesForScan,
-        "review_transition_failed",
+        "auto_save_transition_failed",
       );
     }
   };
@@ -1513,7 +1513,10 @@ export default function ScanScreen() {
   };
 
   /** Save all items sequentially. On partial failure, keep unsaved items visible and report failures inline. */
-  const handleSaveAll = async () => {
+  const saveDetectedItems = async (
+    itemsToSave: ScanDetectedItem[],
+    trigger: "auto" | "review" = "review",
+  ) => {
     if (!selectedFileId || !selectedRoomId) return;
     if (saveAllInFlightRef.current || scanStatus === "saving") return;
 
@@ -1530,11 +1533,11 @@ export default function ScanScreen() {
         return;
       }
 
-      const selectedEntries = detectedItems.map((item, index) => ({ item, index }));
+      const selectedEntries = itemsToSave.map((item, index) => ({ item, index }));
 
       scanLog("scan review save started", {
         stage: "scan-review-save",
-        mode: "batch",
+        mode: trigger === "auto" ? "auto-save" : "batch",
         selectedItemCount: selectedEntries.length,
       });
 
@@ -1660,9 +1663,14 @@ export default function ScanScreen() {
         markRecentItems(savedItemIds);
         showToast(`${savedItemIds.length} item${savedItemIds.length === 1 ? "" : "s"} saved`);
       }
-      setDetectedItems((prev) => prev.filter((_, i) => !savedIndices.includes(i)));
+      setDetectedItems(itemsToSave.filter((_, i) => !savedIndices.includes(i)));
       setPartialFailures(failures);
       setScanStatus("reviewing");
+      setScanSaveError(
+        trigger === "auto"
+          ? "Some scan results could not be saved automatically. Review the remaining items and retry."
+          : null,
+      );
       return;
     }
 
@@ -1685,20 +1693,25 @@ export default function ScanScreen() {
     });
     scanLog("save completed", {
       stage: "scan-review-save",
-      mode: "batch",
+      mode: trigger === "auto" ? "auto-save" : "batch",
       savedItemCount: savedItemIds.length,
     });
     } catch (error) {
       scanLog("save failed", {
         stage: "scan-review-save",
-        mode: "batch",
+        mode: trigger === "auto" ? "auto-save" : "batch",
         message: errorMessage(error),
       });
       setScanStatus("reviewing");
+      setDetectedItems(itemsToSave);
       setScanSaveError(scanSaveErrorMessage("scan-review-save", error));
     } finally {
       saveAllInFlightRef.current = false;
     }
+  };
+
+  const handleSaveAll = async () => {
+    await saveDetectedItems(detectedItems, "review");
   };
 
   const resetScan = () => {

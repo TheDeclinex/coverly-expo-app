@@ -355,7 +355,11 @@ function valuationSourceLabel(item: InventoryItem): string | null {
   if (basis.includes("listing")) return "Replacement listing";
   if (basis.includes("ai")) return "AI estimate";
   if (basis.includes("user") || basis.includes("manual")) return "User entered";
-  return item.valuation_basis;
+  // Fall back to a friendly label when a value exists but the source is
+  // unrecognised — never surface the raw internal valuation_basis string.
+  return item.estimated_price != null || item.unit_estimated_price != null
+    ? "Estimated"
+    : null;
 }
 
 function isWebUrl(value: string | null | undefined): value is string {
@@ -1215,7 +1219,6 @@ export default function ItemDetailScreen() {
                     : undefined
                 }
               />
-              <DetailRow label="Confidence" value={item.confidence} colors={colors} />
             </Section>
 
             {session?.user.id ? (

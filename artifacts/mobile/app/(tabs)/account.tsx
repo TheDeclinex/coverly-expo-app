@@ -140,43 +140,21 @@ export default function AccountScreen() {
           </View>
         </View>
 
+        <AccountSection title="Profile">
+          <AccountRow
+            icon="user"
+            title="Profile & notifications"
+            subtitle="Name, country and future notifications"
+            onPress={() => router.push("/profile-settings" as Href)}
+            last
+          />
+        </AccountSection>
+
         <ClaimPacksSection onOpen={() => router.push("/(tabs)/claim-packs" as Href)} />
 
-        <AccountSection title="Help">
-          <AccountRow
-            icon="book-open"
-            title="User guide"
-            subtitle="How to use Coverly"
-            onPress={() => router.push("/user-guide" as Href)}
-            last
-          />
-        </AccountSection>
-
-        <AccountSection title="Support">
-          <AccountRow
-            icon="message-square"
-            title="Feedback & support"
-            subtitle="Report an issue or send a suggestion"
-            onPress={() => router.push("/feedback" as Href)}
-            last
-          />
-        </AccountSection>
-
-        {isAdmin && (
-          <AccountSection title="Administration">
-            <AccountRow
-              icon="shield"
-              title="Admin"
-              subtitle="System readiness and administration tools"
-              onPress={() => router.push("/admin" as Href)}
-              last
-            />
-          </AccountSection>
-        )}
-
-        <AccountSection title="Plan access">
-          <AccountRow icon="credit-card" title="Your plan" subtitle={planStatusDetail} value={planLabel} />
-          <AccountRow icon="arrow-up-circle" title="Plan options" subtitle="View access options for this tester build." onPress={() => router.push("/upgrade" as Href)} />
+        <AccountSection title="Subscription & usage">
+          <AccountRow icon="credit-card" title="Current plan" subtitle={planStatusDetail} value={planLabel} />
+          <AccountRow icon="arrow-up-circle" title="Change plan" subtitle="View access options for this tester build." onPress={() => router.push("/upgrade" as Href)} />
           <AccountRow
             icon="refresh-cw"
             title="Restore purchases"
@@ -205,31 +183,59 @@ export default function AccountScreen() {
           onUpgrade={() => router.push("/upgrade" as Href)}
         />
 
-        <AccountSection title="Referrals">
+        <AccountSection title="Support & help">
           <AccountRow
-            icon="gift"
-            title="Invite a friend"
-            subtitle="Referral rewards are not part of this tester build."
-            value="Not in test"
+            icon="book-open"
+            title="User guide"
+            subtitle="How to use Coverly"
+            onPress={() => router.push("/user-guide" as Href)}
           />
-          <AccountRow icon="users" title="Referral status" value="Not active" last />
+          <AccountRow
+            icon="message-square"
+            title="Feedback & support"
+            subtitle="Report an issue or send a suggestion"
+            onPress={() => router.push("/feedback" as Href)}
+            last
+          />
         </AccountSection>
 
-        <AccountSection title="Settings">
-          <AccountRow
-            icon="user"
-            title="Profile & preferences"
-            subtitle="Name, country and future notifications"
-            onPress={() => router.push("/profile-settings" as Href)}
-          />
-          <AccountRow icon="lock" title="Privacy policy" value={privacyUrl ? undefined : "Not configured"} disabled={!privacyUrl} onPress={() => void openLegal(privacyUrl, "privacy policy")} />
-          <AccountRow icon="file-text" title="Terms" value={termsUrl ? undefined : "Not configured"} disabled={!termsUrl} onPress={() => void openLegal(termsUrl, "terms")} />
+        {isAdmin && (
+          <AccountSection title="Administration">
+            <AccountRow
+              icon="shield"
+              title="Admin"
+              subtitle="System readiness and administration tools"
+              onPress={() => router.push("/admin" as Href)}
+              last
+            />
+          </AccountSection>
+        )}
+
+        <AccountSection title="About & legal">
+          {privacyUrl ? (
+            <AccountRow
+              icon="lock"
+              title="Privacy policy"
+              onPress={() => void openLegal(privacyUrl, "privacy policy")}
+            />
+          ) : null}
+          {termsUrl ? (
+            <AccountRow
+              icon="file-text"
+              title="Terms"
+              onPress={() => void openLegal(termsUrl, "terms")}
+            />
+          ) : null}
           <AccountRow
             icon="trash-2"
             title="Request account deletion"
             subtitle="Start a support request to delete your account and associated data."
             onPress={requestAccountDeletion}
+            last
           />
+        </AccountSection>
+
+        <AccountSection title="Sign out">
           <AccountRow icon="log-out" title="Sign out" onPress={confirmSignOut} last />
         </AccountSection>
       </ScrollView>

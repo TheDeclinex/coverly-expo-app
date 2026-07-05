@@ -43,7 +43,7 @@ import {
   calcPropertyStats,
   type RoomStat,
 } from "@/lib/dashboard-stats";
-import { getCoverageColor, getCoverageStatusLabel } from "@/lib/coverage";
+import { getCoverageColor } from "@/lib/coverage";
 import {
   formatCurrency,
   getItemTotalValue,
@@ -130,154 +130,6 @@ function SparkLine({
         strokeLinejoin="round"
       />
     </Svg>
-  );
-}
-
-// ─── Compact summary card ─────────────────────────────────────────────────────
-
-function CompactSummary({
-  stats,
-  colors,
-  onEditCover,
-}: {
-  stats: ReturnType<typeof calcPropertyStats>;
-  colors: ReturnType<typeof import("@/hooks/useColors").useColors>;
-  onEditCover: () => void;
-}) {
-  const [displayValue, setDisplayValue] = useState(0);
-  const coverColor =
-    stats.coveragePercent != null
-      ? getCoverageColor(stats.coveragePercent)
-      : colors.mutedForeground;
-
-  useEffect(() => {
-    const animationValue = new Animated.Value(0);
-    const listener = animationValue.addListener(({ value }) => setDisplayValue(Math.round(value)));
-    const animation = Animated.timing(animationValue, {
-      toValue: stats.totalValue,
-      duration: 750,
-      delay: 100,
-      easing: Easing.out(Easing.cubic),
-      useNativeDriver: false,
-    });
-    animation.start();
-    return () => {
-      animation.stop();
-      animationValue.removeListener(listener);
-    };
-  }, [stats.totalValue]);
-
-  return (
-    <View
-      style={[
-        styles.summaryCard,
-        {
-          backgroundColor: colors.card,
-          borderColor: colors.border,
-          borderRadius: colors.radius,
-        },
-      ]}
-    >
-      <View style={styles.summaryRow}>
-        <View style={{ flex: 1.4 }}>
-          <Text
-            style={[styles.summaryBigValue, { color: colors.foreground }]}
-            numberOfLines={1}
-            adjustsFontSizeToFit
-          >
-            {formatCurrency(displayValue)}
-          </Text>
-          <Text
-            style={[styles.summarySmallLabel, { color: colors.mutedForeground }]}
-          >
-            Inventory value
-          </Text>
-        </View>
-
-        <View style={[styles.summaryDivider, { backgroundColor: colors.border }]} />
-
-        <View style={styles.summaryMetricCell}>
-          <Text style={[styles.summaryMetricValue, { color: colors.foreground }]}>
-            {stats.itemCount}
-          </Text>
-          <Text style={[styles.summarySmallLabel, { color: colors.mutedForeground }]}>
-            Items
-          </Text>
-        </View>
-
-        <View style={[styles.summaryDivider, { backgroundColor: colors.border }]} />
-
-        <View style={styles.summaryMetricCell}>
-          <Text style={[styles.summaryMetricValue, { color: colors.foreground }]}>
-            {stats.roomCount}
-          </Text>
-          <Text style={[styles.summarySmallLabel, { color: colors.mutedForeground }]}>
-            Rooms
-          </Text>
-        </View>
-
-        <View style={[styles.summaryDivider, { backgroundColor: colors.border }]} />
-
-        <Pressable
-          onPress={onEditCover}
-          style={styles.summaryMetricCell}
-          hitSlop={8}
-        >
-          {stats.coveragePercent != null ? (
-            <>
-              <Text style={[styles.summaryMetricValue, { color: coverColor }]}>
-                {Math.round(stats.coveragePercent)}%
-              </Text>
-              <Text
-                style={[styles.summarySmallLabel, { color: colors.mutedForeground }]}
-              >
-                of cover
-              </Text>
-            </>
-          ) : (
-            <>
-              <Feather name="shield" size={16} color={colors.primary} />
-              <Text
-                style={[styles.summarySmallLabel, { color: colors.primary }]}
-              >
-                Set cover
-              </Text>
-            </>
-          )}
-        </Pressable>
-      </View>
-
-      {stats.coveragePercent != null && (
-        <View style={{ marginTop: 10 }}>
-          <View
-            style={{
-              height: 4,
-              borderRadius: 2,
-              backgroundColor: colors.border,
-              overflow: "hidden",
-            }}
-          >
-            <LinearGradient
-              colors={["#22C55E", "#22C55E", "#FBBF24", "#F97316", "#EF4444"]}
-              locations={[0, 0.75, 0.85, 0.93, 1.0]}
-              start={{ x: 0, y: 0.5 }}
-              end={{ x: 1, y: 0.5 }}
-              style={StyleSheet.absoluteFill}
-            />
-            <View
-              style={{
-                position: "absolute",
-                top: 0,
-                bottom: 0,
-                left: `${Math.min(stats.coveragePercent, 100)}%` as any,
-                right: 0,
-                backgroundColor: colors.border,
-              }}
-            />
-          </View>
-        </View>
-      )}
-    </View>
   );
 }
 
@@ -435,10 +287,12 @@ function CategoryDonut({
 
 function InsightCard({
   items,
+  stats,
   totalValue,
   colors,
 }: {
   items: InventoryItem[];
+  stats: ReturnType<typeof calcPropertyStats>;
   totalValue: number;
   colors: ReturnType<typeof import("@/hooks/useColors").useColors>;
 }) {
@@ -484,6 +338,14 @@ function InsightCard({
   const moreCount = remainderItems.length;
   // Keep the compact legend short, but render every real category in the ring.
   const donutData = categoryData;
+  const coveragePercent = stats.coveragePercent;
+  const hasCoveragePercent =
+    coveragePercent != null && Number.isFinite(coveragePercent);
+  const clampedCoveragePercent =
+    hasCoveragePercent
+      ? Math.min(Math.max(coveragePercent, 0), 100)
+      : 0;
+  const [coverTrackWidth, setCoverTrackWidth] = useState(0);
 
   return (
     <LinearGradient
@@ -497,6 +359,66 @@ function InsightCard({
       <Text style={styles.insightTagline}>
         See where your documented value is concentrated.
       </Text>
+
+      <View style={styles.insightStatsRow}>
+        <View style={[styles.insightStatCell, { flex: 1.45 }]}>
+          <Text style={styles.insightStatValue} numberOfLines={1} adjustsFontSizeToFit>
+            {formatCurrency(stats.totalValue)}
+          </Text>
+          <Text style={styles.insightStatLabel}>Inventory value</Text>
+        </View>
+        <View style={styles.insightStatDivider} />
+        <View style={styles.insightStatCell}>
+          <Text style={styles.insightStatValue}>{stats.itemCount}</Text>
+          <Text style={styles.insightStatLabel}>Items</Text>
+        </View>
+        <View style={styles.insightStatDivider} />
+        <View style={styles.insightStatCell}>
+          <Text style={styles.insightStatValue}>{stats.roomCount}</Text>
+          <Text style={styles.insightStatLabel}>Rooms</Text>
+        </View>
+        <View style={styles.insightStatDivider} />
+        <View style={styles.insightStatCell}>
+          <Text style={[styles.insightStatValue, hasCoveragePercent && { color: getCoverageColor(coveragePercent) }]}>
+            {hasCoveragePercent ? `${Math.round(coveragePercent)}%` : "Set"}
+          </Text>
+          <Text style={styles.insightStatLabel}>{hasCoveragePercent ? "of cover" : "cover"}</Text>
+        </View>
+      </View>
+
+      {hasCoveragePercent ? (
+        <View style={styles.insightCoverProgress}>
+          <View style={styles.insightCoverProgressHeader}>
+            <Text style={styles.insightCoverProgressLabel}>Contents value vs recorded cover</Text>
+          </View>
+          <View
+            onLayout={(event) => setCoverTrackWidth(event.nativeEvent.layout.width)}
+            style={styles.insightCoverTrack}
+          >
+            <View
+              style={[
+                styles.insightCoverFill,
+                { width: `${clampedCoveragePercent}%` as any },
+              ]}
+            >
+              {coverTrackWidth > 0 ? (
+                <LinearGradient
+                  colors={["#22C55E", "#22C55E", "#FBBF24", "#F97316", "#EF4444"]}
+                  locations={[0, 0.75, 0.85, 0.93, 1.0]}
+                  start={{ x: 0, y: 0.5 }}
+                  end={{ x: 1, y: 0.5 }}
+                  style={[
+                    styles.fullWidthCoverageGradient,
+                    { width: coverTrackWidth },
+                  ]}
+                />
+              ) : (
+                <View style={[StyleSheet.absoluteFill, { backgroundColor: getCoverageColor(coveragePercent) }]} />
+              )}
+            </View>
+          </View>
+        </View>
+      ) : null}
 
       {/* ── What's documented ────────────────────────── */}
       <View style={styles.insightInner}>
@@ -688,93 +610,6 @@ function InsightCard({
   );
 }
 
-// ─── Radial coverage arc ──────────────────────────────────────────────────────
-
-function RadialCoverage({
-  percent,
-  size = 80,
-  strokeWidth = 8,
-}: {
-  percent: number;
-  size?: number;
-  strokeWidth?: number;
-}) {
-  // Animate from 0 → percent on mount for a smooth fill-in effect
-  const [animPct, setAnimPct] = useState(0);
-  useEffect(() => {
-    const anim = new Animated.Value(0);
-    const listenerId = anim.addListener(({ value }) => setAnimPct(value));
-    Animated.timing(anim, {
-      toValue: percent,
-      duration: 900,
-      delay: 200,
-      easing: Easing.out(Easing.cubic),
-      useNativeDriver: false,
-    }).start();
-    return () => anim.removeListener(listenerId);
-  }, [percent]);
-
-  const r = (size - strokeWidth) / 2;
-  const cx = size / 2;
-  const cy = size / 2;
-  const circumference = 2 * Math.PI * r;
-  const filled = (Math.min(animPct, 100) / 100) * circumference;
-  const stroke = getCoverageColor(percent); // derive colour from actual percent, not animated
-
-  return (
-    <View
-      style={{
-        width: size,
-        height: size,
-        alignItems: "center",
-        justifyContent: "center",
-      }}
-    >
-      <Svg width={size} height={size} style={{ position: "absolute" }}>
-        <Circle
-          cx={cx}
-          cy={cy}
-          r={r}
-          stroke={BRAND_BORDER}
-          strokeWidth={strokeWidth}
-          fill="none"
-        />
-        <Circle
-          cx={cx}
-          cy={cy}
-          r={r}
-          stroke={stroke}
-          strokeWidth={strokeWidth}
-          fill="none"
-          strokeDasharray={`${filled} ${circumference - filled}`}
-          strokeLinecap="round"
-          transform={`rotate(-90 ${cx} ${cy})`}
-        />
-      </Svg>
-      <Text
-        style={{
-          fontSize: 13,
-          fontFamily: "Inter_700Bold",
-          color: stroke,
-          textAlign: "center",
-        }}
-      >
-        {Math.round(Math.min(percent, 999))}%
-      </Text>
-      <Text
-        style={{
-          fontSize: 8,
-          fontFamily: "Inter_400Regular",
-          color: "#64748B",
-          textAlign: "center",
-        }}
-      >
-        of cover
-      </Text>
-    </View>
-  );
-}
-
 // ─── Coverage bar ─────────────────────────────────────────────────────────────
 
 function CoverageBar({
@@ -784,10 +619,11 @@ function CoverageBar({
   percent: number;
   colors: ReturnType<typeof import("@/hooks/useColors").useColors>;
 }) {
-  const clamped = Math.min(percent, 100);
-  const fill = getCoverageColor(percent);
-  const label = getCoverageStatusLabel(percent);
+  const clamped = Number.isFinite(percent) ? Math.min(Math.max(percent, 0), 100) : 0;
+  const displayPercent = Number.isFinite(percent) ? Math.round(percent) : 0;
+  const fill = getCoverageColor(Number.isFinite(percent) ? percent : 0);
   const progress = useRef(new Animated.Value(0)).current;
+  const [trackWidth, setTrackWidth] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -814,7 +650,7 @@ function CoverageBar({
     };
   }, [clamped, progress]);
 
-  const overlayLeft = progress.interpolate({
+  const fillWidth = progress.interpolate({
     inputRange: [0, 100],
     outputRange: ["0%", "100%"],
     extrapolate: "clamp",
@@ -839,10 +675,11 @@ function CoverageBar({
             color: fill,
           }}
         >
-          {Math.round(percent)}%
+          {displayPercent}%
         </Text>
       </View>
       <View
+        onLayout={(event) => setTrackWidth(event.nativeEvent.layout.width)}
         style={{
           height: 8,
           borderRadius: 4,
@@ -850,35 +687,32 @@ function CoverageBar({
           overflow: "hidden",
         }}
       >
-        {/* Gradient spans full track so locations map to real bar width */}
-        <LinearGradient
-          colors={["#22C55E", "#22C55E", "#FBBF24", "#F97316", "#EF4444"]}
-          locations={[0, 0.75, 0.85, 0.93, 1.0]}
-          start={{ x: 0, y: 0.5 }}
-          end={{ x: 1, y: 0.5 }}
-          style={StyleSheet.absoluteFill}
-        />
-        {/* Overlay hides the unfilled right portion with the track colour */}
         <Animated.View
           style={{
             position: "absolute",
             top: 0,
             bottom: 0,
-            left: overlayLeft,
-            right: 0,
-            backgroundColor: colors.border,
+            left: 0,
+            width: fillWidth,
+            overflow: "hidden",
           }}
-        />
+        >
+          {trackWidth > 0 ? (
+            <LinearGradient
+              colors={["#22C55E", "#22C55E", "#FBBF24", "#F97316", "#EF4444"]}
+              locations={[0, 0.75, 0.85, 0.93, 1.0]}
+              start={{ x: 0, y: 0.5 }}
+              end={{ x: 1, y: 0.5 }}
+              style={[
+                styles.fullWidthCoverageGradient,
+                { width: trackWidth },
+              ]}
+            />
+          ) : (
+            <View style={[StyleSheet.absoluteFill, { backgroundColor: fill }]} />
+          )}
+        </Animated.View>
       </View>
-      <Text
-        style={{
-          fontSize: 11,
-          fontFamily: "Inter_400Regular",
-          color: colors.mutedForeground,
-        }}
-      >
-        {label}
-      </Text>
     </View>
   );
 }
@@ -1647,7 +1481,7 @@ function CoverAmountModal({
                 letterSpacing: 0.3,
               }}
             >
-              Cover amount (£)
+              Cover amount ($)
             </Text>
             <TextInput
               value={raw}
@@ -2067,7 +1901,14 @@ export default function PropertyDetailScreen() {
     setAddRoomError(null);
     setAddRoomSaving(true);
     try {
+      // Generate the room id client-side (same pattern as the scan flow) so we
+      // can route straight into the new room without a follow-up read.
+      const newRoomId = "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
+        const r = (Math.random() * 16) | 0;
+        return (c === "x" ? r : (r & 0x3) | 0x8).toString(16);
+      });
       const { error } = await supabase.from("inventory_rooms").insert({
+        id: newRoomId,
         file_id: id,
         user_id: session.user.id,
         name: trimmed,
@@ -2084,6 +1925,17 @@ export default function PropertyDetailScreen() {
       setAddRoomType(null);
       showToast(`${trimmed} added`);
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      // Land the user directly inside the new room. fileId/fileName are passed so
+      // the room's back button returns to this parent property as normal.
+      router.push({
+        pathname: "/(tabs)/room/[id]",
+        params: {
+          id: newRoomId,
+          name: trimmed,
+          fileId: id,
+          fileName: property?.name ?? routePropertyName,
+        },
+      });
     } catch (err) {
       setAddRoomError(err instanceof Error ? err.message : "Failed to create room.");
     } finally {
@@ -2362,21 +2214,15 @@ export default function PropertyDetailScreen() {
         </View>
 
       <View style={{ gap: 10, paddingHorizontal: 16, paddingTop: 14 }}>
-        {/* 1 — Compact summary */}
-        <CompactSummary
-          stats={stats}
-          colors={colors}
-          onEditCover={() => setCoverModalVisible(true)}
-        />
-
-        {/* 2 — Insight card */}
+        {/* 1 — Combined inventory summary */}
         <InsightCard
           items={itemsWithDates}
+          stats={stats}
           totalValue={stats.totalValue}
           colors={colors}
         />
 
-        {/* 3 — Action buttons */}
+        {/* 2 — Action buttons */}
         <View style={{ flexDirection: "row", gap: 10 }}>
           <Pressable
             onPress={() =>
@@ -2708,37 +2554,78 @@ export default function PropertyDetailScreen() {
             >
               COVERAGE OVERVIEW
             </Text>
-            <View style={{ flexDirection: "row", alignItems: "center", gap: 16 }}>
+            <View style={{ gap: 10 }}>
               <Pressable
                 onPress={() => setCoverModalVisible(true)}
                 hitSlop={8}
-                style={{ alignItems: "center" }}
+                style={{
+                  alignSelf: "flex-start",
+                  flexDirection: "row",
+                  alignItems: "center",
+                  gap: 5,
+                  paddingVertical: 4,
+                }}
               >
-                <RadialCoverage percent={stats.coveragePercent} size={80} />
-                <View
+                <Feather name="edit-2" size={12} color={colors.mutedForeground} />
+                <Text
                   style={{
-                    flexDirection: "row",
-                    alignItems: "center",
-                    gap: 3,
-                    marginTop: 4,
+                    fontSize: 12,
+                    fontFamily: "Inter_400Regular",
+                    color: colors.mutedForeground,
                   }}
                 >
-                  <Feather name="edit-2" size={10} color={colors.mutedForeground} />
-                  <Text
-                    style={{
-                      fontSize: 10,
-                      fontFamily: "Inter_400Regular",
-                      color: colors.mutedForeground,
-                    }}
-                  >
-                    Edit cover
-                  </Text>
-                </View>
+                  Edit cover
+                </Text>
               </Pressable>
-              <View style={{ flex: 1 }}>
-                <CoverageBar percent={stats.coveragePercent} colors={colors} />
+              <CoverageBar percent={stats.coveragePercent} colors={colors} />
+            </View>
+          </View>
+        )}
+
+        {/* Claim-pack readiness — contextual payoff, property-scoped only */}
+        {stats.itemCount > 0 && (
+          <View
+            style={[
+              styles.claimReadyCard,
+              {
+                backgroundColor: colors.card,
+                borderColor: colors.border,
+                borderRadius: colors.radius,
+              },
+            ]}
+          >
+            <View style={styles.claimReadyHeader}>
+              <View style={[styles.claimReadyIcon, { backgroundColor: colors.accent }]}>
+                <Feather name="package" size={18} color={colors.primary} />
+              </View>
+              <View style={styles.claimReadyCopy}>
+                <Text style={[styles.claimReadyTitle, { color: colors.foreground }]}>
+                  Ready to prepare a claim pack?
+                </Text>
+                <Text style={[styles.claimReadyBody, { color: colors.mutedForeground }]}>
+                  Use the items, photos, values, and evidence from this property to create an insurer-ready summary.
+                </Text>
               </View>
             </View>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Build claim pack for this property"
+              onPress={() =>
+                router.push({
+                  pathname: "/(tabs)/claim-pack/[fileId]",
+                  params: { fileId: id },
+                })
+              }
+              style={({ pressed }) => [
+                styles.claimReadyButton,
+                { backgroundColor: colors.primary, borderRadius: colors.radius, opacity: pressed ? 0.82 : 1 },
+              ]}
+            >
+              <Text style={[styles.claimReadyButtonText, { color: colors.primaryForeground }]}>
+                Build claim pack
+              </Text>
+              <Feather name="arrow-right" size={14} color={colors.primaryForeground} />
+            </Pressable>
           </View>
         )}
       </View>
@@ -3111,38 +2998,6 @@ export default function PropertyDetailScreen() {
 // ─── Styles ───────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
-  // Summary card
-  summaryCard: {
-    borderWidth: 1,
-    padding: 14,
-  },
-  summaryRow: {
-    flexDirection: "row",
-    alignItems: "center",
-  },
-  summaryBigValue: {
-    fontSize: 19,
-    fontFamily: "Inter_700Bold",
-  },
-  summarySmallLabel: {
-    fontSize: 10,
-    fontFamily: "Inter_400Regular",
-    marginTop: 1,
-  },
-  summaryDivider: {
-    width: StyleSheet.hairlineWidth,
-    height: 32,
-    marginHorizontal: 12,
-  },
-  summaryMetricCell: {
-    alignItems: "center",
-    gap: 2,
-  },
-  summaryMetricValue: {
-    fontSize: 16,
-    fontFamily: "Inter_700Bold",
-  },
-
   // Insight card — teal gradient, donut + sparkline
   insightCard: {
     padding: 16,
@@ -3166,11 +3021,75 @@ const styles = StyleSheet.create({
     color: "rgba(255,255,255,0.65)",
     marginTop: 5,
   },
+  insightStatsRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginTop: 13,
+    paddingTop: 11,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: "rgba(255,255,255,0.14)",
+  },
+  insightStatCell: {
+    flex: 1,
+    alignItems: "center",
+    gap: 2,
+  },
+  insightStatValue: {
+    fontSize: 15,
+    lineHeight: 19,
+    fontFamily: "Inter_700Bold",
+    color: "#FFFFFF",
+  },
+  insightStatLabel: {
+    fontSize: 10,
+    lineHeight: 13,
+    fontFamily: "Inter_400Regular",
+    color: "rgba(255,255,255,0.66)",
+    textAlign: "center",
+  },
+  insightStatDivider: {
+    width: StyleSheet.hairlineWidth,
+    height: 28,
+    marginHorizontal: 5,
+    backgroundColor: "rgba(255,255,255,0.16)",
+  },
+  insightCoverProgress: {
+    marginTop: 10,
+    gap: 5,
+  },
+  insightCoverProgressHeader: {
+    flexDirection: "row",
+    gap: 10,
+  },
+  insightCoverProgressLabel: {
+    fontSize: 11,
+    fontFamily: "Inter_400Regular",
+    color: "rgba(255,255,255,0.68)",
+  },
+  insightCoverTrack: {
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: "rgba(255,255,255,0.18)",
+    overflow: "hidden",
+  },
+  insightCoverFill: {
+    position: "absolute",
+    top: 0,
+    bottom: 0,
+    left: 0,
+    overflow: "hidden",
+  },
+  fullWidthCoverageGradient: {
+    position: "absolute",
+    top: 0,
+    bottom: 0,
+    left: 0,
+  },
   insightInner: {
     backgroundColor: "rgba(255,255,255,0.95)",
     borderRadius: 10,
-    padding: 12,
-    marginTop: 14,
+    padding: 11,
+    marginTop: 12,
     gap: 10,
   },
   insightSectionLabel: {
@@ -3488,6 +3407,46 @@ const styles = StyleSheet.create({
   footerCard: {
     borderWidth: 1,
     padding: 14,
+  },
+  // Claim-pack readiness card
+  claimReadyCard: {
+    borderWidth: 1,
+    padding: 16,
+    gap: 14,
+  },
+  claimReadyHeader: {
+    flexDirection: "row",
+    gap: 12,
+    alignItems: "flex-start",
+  },
+  claimReadyIcon: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  claimReadyCopy: { flex: 1, gap: 3 },
+  claimReadyTitle: {
+    fontSize: 15,
+    fontFamily: "Inter_600SemiBold",
+  },
+  claimReadyBody: {
+    fontSize: 13,
+    lineHeight: 19,
+    fontFamily: "Inter_400Regular",
+  },
+  claimReadyButton: {
+    minHeight: 44,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 7,
+    paddingHorizontal: 16,
+  },
+  claimReadyButtonText: {
+    fontSize: 14,
+    fontFamily: "Inter_600SemiBold",
   },
   sectionLabel: {
     fontSize: 11,

@@ -3,7 +3,7 @@ import * as Haptics from "expo-haptics";
 import { LinearGradient } from "expo-linear-gradient";
 import { Stack, router, type Href } from "expo-router";
 import { useQuery } from "@tanstack/react-query";
-import React, { useMemo } from "react";
+import React, { useMemo, useState } from "react";
 import {
   Animated,
   Easing,
@@ -43,8 +43,8 @@ import { supabase } from "@/lib/supabase";
 import type { InventoryFile, InventoryItem, InventoryRoom } from "@/types";
 
 const HOME_ITEMS_PAGE_SIZE = 1000;
-const HOME_SUMMARY_BACKGROUND = "#F4F8F7";
-const HOME_SUMMARY_BORDER = "#DCE9E6";
+const HOME_SUMMARY_BACKGROUND = "#344E6B";
+const HOME_SUMMARY_BORDER = "rgba(255,255,255,0.14)";
 const countFormatter = new Intl.NumberFormat("en-NZ");
 type GlobalReadinessFilter = "all" | "needs_review" | "missing_photo" | "missing_value";
 
@@ -105,71 +105,71 @@ function CoverageBar({
   percent,
   inventoryValue,
   coverValue,
-  colors,
 }: {
   percent: number;
   inventoryValue: number;
   coverValue: number;
-  colors: ReturnType<typeof import("@/hooks/useColors").useColors>;
 }) {
-  const clamped = Math.min(percent, 100);
-  const fill = getCoverageColor(percent);
+  const clamped = Number.isFinite(percent) ? Math.min(Math.max(percent, 0), 100) : 0;
+  const trackColor = "rgba(255,255,255,0.18)";
+  const [trackWidth, setTrackWidth] = useState(0);
 
   return (
-    <View style={{ gap: 6 }}>
+    <View style={{ gap: 5 }}>
       <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
         <Text
           style={{
             fontSize: 12,
             fontFamily: "Inter_400Regular",
-            color: colors.mutedForeground,
+            color: "rgba(255,255,255,0.72)",
           }}
         >
           Inventory value vs cover
         </Text>
-        <Text
-          style={{
-            fontSize: 12,
-            fontFamily: "Inter_600SemiBold",
-            color: fill,
-          }}
-        >
-          {Math.round(percent)}%
-        </Text>
       </View>
       <View
+        onLayout={(event) => setTrackWidth(event.nativeEvent.layout.width)}
         style={{
-          height: 8,
-          borderRadius: 4,
-          backgroundColor: colors.border,
+          height: 6,
+          borderRadius: 3,
+          backgroundColor: trackColor,
           overflow: "hidden",
         }}
       >
-        {/* Gradient spans full track so locations map to real bar width */}
-        <LinearGradient
-          colors={["#22C55E", "#22C55E", "#FBBF24", "#F97316", "#EF4444"]}
-          locations={[0, 0.75, 0.85, 0.93, 1.0]}
-          start={{ x: 0, y: 0.5 }}
-          end={{ x: 1, y: 0.5 }}
-          style={StyleSheet.absoluteFill}
-        />
-        {/* Overlay hides the unfilled right portion with the track colour */}
         <View
           style={{
             position: "absolute",
             top: 0,
             bottom: 0,
-            left: `${clamped}%` as any,
-            right: 0,
-            backgroundColor: colors.border,
+            left: 0,
+            width: `${clamped}%` as any,
+            overflow: "hidden",
           }}
-        />
+        >
+          {trackWidth > 0 ? (
+            <LinearGradient
+              colors={["#22C55E", "#22C55E", "#FBBF24", "#F97316", "#EF4444"]}
+              locations={[0, 0.75, 0.85, 0.93, 1.0]}
+              start={{ x: 0, y: 0.5 }}
+              end={{ x: 1, y: 0.5 }}
+              style={{
+                position: "absolute",
+                top: 0,
+                bottom: 0,
+                left: 0,
+                width: trackWidth,
+              }}
+            />
+          ) : (
+            <View style={[StyleSheet.absoluteFill, { backgroundColor: getCoverageColor(clamped) }]} />
+          )}
+        </View>
       </View>
       <Text
         style={{
           fontSize: 11,
           fontFamily: "Inter_400Regular",
-          color: colors.mutedForeground,
+          color: "rgba(255,255,255,0.62)",
         }}
       >
         {formatCurrency(inventoryValue || null)} recorded of {formatCurrency(coverValue)} cover
@@ -695,9 +695,11 @@ export default function HomeScreen() {
       portfolio.totalRecordedCover > 0
         ? (portfolio.totalInventoryValue / portfolio.totalRecordedCover) * 100
         : null;
+    const hasPortfolioCoverPercent =
+      portfolioCoverPercent != null && Number.isFinite(portfolioCoverPercent);
 
     return (
-      <View style={{ gap: 14, paddingHorizontal: 16, paddingTop: 16 }}>
+      <View style={{ gap: 12, paddingHorizontal: 16, paddingTop: 12 }}>
         {/* Welcome header */}
         <View style={{ paddingBottom: 2 }}>
           <Text style={{ fontSize: 17, fontFamily: "Inter_600SemiBold", color: "#1E293B" }}>
@@ -708,97 +710,99 @@ export default function HomeScreen() {
           </Text>
         </View>
 
-        <View
+        <LinearGradient
+          colors={[HOME_SUMMARY_BACKGROUND, "#1E3348"]}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
           style={[
             styles.statsCard,
-            { backgroundColor: HOME_SUMMARY_BACKGROUND, borderColor: HOME_SUMMARY_BORDER, borderRadius: colors.radius },
+            { borderRadius: colors.radius + 2 },
           ]}
         >
           <View style={styles.statusHeader}>
             <View>
-              <Text style={[styles.statusEyebrow, { color: colors.primary }]}>
+              <Text style={styles.statusEyebrow}>
                 Status
               </Text>
-              <Text style={[styles.statusTitle, { color: colors.foreground }]}>
+              <Text style={styles.statusTitle}>
                 Your home inventory
               </Text>
             </View>
-            <View style={[styles.summaryTitleIcon, { backgroundColor: colors.card, borderColor: colors.border }]}>
-              <Feather name="home" size={14} color={colors.primary} />
+            <View style={styles.summaryTitleIcon}>
+              <Feather name="home" size={13} color="#9EDBD4" />
             </View>
           </View>
 
           <View style={styles.statusValueBlock}>
             <Text
-              style={[styles.bigValue, { color: colors.foreground }]}
+              style={styles.bigValue}
               numberOfLines={1}
               adjustsFontSizeToFit
             >
               {formatCurrency(portfolio.totalInventoryValue || null)}
             </Text>
-            <Text style={[styles.bigLabel, { color: colors.mutedForeground }]}>
+            <Text style={styles.bigLabel}>
               Total inventory value
             </Text>
           </View>
 
-          <View style={[styles.statsRow, { borderColor: colors.border }]}>
+          <View style={styles.statsRow}>
             <View style={styles.statCell}>
-              <Text style={[styles.statValue, { color: colors.foreground }]}>
+              <Text style={styles.statusStatValue}>
                 {formatCount(portfolio.totalItems)}
               </Text>
-              <Text style={[styles.statLabel, { color: colors.mutedForeground }]}>
+              <Text style={styles.statusStatLabel}>
                 Items
               </Text>
             </View>
-            <View style={[styles.statDivider, { backgroundColor: colors.border }]} />
+            <View style={styles.statDivider} />
             <View style={styles.statCell}>
-              <Text style={[styles.statValue, { color: colors.foreground }]}>
+              <Text style={styles.statusStatValue}>
                 {formatCount(portfolio.propertyCount)}
               </Text>
-              <Text style={[styles.statLabel, { color: colors.mutedForeground }]}>
+              <Text style={styles.statusStatLabel}>
                 Properties
               </Text>
             </View>
-            <View style={[styles.statDivider, { backgroundColor: colors.border }]} />
+            <View style={styles.statDivider} />
             <View style={styles.statCell}>
-              <Text style={[styles.statValue, { color: colors.foreground }]}>
+              <Text style={styles.statusStatValue}>
                 {formatCount(roomCount)}
               </Text>
-              <Text style={[styles.statLabel, { color: colors.mutedForeground }]}>
+              <Text style={styles.statusStatLabel}>
                 Rooms
               </Text>
             </View>
-            <View style={[styles.statDivider, { backgroundColor: colors.border }]} />
+            <View style={styles.statDivider} />
             <View style={styles.statCell}>
               <Text
                 style={[
-                  styles.statValue,
-                  { color: portfolioCoverPercent == null ? colors.mutedForeground : getCoverageColor(portfolioCoverPercent) },
+                  styles.statusStatValue,
+                  { color: hasPortfolioCoverPercent ? getCoverageColor(portfolioCoverPercent) : "rgba(255,255,255,0.72)" },
                 ]}
               >
-                {portfolioCoverPercent == null ? "Set" : `${Math.round(portfolioCoverPercent)}%`}
+                {hasPortfolioCoverPercent ? `${Math.round(portfolioCoverPercent)}%` : "Set"}
               </Text>
-              <Text style={[styles.statLabel, { color: colors.mutedForeground }]}>
+              <Text style={styles.statusStatLabel}>
                 Cover
               </Text>
             </View>
           </View>
-          {portfolioCoverPercent != null && portfolio.totalInventoryValue > 0 && (
+          {hasPortfolioCoverPercent && portfolio.totalInventoryValue > 0 && (
             <View style={styles.coverProgressWrap}>
               <CoverageBar
                 percent={portfolioCoverPercent}
                 inventoryValue={portfolio.totalInventoryValue}
                 coverValue={portfolio.totalRecordedCover}
-                colors={colors}
               />
             </View>
           )}
           {portfolio.totalRecordedCover <= 0 && (
-            <Text style={[styles.coverFallbackText, { color: colors.mutedForeground }]}>
+            <Text style={styles.coverFallbackText}>
               Add contents cover to compare your inventory value
             </Text>
           )}
-        </View>
+        </LinearGradient>
 
         {homeRecommendedAction ? <RecommendedActionCard {...homeRecommendedAction} /> : null}
 
@@ -840,7 +844,7 @@ export default function HomeScreen() {
         </View>
 
         <Text style={[styles.sectionHeading, { color: colors.foreground }]}>
-          {properties.length === 1 ? "Your Property" : "My Properties"}
+          {properties.length === 1 ? "Your Property" : "Your Properties"}
         </Text>
       </View>
     );
@@ -1325,14 +1329,18 @@ const styles = StyleSheet.create({
   },
   statsCard: {
     borderWidth: 1,
-    padding: 16,
+    borderColor: HOME_SUMMARY_BORDER,
+    padding: 12,
     gap: 0,
+    overflow: "hidden",
   },
   summaryTitleIcon: {
-    width: 30,
-    height: 30,
-    borderRadius: 15,
+    width: 26,
+    height: 26,
+    borderRadius: 13,
     borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.18)",
+    backgroundColor: "rgba(255,255,255,0.08)",
     alignItems: "center",
     justifyContent: "center",
   },
@@ -1341,21 +1349,23 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "space-between",
     gap: 12,
-    marginBottom: 14,
+    marginBottom: 8,
   },
   statusEyebrow: {
-    fontSize: 11,
+    fontSize: 10,
     fontFamily: "Inter_700Bold",
     letterSpacing: 0.8,
     textTransform: "uppercase",
+    color: "#9EDBD4",
   },
   statusTitle: {
-    marginTop: 3,
-    fontSize: 17,
+    marginTop: 2,
+    fontSize: 16,
     fontFamily: "Inter_700Bold",
+    color: "#FFFFFF",
   },
   statusValueBlock: {
-    gap: 3,
+    gap: 1,
   },
   sectionHeading: {
     fontSize: 18,
@@ -1366,9 +1376,10 @@ const styles = StyleSheet.create({
   statsRow: {
     flexDirection: "row",
     alignItems: "center",
-    marginTop: 15,
-    paddingTop: 14,
+    marginTop: 9,
+    paddingTop: 9,
     borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: "rgba(255,255,255,0.14)",
   },
   statCell: {
     flex: 1,
@@ -1377,32 +1388,36 @@ const styles = StyleSheet.create({
   },
   statDivider: {
     width: StyleSheet.hairlineWidth,
-    height: 30,
+    height: 26,
     marginHorizontal: 3,
+    backgroundColor: "rgba(255,255,255,0.16)",
   },
   bigValue: {
-    fontSize: 32,
-    lineHeight: 38,
+    fontSize: 24,
+    lineHeight: 29,
     fontFamily: "Inter_700Bold",
+    color: "#FFFFFF",
   },
   bigLabel: {
-    fontSize: 12,
+    fontSize: 11,
     fontFamily: "Inter_400Regular",
+    color: "rgba(255,255,255,0.66)",
   },
   coverProgressWrap: {
-    marginTop: 14,
-    paddingTop: 13,
+    marginTop: 8,
+    paddingTop: 8,
     borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: HOME_SUMMARY_BORDER,
+    borderTopColor: "rgba(255,255,255,0.14)",
   },
   coverFallbackText: {
-    marginTop: 13,
-    paddingTop: 13,
+    marginTop: 8,
+    paddingTop: 8,
     borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: HOME_SUMMARY_BORDER,
+    borderTopColor: "rgba(255,255,255,0.14)",
     fontSize: 11,
     lineHeight: 16,
     fontFamily: "Inter_400Regular",
+    color: "rgba(255,255,255,0.66)",
   },
   actionRow: {
     flexDirection: "row",
@@ -1421,6 +1436,18 @@ const styles = StyleSheet.create({
   quickActionText: {
     fontSize: 14,
     fontFamily: "Inter_600SemiBold",
+  },
+  statusStatValue: {
+    fontSize: 14,
+    lineHeight: 18,
+    fontFamily: "Inter_700Bold",
+    color: "#FFFFFF",
+  },
+  statusStatLabel: {
+    fontSize: 10,
+    lineHeight: 13,
+    fontFamily: "Inter_400Regular",
+    color: "rgba(255,255,255,0.66)",
   },
   firstUseWrap: {
     paddingHorizontal: 16,

@@ -317,18 +317,6 @@ export default function AddPropertyScreen() {
         </Text>
       </View>
 
-      <View style={[styles.infoRow, { backgroundColor: colors.secondary, borderRadius: colors.radius }]}>
-        <View style={[styles.infoIcon, { backgroundColor: colors.card }]}>
-          <Feather name="map-pin" size={14} color={colors.primary} />
-        </View>
-        <View style={styles.infoCopy}>
-          <Text style={[styles.infoTitle, { color: colors.foreground }]}>Address</Text>
-          <Text style={[styles.infoBody, { color: colors.mutedForeground }]}>
-            Skip for now. Address can be added later when property details support it.
-          </Text>
-        </View>
-      </View>
-
       <FormField label="Insurer" hint="Optional" colors={colors}>
         <InputBox
           value={insurerName}
@@ -384,9 +372,8 @@ export default function AddPropertyScreen() {
         <ReviewRow label="Property" value={trimmedName || "Not set"} colors={colors} />
         <ReviewRow label="Type" value={propertyTypeLabel(propertyType) ?? "Not set"} colors={colors} />
         <ReviewRow label="Contents cover" value={hasValidCoverAmount ? `$${parsedCoverAmount.toLocaleString("en-NZ")}` : "Not set"} colors={colors} />
-        <ReviewRow label="Insurer" value={insurerName.trim() || "Skip for now"} colors={colors} />
-        <ReviewRow label="Policy number" value={policyNumber.trim() || "Skip for now"} colors={colors} />
-        <ReviewRow label="Address" value="Skip for now" colors={colors} />
+        <ReviewRow label="Insurer" value={insurerName.trim() || "Not set"} colors={colors} />
+        <ReviewRow label="Policy number" value={policyNumber.trim() || "Not set"} colors={colors} />
       </View>
 
       <View style={styles.buttonRow}>

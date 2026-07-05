@@ -517,10 +517,12 @@ function ItemCard({
                   beginNameEdit();
                 }}
                 hitSlop={5}
+                style={styles.namePressable}
               >
                 <Text
                   style={[styles.cardName, { color: colors.foreground }]}
                   numberOfLines={useStackedSummary ? 3 : 2}
+                  ellipsizeMode="tail"
                 >
                   {item.name}
                 </Text>
@@ -618,11 +620,11 @@ function ItemCard({
                     hitSlop={5}
                   >
                     <View style={styles.compactValuation}>
-                      <Text style={[styles.mainValue, { color: colors.foreground }]}>
+                      <Text style={[styles.mainValue, { color: colors.foreground }]} numberOfLines={1}>
                         {formatCurrencyFull(totalValue)}
                       </Text>
                       {quantity > 1 ? (
-                        <Text style={[styles.valueMeta, { color: colors.mutedForeground }]}>
+                        <Text style={[styles.valueMeta, { color: colors.mutedForeground }]} numberOfLines={1}>
                           Qty {quantity} · Each {formatCurrencyFull(unitPrice)}
                         </Text>
                       ) : null}
@@ -638,12 +640,12 @@ function ItemCard({
                       }}
                       hitSlop={6}
                     >
-                      <Text style={[styles.valLabel, styles.listingLink, { color: TEAL }]}>
+                      <Text style={[styles.valLabel, styles.listingLink, { color: TEAL }]} numberOfLines={1}>
                         {valLabel} <Feather name="external-link" size={10} color={TEAL} />
                       </Text>
                     </Pressable>
                   ) : valLabel ? (
-                    <Text style={[styles.valLabel, { color: colors.mutedForeground }]}>{valLabel}</Text>
+                    <Text style={[styles.valLabel, { color: colors.mutedForeground }]} numberOfLines={1}>{valLabel}</Text>
                   ) : null}
                 </>
               )}
@@ -1778,10 +1780,18 @@ export default function ItemsScreen() {
         <View style={styles.coverPlaceholder}>
           <MaterialCommunityIcons
             name={getRoomPlaceholderIcon(room?.room_type, room?.name ?? name)}
-            size={72}
+            size={62}
             color={colors.primary}
             style={{ opacity: 0.55 }}
           />
+          <View style={styles.coverPlaceholderCopy}>
+            <Text style={[styles.coverPlaceholderTitle, { color: colors.foreground }]}>
+              Add a room photo
+            </Text>
+            <Text style={[styles.coverPlaceholderBody, { color: colors.mutedForeground }]}>
+              Use a photo to make this room easier to recognise.
+            </Text>
+          </View>
         </View>
       )}
       <Pressable
@@ -2386,6 +2396,24 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: "center",
     justifyContent: "center",
+    gap: 10,
+    paddingHorizontal: 32,
+  },
+  coverPlaceholderCopy: {
+    alignItems: "center",
+    gap: 4,
+    maxWidth: 280,
+  },
+  coverPlaceholderTitle: {
+    fontSize: 17,
+    fontFamily: "Inter_700Bold",
+    textAlign: "center",
+  },
+  coverPlaceholderBody: {
+    fontSize: 13,
+    lineHeight: 18,
+    fontFamily: "Inter_400Regular",
+    textAlign: "center",
   },
   recommendedActionWrap: {
     paddingHorizontal: 16,
@@ -2613,7 +2641,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     padding: 12,
-    gap: 12,
+    gap: 10,
   },
   cardSummaryPressed: { opacity: 0.82 },
   thumbWrap: {
@@ -2624,24 +2652,24 @@ const styles = StyleSheet.create({
     overflow: "hidden",
   },
   thumb: { width: "100%", height: "100%" },
-  cardBody: { flex: 1, gap: 4 },
+  cardBody: { flex: 1, minWidth: 0, gap: 4 },
   nameRow: {
     flexDirection: "row",
     alignItems: "flex-start",
     justifyContent: "space-between",
-    gap: 10,
+    gap: 8,
   },
   nameRowStacked: { flexDirection: "column", alignItems: "stretch", gap: 4 },
   nameBlock: { flex: 1, minWidth: 0, gap: 4 },
+  namePressable: { minWidth: 0, maxWidth: "100%" },
   cardName: {
     fontSize: 15,
     fontFamily: "Inter_600SemiBold",
     lineHeight: 20,
-    flex: 1,
   },
   newBadge: { borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2, marginTop: 1 },
   newBadgeText: { fontSize: 9, fontFamily: "Inter_700Bold", letterSpacing: 0.5 },
-  priceBlock: { alignItems: "stretch", gap: 3, width: 124, flexShrink: 0 },
+  priceBlock: { alignItems: "flex-end", gap: 3, width: 104, flexShrink: 0 },
   priceBlockStacked: { width: "100%", alignItems: "flex-end" },
   priceBlockEditing: { width: 184 },
   compactValuation: { alignItems: "flex-end", gap: 2, paddingTop: 1 },
