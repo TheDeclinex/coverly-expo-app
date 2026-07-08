@@ -35,6 +35,8 @@ import { supabase } from "@/lib/supabase";
 import type { InventoryFile, InventoryRoom } from "@/types";
 import type { VoiceItemField, VoiceItemPatch } from "@/types/voice";
 
+const VOICE_EDIT_FALLBACK_MESSAGE = "Voice edit could not start. Please try again or type your changes manually.";
+
 function FormField({
   label,
   required,
@@ -245,6 +247,10 @@ export default function AddItemScreen() {
   };
 
   const openVoice = (targetField?: VoiceItemField) => {
+    if (!session?.user?.id || !selectedFileId || !selectedRoomId || launchStep !== "details") {
+      showToast(VOICE_EDIT_FALLBACK_MESSAGE);
+      return;
+    }
     setVoiceTargetField(targetField);
     setVoiceVisible(true);
   };

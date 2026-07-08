@@ -40,6 +40,7 @@ import type { VoiceItemField, VoiceItemPatch } from "@/types/voice";
 
 // One-line rollback for the item review/edit trial.
 const ITEM_REVIEW_EDIT_TRIAL = true;
+const VOICE_EDIT_FALLBACK_MESSAGE = "Voice edit could not start. Please try again or type your changes manually.";
 
 type InlineField = "name" | "quantity" | "unit_estimated_price" | "brand_maker";
 
@@ -579,6 +580,10 @@ export default function ItemDetailScreen() {
   };
 
   const openVoiceInput = (targetField?: VoiceItemField) => {
+    if (!session?.user?.id || !id || !item || !item.room_id || !item.file_id) {
+      showToast(VOICE_EDIT_FALLBACK_MESSAGE);
+      return;
+    }
     cancelInlineEdit();
     setVoiceTargetField(targetField);
     setVoiceInputOpen(true);

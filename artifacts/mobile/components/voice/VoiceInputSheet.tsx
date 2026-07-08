@@ -30,6 +30,7 @@ import type {
 } from "@/types/voice";
 
 type VoiceContext = Omit<VoiceDescribeRequest, "audioBase64" | "mimeType" | "ext" | "targetField" | "currentValues">;
+const VOICE_EDIT_FALLBACK_MESSAGE = "Voice edit could not start. Please try again or type your changes manually.";
 
 export function VoiceInputSheet({
   visible,
@@ -71,9 +72,16 @@ export function VoiceInputSheet({
     setChanges([]);
     setSelectedIds(new Set());
     setErrorMessage(null);
-    void voice.checkPermission().then((granted) => {
-      if (!cancelled && visibleRef.current) setPhase(granted ? "ready" : "permission");
-    });
+    void voice.checkPermission()
+      .then((granted) => {
+        if (!cancelled && visibleRef.current) setPhase(granted ? "ready" : "permission");
+      })
+      .catch(() => {
+        if (!cancelled && visibleRef.current) {
+          setPhase("error");
+          setErrorMessage(VOICE_EDIT_FALLBACK_MESSAGE);
+        }
+      });
     return () => {
       cancelled = true;
     };
@@ -92,12 +100,19 @@ export function VoiceInputSheet({
     if (voice.isRequestingPermission) return;
     voice.logDiagnostic("voice_permission_button_pressed");
     setErrorMessage(null);
-    const granted = await voice.requestPermission();
-    if (!visibleRef.current) return;
-    if (granted) setPhase("ready");
-    else {
-      setPhase("permission");
-      setErrorMessage("Allow microphone access in your device settings to use voice input.");
+    try {
+      const granted = await voice.requestPermission();
+      if (!visibleRef.current) return;
+      if (granted) setPhase("ready");
+      else {
+        setPhase("error");
+        setErrorMessage(VOICE_EDIT_FALLBACK_MESSAGE);
+      }
+    } catch {
+      if (visibleRef.current) {
+        setPhase("error");
+        setErrorMessage(VOICE_EDIT_FALLBACK_MESSAGE);
+      }
     }
   };
 
@@ -106,15 +121,22 @@ export function VoiceInputSheet({
     setErrorMessage(null);
     if (voice.permission !== "granted") {
       setPhase("permission");
-      setErrorMessage("Tap Allow microphone first, then start recording.");
+      setErrorMessage(VOICE_EDIT_FALLBACK_MESSAGE);
       return;
     }
-    if (await voice.startRecording()) {
-      if (visibleRef.current) setPhase("recording");
-    }
-    else {
-      setPhase("error");
-      setErrorMessage(voice.error ?? "Could not start recording.");
+    try {
+      if (await voice.startRecording()) {
+        if (visibleRef.current) setPhase("recording");
+      }
+      else {
+        setPhase("error");
+        setErrorMessage(VOICE_EDIT_FALLBACK_MESSAGE);
+      }
+    } catch {
+      if (visibleRef.current) {
+        setPhase("error");
+        setErrorMessage(VOICE_EDIT_FALLBACK_MESSAGE);
+      }
     }
   };
 
@@ -128,7 +150,7 @@ export function VoiceInputSheet({
       if (!visibleRef.current) return;
       if (!recording) {
         setPhase("error");
-        setErrorMessage(voice.error ?? "Could not finish recording.");
+        setErrorMessage(VOICE_EDIT_FALLBACK_MESSAGE);
         return;
       }
 
@@ -142,12 +164,12 @@ export function VoiceInputSheet({
 
       if (!result.response) {
         setPhase("error");
-        setErrorMessage(result.networkError ?? "Voice input could not be processed.");
+        setErrorMessage(VOICE_EDIT_FALLBACK_MESSAGE);
         return;
       }
       if (!result.response.success) {
         setPhase("error");
-        setErrorMessage(result.response.error);
+        setErrorMessage(VOICE_EDIT_FALLBACK_MESSAGE);
         return;
       }
       setTranscript(result.response.transcript);
@@ -174,7 +196,7 @@ export function VoiceInputSheet({
     } catch {
       if (visibleRef.current) {
         setPhase("error");
-        setErrorMessage("Voice input could not be processed. Please try again.");
+        setErrorMessage(VOICE_EDIT_FALLBACK_MESSAGE);
       }
     } finally {
       processingRef.current = false;
@@ -212,7 +234,7 @@ export function VoiceInputSheet({
       await closeAndClean();
     } catch (applyError) {
       setPhase("error");
-      setErrorMessage(applyError instanceof Error ? applyError.message : "Could not apply voice changes.");
+      setErrorMessage(VOICE_EDIT_FALLBACK_MESSAGE);
     }
   };
 

@@ -63,6 +63,7 @@ const SEARCH_PROCESS_TILES: LoadingTile[] = [
 ];
 
 const ACTIVE_TILE_INDEX = 2;
+const VOICE_EDIT_FALLBACK_MESSAGE = "Voice edit could not start. Please try again or type your changes manually.";
 
 function formatEstimate(value: number | null): string {
   if (value == null) return "No current estimate";
@@ -352,7 +353,7 @@ export default function ReplacementPricingScreen() {
     setVoiceNotice(null);
     const recording = await stopVoiceRecording();
     if (!recording) {
-      setVoiceError("Could not transcribe. Try again or type your search.");
+      setVoiceError(VOICE_EDIT_FALLBACK_MESSAGE);
       return;
     }
 
@@ -368,12 +369,12 @@ export default function ReplacementPricingScreen() {
         ? replacementVoiceTranscriptToQuery(result.response.transcript)
         : "";
       if (!transcript) {
-        setVoiceError("Could not transcribe. Try again or type your search.");
+        setVoiceError(VOICE_EDIT_FALLBACK_MESSAGE);
         return;
       }
       setSearchQuery(transcript);
     } catch {
-      setVoiceError("Could not transcribe. Try again or type your search.");
+      setVoiceError(VOICE_EDIT_FALLBACK_MESSAGE);
     } finally {
       setVoiceProcessing(false);
       await resetVoiceRecording();
@@ -390,17 +391,25 @@ export default function ReplacementPricingScreen() {
     }
     if (voicePermission !== "granted") {
       logVoiceDiagnostic("voice_permission_button_pressed");
-      const granted = await requestVoicePermission();
-      if (granted) {
-        setVoiceNotice("Microphone enabled. Tap the mic again to speak your search.");
-      } else {
-        setVoiceError("Allow microphone access in your device settings to use voice search.");
+      try {
+        const granted = await requestVoicePermission();
+        if (granted) {
+          setVoiceNotice("Microphone enabled. Tap the mic again to speak your search.");
+        } else {
+          setVoiceError(VOICE_EDIT_FALLBACK_MESSAGE);
+        }
+      } catch {
+        setVoiceError(VOICE_EDIT_FALLBACK_MESSAGE);
       }
       return;
     }
-    const started = await startVoiceRecording();
-    if (!started) {
-      setVoiceError("Could not transcribe. Try again or type your search.");
+    try {
+      const started = await startVoiceRecording();
+      if (!started) {
+        setVoiceError(VOICE_EDIT_FALLBACK_MESSAGE);
+      }
+    } catch {
+      setVoiceError(VOICE_EDIT_FALLBACK_MESSAGE);
     }
   }, [
     logVoiceDiagnostic,

@@ -13,6 +13,7 @@ import { Platform } from "react-native";
 import type { VoiceRecordingInput } from "@/lib/voice-input";
 
 const DEFAULT_MAX_DURATION_SECONDS = 45;
+const VOICE_EDIT_FALLBACK_MESSAGE = "Voice edit could not start. Please try again or type your changes manually.";
 type VoicePermission = "unknown" | "granted" | "denied";
 type VoiceEntryPoint = "edit_item_full_voice" | "inline_voice_field" | "replacement_price_voice_search" | "unknown_voice";
 type VoiceDiagnosticStage =
@@ -64,6 +65,7 @@ export function useVoiceRecording(maxDurationSeconds = DEFAULT_MAX_DURATION_SECO
   const recordingActiveRef = useRef(false);
 
   const logDiagnostic = useCallback((stage: VoiceDiagnosticStage) => {
+    if (!__DEV__) return;
     console.info("[voice]", { stage, platform: Platform.OS, entryPoint });
   }, [entryPoint]);
 
@@ -97,6 +99,7 @@ export function useVoiceRecording(maxDurationSeconds = DEFAULT_MAX_DURATION_SECO
       setPermissionIfMounted(granted ? "granted" : result.canAskAgain === false ? "denied" : "unknown");
       return granted;
     } catch {
+      if (__DEV__) console.info("[voice]", { stage: "permission_check_failed", platform: Platform.OS, entryPoint });
       return permission === "granted";
     }
   }, [permission, setPermissionIfMounted]);
@@ -118,7 +121,7 @@ export function useVoiceRecording(maxDurationSeconds = DEFAULT_MAX_DURATION_SECO
       return granted;
     } catch {
       setPermissionIfMounted("denied");
-      setErrorIfMounted("Microphone permission could not be requested. Please try again from device settings.");
+      setErrorIfMounted(VOICE_EDIT_FALLBACK_MESSAGE);
       logDiagnostic("permission_denied");
       return false;
     } finally {
@@ -134,7 +137,7 @@ export function useVoiceRecording(maxDurationSeconds = DEFAULT_MAX_DURATION_SECO
     setErrorIfMounted(null);
     const granted = permission === "granted" || await checkPermission();
     if (!granted) {
-      setErrorIfMounted("Microphone permission is required before recording voice input.");
+      setErrorIfMounted(VOICE_EDIT_FALLBACK_MESSAGE);
       return false;
     }
 
@@ -158,7 +161,7 @@ export function useVoiceRecording(maxDurationSeconds = DEFAULT_MAX_DURATION_SECO
     } catch (recordingError) {
       recordingActiveRef.current = false;
       await setAudioModeAsync({ allowsRecording: false }).catch(() => undefined);
-      setErrorIfMounted(recordingError instanceof Error ? recordingError.message : "Could not start recording.");
+      setErrorIfMounted(VOICE_EDIT_FALLBACK_MESSAGE);
       logDiagnostic("recording_failed");
       return false;
     } finally {
@@ -182,7 +185,7 @@ export function useVoiceRecording(maxDurationSeconds = DEFAULT_MAX_DURATION_SECO
     } catch (recordingError) {
       recordingActiveRef.current = false;
       await setAudioModeAsync({ allowsRecording: false }).catch(() => undefined);
-      setErrorIfMounted(recordingError instanceof Error ? recordingError.message : "Could not stop recording.");
+      setErrorIfMounted(VOICE_EDIT_FALLBACK_MESSAGE);
       return null;
     } finally {
       stoppingRecordingRef.current = false;

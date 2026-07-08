@@ -118,6 +118,33 @@ const SCAN_MODES: ScanModeCard[] = [
   },
 ];
 
+const SCAN_MODE_COLORS: Record<ScanMode, { fill: string; border: string; chip: string; icon: string }> = {
+  single_photo_room: {
+    fill: "#EFF8FF",
+    border: "#B9E0FF",
+    chip: "#DBF0FF",
+    icon: "#2563EB",
+  },
+  multi_photo_room: {
+    fill: "#F6F0FF",
+    border: "#D9C7FF",
+    chip: "#EEE2FF",
+    icon: "#7C3AED",
+  },
+  single_item: {
+    fill: "#FFF8E7",
+    border: "#F3D59B",
+    chip: "#FFEBC2",
+    icon: "#B45309",
+  },
+  video_room: {
+    fill: "#F0FDF4",
+    border: "#B7E4C7",
+    chip: "#DCFCE7",
+    icon: "#15803D",
+  },
+};
+
 interface PartialFailure {
   itemName: string;
   error: string;
@@ -1052,18 +1079,6 @@ export default function ScanScreen() {
     }
   };
 
-  const showVideoScanChoice = () => {
-    Alert.alert(
-      "Video room scan",
-      VIDEO_SCAN_LIMIT_COPY,
-      [
-        { text: "Record video", onPress: () => void recordVideo() },
-        { text: "Choose from gallery", onPress: () => void pickVideo() },
-        { text: "Cancel", style: "cancel" },
-      ],
-    );
-  };
-
   const takeAnotherMultiPhoto = () => {
     if (images.length >= MAX_MULTI_PHOTO_IMAGES) {
       setMultiPhotoPromptVisible(true);
@@ -1103,7 +1118,7 @@ export default function ScanScreen() {
     aiScanEntitlementCheckedRef.current = true;
     setSelectedMode(mode);
     if (mode === "video_room") {
-      showVideoScanChoice();
+      void recordVideo();
       return;
     }
     void takePhoto(mode, mode !== "multi_photo_room");
@@ -1391,6 +1406,10 @@ export default function ScanScreen() {
 
   const chooseGalleryFallback = () => {
     if (!selectedMode) return;
+    if (selectedMode === "video_room") {
+      void pickVideo();
+      return;
+    }
     void pickImages();
   };
 
@@ -2316,11 +2335,6 @@ export default function ScanScreen() {
 
   const isScanning = scanStatus === "scanning";
   const isPreparingVideo = scanStatus === "picking";
-  const canScan =
-    selectedMode &&
-    selectedFileId &&
-    selectedRoomId &&
-    (selectedMode === "video_room" || images.length > 0);
 
   // ── Scanning overlay — full screen while AI processes ─────────────────────
   if (isScanning && !limitModal) {
@@ -2542,69 +2556,53 @@ export default function ScanScreen() {
               SCAN TYPE FOR {selectedRoomName.toUpperCase()}
             </Text>
           </View>
-          {SCAN_MODES.map((m) => (
-            <Pressable
-              key={m.mode}
-              onPress={() => chooseScanMode(m.mode, m.comingSoon)}
-              style={({ pressed }) => [
-                styles.modeCard,
-                {
-                  backgroundColor: selectedMode === m.mode ? colors.primary : colors.card,
-                  borderColor: selectedMode === m.mode ? colors.primary : colors.border,
-                  borderRadius: colors.radius,
-                  opacity: m.comingSoon ? 0.5 : pressed ? 0.9 : 1,
-                },
-              ]}
-            >
-              <View
-                style={[
-                  styles.modeIcon,
-                  { backgroundColor: selectedMode === m.mode ? "rgba(255,255,255,0.2)" : colors.secondary },
+          {SCAN_MODES.map((m) => {
+            const palette = SCAN_MODE_COLORS[m.mode];
+            const active =
+              selectedMode === m.mode &&
+              (scanStatus === "scanning" || scanStatus === "saving");
+            return (
+              <Pressable
+                key={m.mode}
+                accessibilityRole="button"
+                accessibilityState={{ busy: active, disabled: m.comingSoon }}
+                onPress={() => chooseScanMode(m.mode, m.comingSoon)}
+                style={({ pressed }) => [
+                  styles.modeCard,
+                  {
+                    backgroundColor: palette.fill,
+                    borderColor: active ? palette.icon : palette.border,
+                    borderRadius: colors.radius,
+                    opacity: m.comingSoon ? 0.5 : pressed ? 0.86 : 1,
+                  },
                 ]}
               >
-                <Feather
-                  name={m.icon}
-                  size={20}
-                  color={selectedMode === m.mode ? colors.primaryForeground : colors.primary}
-                />
-              </View>
-              <View style={{ flex: 1, gap: 2 }}>
-                <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-                  <Text
-                    style={[
-                      styles.modeTitle,
-                      { color: selectedMode === m.mode ? colors.primaryForeground : colors.foreground },
-                    ]}
-                  >
-                    {m.title}
-                  </Text>
-                  {m.comingSoon && (
-                    <View style={[styles.soonBadge, { backgroundColor: colors.muted }]}>
-                      <Text style={{ fontSize: 9, fontFamily: "Inter_600SemiBold", color: colors.mutedForeground }}>
-                        SOON
-                      </Text>
-                    </View>
-                  )}
+                <View style={[styles.modeIcon, { backgroundColor: palette.chip }]}>
+                  <Feather name={m.icon} size={20} color={palette.icon} />
                 </View>
-                <Text
-                  style={[
-                    styles.modeSub,
-                    { color: selectedMode === m.mode ? "rgba(255,255,255,0.75)" : colors.mutedForeground },
-                  ]}
-                >
-                  {m.subtitle}
-                </Text>
-                <Text
-                  style={[
-                    styles.modeCredit,
-                    { color: selectedMode === m.mode ? "rgba(255,255,255,0.6)" : colors.mutedForeground },
-                  ]}
-                >
-                  {m.creditLabel}
-                </Text>
-              </View>
-            </Pressable>
-          ))}
+                <View style={{ flex: 1, gap: 2 }}>
+                  <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                    <Text style={[styles.modeTitle, { color: colors.foreground }]}>
+                      {m.title}
+                    </Text>
+                    {m.comingSoon && (
+                      <View style={[styles.soonBadge, { backgroundColor: colors.muted }]}>
+                        <Text style={{ fontSize: 9, fontFamily: "Inter_600SemiBold", color: colors.mutedForeground }}>
+                          SOON
+                        </Text>
+                      </View>
+                    )}
+                  </View>
+                  <Text style={[styles.modeSub, { color: colors.mutedForeground }]}>
+                    {m.subtitle}
+                  </Text>
+                  <Text style={[styles.modeCredit, { color: colors.mutedForeground }]}>
+                    {m.creditLabel}
+                  </Text>
+                </View>
+              </Pressable>
+            );
+          })}
         </View>
         )}
 
@@ -2696,106 +2694,6 @@ export default function ScanScreen() {
           </View>
         )}
 
-        {/* Photo picker */}
-        {selectedMode && selectedMode !== "video_room" && (
-          <View style={styles.section}>
-            <Text style={[styles.sectionLabel, { color: colors.mutedForeground }]}>
-              {selectedMode === "multi_photo_room" ? `PHOTOS (max ${MAX_MULTI_PHOTO_IMAGES})` : "PHOTO"}
-            </Text>
-
-            {images.length > 0 ? (
-              <View style={{ gap: 10 }}>
-                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
-                  {images.map((img, i) => (
-                    <View key={i} style={{ position: "relative" }}>
-                      <ExpandableImage
-                        uri={img.uri}
-                        style={[styles.photoThumb, { borderRadius: colors.radius }]}
-                        contentFit="cover"
-                      />
-                      <Pressable
-                        onPress={() => setImages((prev) => prev.filter((_, idx) => idx !== i))}
-                        style={styles.removeThumb}
-                      >
-                        <Feather name="x" size={12} color="#fff" />
-                      </Pressable>
-                    </View>
-                  ))}
-                </ScrollView>
-                {selectedMode === "multi_photo_room" && images.length < MAX_MULTI_PHOTO_IMAGES && (
-                  <Pressable
-                    onPress={pickImages}
-                    style={({ pressed }) => [
-                      styles.addMoreBtn,
-                      { borderColor: colors.border, borderRadius: colors.radius, opacity: pressed ? 0.8 : 1 },
-                    ]}
-                  >
-                    <Feather name="plus" size={15} color={colors.primary} />
-                    <Text style={[styles.addMoreText, { color: colors.primary }]}>
-                      Add more ({images.length}/{MAX_MULTI_PHOTO_IMAGES})
-                    </Text>
-                  </Pressable>
-                )}
-              </View>
-            ) : (
-              <View style={{ flexDirection: "row", gap: 10 }}>
-                <Pressable
-                  onPress={() => void takePhoto(selectedMode, selectedMode !== "multi_photo_room")}
-                  style={({ pressed }) => [
-                    styles.photoBtn,
-                    { backgroundColor: colors.card, borderColor: colors.border, borderRadius: colors.radius, opacity: pressed ? 0.8 : 1 },
-                  ]}
-                >
-                  <Feather name="camera" size={20} color={colors.primary} />
-                  <Text style={[styles.photoBtnText, { color: colors.primary }]}>Camera</Text>
-                </Pressable>
-                <Pressable
-                  onPress={pickImages}
-                  style={({ pressed }) => [
-                    styles.photoBtn,
-                    { backgroundColor: colors.card, borderColor: colors.border, borderRadius: colors.radius, opacity: pressed ? 0.8 : 1 },
-                  ]}
-                >
-                  <Feather name="image" size={20} color={colors.primary} />
-                  <Text style={[styles.photoBtnText, { color: colors.primary }]}>Gallery</Text>
-                </Pressable>
-              </View>
-            )}
-          </View>
-        )}
-
-        {/* Video picker */}
-        {selectedMode === "video_room" && (
-          <View style={styles.section}>
-            <Text style={[styles.sectionLabel, { color: colors.mutedForeground }]}>VIDEO</Text>
-            <Text style={[styles.videoHelper, { color: colors.mutedForeground }]}>
-              {VIDEO_SCAN_LIMIT_COPY}
-            </Text>
-            <View style={{ flexDirection: "row", gap: 10 }}>
-              <Pressable
-                onPress={() => void recordVideo()}
-                style={({ pressed }) => [
-                  styles.photoBtn,
-                  { backgroundColor: colors.card, borderColor: colors.border, borderRadius: colors.radius, opacity: pressed ? 0.8 : 1 },
-                ]}
-              >
-                <Feather name="video" size={20} color={colors.primary} />
-                <Text style={[styles.photoBtnText, { color: colors.primary }]}>Record</Text>
-              </Pressable>
-              <Pressable
-                onPress={() => void pickVideo()}
-                style={({ pressed }) => [
-                  styles.photoBtn,
-                  { backgroundColor: colors.card, borderColor: colors.border, borderRadius: colors.radius, opacity: pressed ? 0.8 : 1 },
-                ]}
-              >
-                <Feather name="film" size={20} color={colors.primary} />
-                <Text style={[styles.photoBtnText, { color: colors.primary }]}>Gallery</Text>
-              </Pressable>
-            </View>
-          </View>
-        )}
-
         {/* Inline error */}
         {scanError && (
           <View style={[styles.errorCard, { backgroundColor: "#FEF2F2", borderColor: "#FCA5A5", borderRadius: colors.radius }]}>
@@ -2857,43 +2755,24 @@ export default function ScanScreen() {
           </View>
         )}
 
-        {/* Start scan button */}
-        {selectedMode && selectedMode !== "video_room" && (
-          <Pressable
-            onPress={() => void handleStartScan()}
-            disabled={!canScan || isScanning}
-            style={({ pressed }) => [
-              styles.scanBtn,
-              {
-                backgroundColor: !canScan || isScanning ? colors.muted : colors.primary,
-                borderRadius: colors.radius,
-                opacity: pressed ? 0.85 : 1,
-              },
-            ]}
-          >
-            {isScanning ? (
+        {false ? (
+          <Pressable>
+            {false ? (
               <>
                 <ActivityIndicator color={colors.primaryForeground} />
                 <Text style={[styles.scanBtnText, { color: colors.primaryForeground }]}>Scanning…</Text>
               </>
             ) : (
               <>
-                <Feather name="zap" size={18} color={!canScan ? colors.mutedForeground : colors.primaryForeground} />
-                <Text style={[styles.scanBtnText, { color: !canScan ? colors.mutedForeground : colors.primaryForeground }]}>
-                  Start scan
+                <Feather name="zap" size={18} color={colors.mutedForeground} />
+                <Text style={[styles.scanBtnText, { color: colors.mutedForeground }]}>
+                  
                 </Text>
               </>
             )}
           </Pressable>
-        )}
+        ) : null}
 
-        {!selectedMode && (
-          <EmptyState
-            icon="zap"
-            title="Choose a scan type above"
-            subtitle="Choose how you want to capture items, then add a photo to start scanning."
-          />
-        )}
       </ScrollView>
 
       <Modal
