@@ -67,6 +67,7 @@ import type {
 const VIDEO_SCAN_USED_DURATION_MS = 10_000;
 const VIDEO_SCAN_USED_SECONDS = VIDEO_SCAN_USED_DURATION_MS / 1000;
 const VIDEO_SCAN_LIMIT_COPY = `Record or upload a room walkthrough. Coverly will scan up to the first ${VIDEO_SCAN_USED_SECONDS} seconds.`;
+const VIDEO_SCAN_START_ERROR = "Video scan could not start. Please try again or choose a video from gallery.";
 const ANDROID_SCAN_STATE_STORAGE_KEY = "coverly:android-scan-state:v1";
 const ANDROID_SCAN_STATE_MAX_AGE_MS = 30 * 60 * 1000;
 const EXTREME_IMAGE_MAX_DIMENSION = 5200;
@@ -1024,27 +1025,34 @@ export default function ScanScreen() {
       setScanError("Choose a property and room before adding video.");
       return;
     }
-    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (status !== "granted") {
-      Alert.alert("Permission needed", "Allow photo library access to choose a video.");
-      return;
-    }
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Videos,
-      quality: 0.8,
-      allowsMultipleSelection: false,
-    });
-    scanLog("image picker returned", {
-      source: "video_library",
-      mode: "video_room",
-      canceled: result.canceled,
-      assetCount: result.canceled ? 0 : result.assets.length,
-      hasUri: !result.canceled && !!result.assets[0]?.uri,
-    });
-    if (!result.canceled && result.assets[0]) {
-      await scanVideoAsset(result.assets[0]);
-    } else if (result.canceled) {
-      scanLog("image picker cancelled", { source: "video_library", mode: "video_room" });
+    try {
+      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (status !== "granted") {
+        Alert.alert("Permission needed", "Allow photo library access to choose a video.");
+        return;
+      }
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ["videos"],
+        quality: 0.8,
+        allowsMultipleSelection: false,
+      });
+      scanLog("image picker returned", {
+        source: "video_library",
+        mode: "video_room",
+        canceled: result.canceled,
+        assetCount: result.canceled ? 0 : result.assets.length,
+        hasUri: !result.canceled && !!result.assets[0]?.uri,
+      });
+      if (!result.canceled && result.assets[0]) {
+        await scanVideoAsset(result.assets[0]);
+      } else if (result.canceled) {
+        scanLog("image picker cancelled", { source: "video_library", mode: "video_room" });
+      } else {
+        setScanError("Could not prepare the selected video. Please try another video.");
+      }
+    } catch (error) {
+      scanLog("video library failed", { message: errorMessage(error) });
+      setScanError("Could not open video gallery. Please try again.");
     }
   };
 
@@ -1053,29 +1061,39 @@ export default function ScanScreen() {
       setScanError("Choose a property and room before recording video.");
       return;
     }
-    if (Platform.OS !== "web") {
-      const { status } = await ImagePicker.requestCameraPermissionsAsync();
-      if (status !== "granted") {
-        Alert.alert("Permission needed", "Allow camera access to record video.");
-        return;
+    setScanError(null);
+    try {
+      if (Platform.OS !== "web") {
+        const { status } = await ImagePicker.requestCameraPermissionsAsync();
+        if (status !== "granted") {
+          Alert.alert("Permission needed", "Allow camera access to record video.");
+          return;
+        }
       }
-    }
-    const result = await ImagePicker.launchCameraAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Videos,
-      quality: 0.8,
-      videoMaxDuration: VIDEO_SCAN_USED_SECONDS,
-    });
-    scanLog("image picker returned", {
-      source: "video_camera",
-      mode: "video_room",
-      canceled: result.canceled,
-      assetCount: result.canceled ? 0 : result.assets.length,
-      hasUri: !result.canceled && !!result.assets[0]?.uri,
-    });
-    if (!result.canceled && result.assets[0]) {
-      await scanVideoAsset(result.assets[0]);
-    } else if (result.canceled) {
-      scanLog("image picker cancelled", { source: "video_camera", mode: "video_room" });
+      const result = await ImagePicker.launchCameraAsync({
+        mediaTypes: ["videos"],
+        quality: 0.8,
+        videoMaxDuration: VIDEO_SCAN_USED_SECONDS,
+      });
+      scanLog("image picker returned", {
+        source: "video_camera",
+        mode: "video_room",
+        canceled: result.canceled,
+        assetCount: result.canceled ? 0 : result.assets.length,
+        hasUri: !result.canceled && !!result.assets[0]?.uri,
+      });
+      if (!result.canceled && result.assets[0]) {
+        await scanVideoAsset(result.assets[0]);
+      } else if (result.canceled) {
+        scanLog("image picker cancelled", { source: "video_camera", mode: "video_room" });
+      } else {
+        setScanStatus("error");
+        setScanError(VIDEO_SCAN_START_ERROR);
+      }
+    } catch (error) {
+      scanLog("video camera failed", { message: errorMessage(error), platform: Platform.OS });
+      setScanStatus("error");
+      setScanError(VIDEO_SCAN_START_ERROR);
     }
   };
 
@@ -1392,6 +1410,10 @@ export default function ScanScreen() {
 
   const retryCurrentScan = () => {
     if (!selectedMode) return;
+    if (selectedMode === "video_room" && images.length === 0) {
+      void recordVideo();
+      return;
+    }
     void handleStartScan(selectedMode, images);
   };
 
@@ -2701,7 +2723,7 @@ export default function ScanScreen() {
               <Feather name="alert-circle" size={15} color="#DC2626" />
               <Text style={[styles.errorText, { color: "#991B1B" }]}>{scanError}</Text>
             </View>
-            {scanStatus === "error" && selectedMode && images.length > 0 ? (
+            {scanStatus === "error" && selectedMode && (images.length > 0 || selectedMode === "video_room") ? (
               <View style={styles.errorActions}>
                 <Pressable
                   onPress={retryCurrentScan}

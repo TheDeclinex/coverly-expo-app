@@ -49,7 +49,7 @@
         {
           "cameraPermission": "Allow Coverly to take property, room, item and evidence photos.",
           "photosPermission": "Allow Coverly to choose property, room, item and evidence photos.",
-          "microphonePermission": false
+          "microphonePermission": "Allow Coverly to record room walkthrough videos for item scanning."
         }
       ],
       [
