@@ -78,6 +78,12 @@ Known direction:
 - App should use entitlement state for gating.
 - Billing state should survive app reloads and auth changes.
 
+Backend webhook requirements:
+- `revenuecat-webhook` validates webhook authorization/signature before processing events.
+- Set Supabase Edge Function secret `REVENUECAT_SECRET_API_KEY` to a RevenueCat server-side Secret API key. This key is used only by the Edge Function to call `GET /v1/subscribers/{app_user_id}` and sync canonical Customer Info after lifecycle webhook events.
+- Do not expose `REVENUECAT_SECRET_API_KEY` in Expo `EXPO_PUBLIC_` variables or client code.
+- Canonical entitlement mapping is configured by entitlement IDs: `Coverly Plus` -> Plus and `Coverly Family` -> Family. Configure these through `REVENUECAT_PLUS_ENTITLEMENT_IDS` / `REVENUECAT_FAMILY_ENTITLEMENT_IDS` for the webhook and `EXPO_PUBLIC_REVENUECAT_PLUS_ENTITLEMENT_ID` / `EXPO_PUBLIC_REVENUECAT_FAMILY_ENTITLEMENT_ID` for mobile.
+
 ## Supabase entitlement sync
 
 Supabase should store enough subscription state for:

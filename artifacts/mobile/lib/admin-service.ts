@@ -40,8 +40,17 @@ export interface AdminUserProfile {
   revenueCatCustomerId: string | null;
   revenueCatProductId: string | null;
   revenueCatEntitlementId: string | null;
+  revenueCatExpirationAt: string | null;
   revenueCatStatus: string | null;
   revenueCatUpdatedAt: string | null;
+  revenueCatLastEventId: string | null;
+}
+
+export interface AdminRevenueCatWebhookEvent {
+  eventType: string | null;
+  status: string | null;
+  receivedAt: string | null;
+  processedAt: string | null;
 }
 
 export interface AdminUserDetail {
@@ -64,6 +73,7 @@ export interface AdminUserDetail {
     severity: string | null;
     createdAt: string | null;
   }>;
+  latestRevenueCatWebhookEvent: AdminRevenueCatWebhookEvent | null;
   supportsBonusAllowance: boolean;
 }
 
@@ -73,6 +83,7 @@ export interface AdminEntitlementDebug {
   entitlementMode: string | null;
   revenueCatConnected: boolean;
   revenueCatExplanation: string | null;
+  latestRevenueCatWebhookEvent: AdminRevenueCatWebhookEvent | null;
   supportsBonusAllowance: boolean;
 }
 

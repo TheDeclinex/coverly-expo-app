@@ -70,6 +70,7 @@ import type { InventoryFile, InventoryItem, InventoryRoom } from "@/types";
 const UNASSIGNED_SECTION_ID = "__unassigned__";
 
 type BuilderStage = "scope" | "room_picker" | "draft";
+type ClaimPackFlowStep = 1 | 2 | 3 | 4;
 
 type EvidenceLinkRow = {
   item_id: string | null;
@@ -170,7 +171,8 @@ export default function ClaimPackDraftScreen() {
   const insets = useSafeAreaInsets();
   const queryClient = useQueryClient();
   const scrollRef = useRef<ScrollView>(null);
-  const [stage, setStage] = useState<BuilderStage>("scope");
+  const [stage, setStage] = useState<BuilderStage>("draft");
+  const [flowStep, setFlowStep] = useState<ClaimPackFlowStep>(1);
   const [selection, setSelection] = useState<ClaimPackSelection | null>(null);
   const [roomDraftIds, setRoomDraftIds] = useState<Set<string>>(new Set());
   const [didApplyFocusRoom, setDidApplyFocusRoom] = useState(false);
@@ -310,6 +312,7 @@ export default function ClaimPackDraftScreen() {
       setRoomDraftIds(new Set(draft.selectedRoomIds));
       setManagedRoomId(null);
       setStage("draft");
+      setFlowStep(2);
       setDidLoadStoredDraft(true);
       setDidPrefillClaimDetails(true);
     });
@@ -339,6 +342,7 @@ export default function ClaimPackDraftScreen() {
     setManagedRoomId(focusRoomId);
     setHighlightItemId(newItemId ?? null);
     setStage("draft");
+    setFlowStep(2);
     setDidApplyFocusRoom(true);
   }, [clientDraftId, didApplyFocusRoom, focusRoomId, items, itemsQuery.isSuccess, newItemId, roomsQuery.isSuccess]);
 
@@ -402,6 +406,12 @@ export default function ClaimPackDraftScreen() {
     void roomsQuery.refetch();
     void itemsQuery.refetch();
     void evidenceCountsQuery.refetch();
+  };
+
+  const scrollToTop = () => {
+    requestAnimationFrame(() => {
+      scrollRef.current?.scrollTo({ y: 0, animated: true });
+    });
   };
 
   const persistDraft = (draftSelection = effectiveSelection) => {
@@ -520,6 +530,33 @@ export default function ClaimPackDraftScreen() {
 
   const enterRoomSelectionMode = (roomId: string | null) => {
     setManagedRoomId(roomId);
+  };
+
+  const continueToSelectItems = () => {
+    if (!selection) {
+      const roomIds = rooms.map((room) => room.id);
+      const initialSelection = createRoomsOnlyClaimPackSelection(roomIds);
+      setSelection(initialSelection);
+      setRoomDraftIds(new Set(roomIds));
+    }
+    setScope("selected_rooms");
+    setManagedRoomId(null);
+    setStage("draft");
+    setFlowStep(2);
+    scrollToTop();
+  };
+
+  const continueToReview = () => {
+    if (summary.selectedItemsCount === 0) return;
+    setManagedRoomId(null);
+    setFlowStep(3);
+    scrollToTop();
+  };
+
+  const continueToGenerate = () => {
+    setManagedRoomId(null);
+    setFlowStep(4);
+    scrollToTop();
   };
 
   const approveReviewIssue = (issueId: string) => {
@@ -641,7 +678,7 @@ export default function ClaimPackDraftScreen() {
           contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + 28 }]}
           showsVerticalScrollIndicator={false}
         >
-          <BuilderHero property={property} stage={stage} colors={colors} />
+          <BuilderHero property={property} flowStep={flowStep} colors={colors} />
 
           {stage === "scope" ? (
             <ScopeChoice
@@ -691,6 +728,10 @@ export default function ClaimPackDraftScreen() {
               onApproveReviewIssue={approveReviewIssue}
               onGeneratePdf={generatePdf}
               onOpenGeneratedPdf={openGeneratedPdf}
+              flowStep={flowStep}
+              onContinueToSelectItems={continueToSelectItems}
+              onContinueToReview={continueToReview}
+              onContinueToGenerate={continueToGenerate}
               isGeneratingPdf={isGeneratingPdf}
               generatedPdf={generatedPdf}
               generateError={generateError}
@@ -698,7 +739,7 @@ export default function ClaimPackDraftScreen() {
             />
           )}
 
-          {stage !== "draft" || managedRoomId ? null : (
+          {stage !== "draft" || managedRoomId || flowStep !== 4 ? null : (
             <Text style={[styles.exportFootnote, { color: colors.mutedForeground }]}>
               PDFs are generated securely by Coverly and saved to your claim-pack history.
             </Text>
@@ -711,14 +752,22 @@ export default function ClaimPackDraftScreen() {
 
 function BuilderHero({
   property,
-  stage,
+  flowStep,
   colors,
 }: {
   property: InventoryFile;
-  stage: BuilderStage;
+  flowStep: ClaimPackFlowStep;
   colors: ReturnType<typeof useColors>;
 }) {
-  const step = stage === "scope" ? "Step 1 of 3" : stage === "room_picker" ? "Step 2 of 3" : "Draft review";
+  const step = `Step ${flowStep} of 4`;
+  const helperCopy =
+    flowStep === 1
+      ? "Add the claim details that should appear on the draft."
+      : flowStep === 2
+        ? "Choose the rooms and items to include."
+        : flowStep === 3
+          ? "Review the claim pack before final export."
+          : "Generate the final PDF when everything is ready.";
   return (
     <View style={[styles.heroCard, { backgroundColor: colors.card, borderColor: colors.border, borderRadius: colors.radius }]}>
       <View style={[styles.heroIcon, { backgroundColor: colors.accent }]}>
@@ -728,7 +777,7 @@ function BuilderHero({
         <Text style={[styles.kicker, { color: colors.mutedForeground }]}>{step.toUpperCase()}</Text>
         <Text style={[styles.title, { color: colors.foreground }]}>{property.name}</Text>
         <Text style={[styles.body, { color: colors.mutedForeground }]}>
-          Build a claim pack draft for selected property contents, photos and supporting evidence.
+          {helperCopy}
         </Text>
       </View>
     </View>
@@ -908,6 +957,10 @@ function DraftReview({
   onApproveReviewIssue,
   onGeneratePdf,
   onOpenGeneratedPdf,
+  flowStep,
+  onContinueToSelectItems,
+  onContinueToReview,
+  onContinueToGenerate,
   isGeneratingPdf,
   generatedPdf,
   generateError,
@@ -941,6 +994,10 @@ function DraftReview({
   onApproveReviewIssue: (issueId: string) => void;
   onGeneratePdf: () => void;
   onOpenGeneratedPdf: () => void;
+  flowStep: ClaimPackFlowStep;
+  onContinueToSelectItems: () => void;
+  onContinueToReview: () => void;
+  onContinueToGenerate: () => void;
   isGeneratingPdf: boolean;
   generatedPdf: GenerateClaimPackPdfSuccess | null;
   generateError: string | null;
@@ -1024,43 +1081,85 @@ function DraftReview({
     );
   }
 
+  if (flowStep === 1) {
+    return (
+      <View style={styles.sections}>
+        <ClaimDetailsCard
+          insurerName={insurerName}
+          onChangeInsurerName={onChangeInsurerName}
+          policyNumber={policyNumber}
+          onChangePolicyNumber={onChangePolicyNumber}
+          claimNumber={claimNumber}
+          onChangeClaimNumber={onChangeClaimNumber}
+          claimNote={claimNote}
+          onChangeClaimNote={onChangeClaimNote}
+          colors={colors}
+        />
+        <Pressable
+          onPress={onContinueToSelectItems}
+          style={({ pressed }) => [
+            styles.primaryButton,
+            { backgroundColor: colors.primary, borderRadius: colors.radius, opacity: pressed ? 0.76 : 1 },
+          ]}
+        >
+          <Text style={[styles.primaryButtonText, { color: colors.primaryForeground }]}>Continue to select items</Text>
+        </Pressable>
+      </View>
+    );
+  }
+
+  if (flowStep === 3) {
+    return (
+      <View style={styles.sections}>
+        <ClaimPackReviewCard
+          reviewSummary={review.summary}
+          issues={unresolvedReviewIssues}
+          expanded={isReviewExpanded}
+          onToggleExpanded={() => setIsReviewExpanded((current) => !current)}
+          onApproveIssue={onApproveReviewIssue}
+          onFixItem={openItemEditor}
+          onRunPriceSearch={openPriceSearch}
+          onExcludeItem={excludeReviewItem}
+          onExcludeRoom={excludeReviewRoom}
+          onEditProperty={openPropertyEditor}
+          colors={colors}
+        />
+        <Pressable
+          disabled={exportBlockReason !== null}
+          onPress={onContinueToGenerate}
+          style={[
+            styles.primaryButton,
+            { backgroundColor: exportBlockReason === null ? colors.primary : colors.border, borderRadius: colors.radius },
+          ]}
+        >
+          <Text style={[styles.primaryButtonText, { color: exportBlockReason === null ? colors.primaryForeground : colors.mutedForeground }]}>
+            Continue to generate PDF
+          </Text>
+        </Pressable>
+      </View>
+    );
+  }
+
+  if (flowStep === 4) {
+    return (
+      <View style={styles.sections}>
+        <ClaimPackPdfExportCard
+          canGenerate={canGeneratePdf}
+          blockReason={exportBlockReason}
+          isGenerating={isGeneratingPdf}
+          generatedPdf={generatedPdf}
+          errorMessage={generateError}
+          onGenerate={onGeneratePdf}
+          onOpen={onOpenGeneratedPdf}
+          colors={colors}
+        />
+      </View>
+    );
+  }
+
   return (
     <View style={styles.sections}>
       <SummaryCard property={property} summary={summary} reviewSummary={review.summary} colors={colors} />
-      <ClaimDetailsCard
-        insurerName={insurerName}
-        onChangeInsurerName={onChangeInsurerName}
-        policyNumber={policyNumber}
-        onChangePolicyNumber={onChangePolicyNumber}
-        claimNumber={claimNumber}
-        onChangeClaimNumber={onChangeClaimNumber}
-        claimNote={claimNote}
-        onChangeClaimNote={onChangeClaimNote}
-        colors={colors}
-      />
-
-      <View style={styles.actionRow}>
-        <Pressable
-          onPress={onAddRoom}
-          style={({ pressed }) => [
-            styles.secondaryButton,
-            { borderColor: colors.border, borderRadius: colors.radius, backgroundColor: colors.card, opacity: pressed ? 0.75 : 1 },
-          ]}
-        >
-          <Feather name="plus" size={15} color={colors.primary} />
-          <Text style={[styles.secondaryButtonText, { color: colors.primary }]}>Add another room</Text>
-        </Pressable>
-        <Pressable
-          onPress={() => onAddItem(rooms[0])}
-          style={({ pressed }) => [
-            styles.secondaryButton,
-            { borderColor: colors.border, borderRadius: colors.radius, backgroundColor: colors.card, opacity: pressed ? 0.75 : 1 },
-          ]}
-        >
-          <Feather name="edit-3" size={15} color={colors.primary} />
-          <Text style={[styles.secondaryButtonText, { color: colors.primary }]}>Add missing item</Text>
-        </Pressable>
-      </View>
 
       {rooms.length === 0 && selectedUnassignedItems.length === 0 ? (
         <View style={[styles.emptyCard, { backgroundColor: colors.card, borderColor: colors.border, borderRadius: colors.radius }]}>
@@ -1085,11 +1184,7 @@ function DraftReview({
               items={itemsByRoomId.get(room.id) ?? []}
               selectedItemIds={selection.selectedItemIds}
               evidenceCounts={evidenceCounts}
-              onRemoveRoom={() => onRemoveRoom(room.id)}
-              onSelectAll={() => onSelectRoomItems(room.id)}
-              onClear={() => onClearRoomItems(room.id)}
               onManageItems={() => onManageRoom(room.id)}
-              onAddItem={() => onAddItem(room)}
               colors={colors}
             />
           ))}
@@ -1105,30 +1200,19 @@ function DraftReview({
         </>
       )}
 
-      <ClaimPackReviewCard
-        reviewSummary={review.summary}
-        issues={unresolvedReviewIssues}
-        expanded={isReviewExpanded}
-        onToggleExpanded={() => setIsReviewExpanded((current) => !current)}
-        onApproveIssue={onApproveReviewIssue}
-        onFixItem={openItemEditor}
-        onRunPriceSearch={openPriceSearch}
-        onExcludeItem={excludeReviewItem}
-        onExcludeRoom={excludeReviewRoom}
-        onEditProperty={openPropertyEditor}
-        colors={colors}
-      />
-
-      <ClaimPackPdfExportCard
-        canGenerate={canGeneratePdf}
-        blockReason={exportBlockReason}
-        isGenerating={isGeneratingPdf}
-        generatedPdf={generatedPdf}
-        errorMessage={generateError}
-        onGenerate={onGeneratePdf}
-        onOpen={onOpenGeneratedPdf}
-        colors={colors}
-      />
+      <Pressable
+        disabled={!hasSelectedItems}
+        onPress={onContinueToReview}
+        accessibilityHint="Review the selected items before generating the claim pack PDF."
+        style={[
+          styles.primaryButton,
+          { backgroundColor: hasSelectedItems ? colors.primary : colors.border, borderRadius: colors.radius },
+        ]}
+      >
+        <Text style={[styles.primaryButtonText, { color: hasSelectedItems ? colors.primaryForeground : colors.mutedForeground }]}>
+          Continue to review
+        </Text>
+      </Pressable>
     </View>
   );
 }
@@ -1692,22 +1776,14 @@ function DraftRoomCard({
   items,
   selectedItemIds,
   evidenceCounts,
-  onRemoveRoom,
-  onSelectAll,
-  onClear,
   onManageItems,
-  onAddItem,
   colors,
 }: {
   room: InventoryRoom;
   items: InventoryItem[];
   selectedItemIds: Set<string>;
   evidenceCounts: Record<string, number>;
-  onRemoveRoom: () => void;
-  onSelectAll: () => void;
-  onClear: () => void;
   onManageItems: () => void;
-  onAddItem: () => void;
   colors: ReturnType<typeof useColors>;
 }) {
   const selectedItems = items.filter((item) => selectedItemIds.has(item.id));
@@ -1737,9 +1813,6 @@ function DraftRoomCard({
             {missingCount > 0 ? ` · ${formatCount(missingCount, "missing detail", "missing details")}` : ""}
           </Text>
         </View>
-        <Pressable onPress={onRemoveRoom} hitSlop={8}>
-          <Text style={[styles.removeText, { color: colors.mutedForeground }]}>Exclude</Text>
-        </Pressable>
       </View>
       <View style={[styles.roomTools, { borderTopColor: colors.border }]}>
         <Pressable
@@ -1750,13 +1823,8 @@ function DraftRoomCard({
           ]}
         >
           <Feather name="plus-circle" size={15} color={colors.primaryForeground} />
-          <Text style={[styles.primaryButtonText, { color: colors.primaryForeground }]}>Add items to claim pack</Text>
+          <Text style={[styles.primaryButtonText, { color: colors.primaryForeground }]}>Choose items</Text>
         </Pressable>
-        <View style={styles.roomSecondaryActions}>
-          <ActionPill label="Select all" variant="neutral" onPress={onSelectAll} colors={colors} />
-          <ActionPill label="Clear" variant="neutral" onPress={onClear} colors={colors} />
-          <ActionPill label="Add missing item" icon="plus" variant="outline" onPress={onAddItem} colors={colors} />
-        </View>
       </View>
       {items.length === 0 ? (
         <Text style={[styles.emptyRoomText, { color: colors.mutedForeground }]}>No documented items in this room yet. Use Add item to create one.</Text>

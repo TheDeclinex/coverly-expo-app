@@ -1,5 +1,13 @@
 import { Platform } from "react-native";
-import type { CustomerInfo, PurchasesOffering, PurchasesPackage } from "react-native-purchases";
+import type { CustomerInfo, CustomerInfoUpdateListener, PurchasesOffering, PurchasesPackage } from "react-native-purchases";
+
+import {
+  hasActiveRevenueCatEntitlement,
+  resolveRevenueCatPlan,
+  type CoverlyBillingPlan,
+  type RevenueCatEntitlementConfig,
+  type RevenueCatPlanState,
+} from "@/lib/billing-entitlements";
 
 export type BillingResult<T> =
   | { ok: true; value: T }
@@ -7,8 +15,19 @@ export type BillingResult<T> =
 
 const iosKey = process.env.EXPO_PUBLIC_REVENUECAT_IOS_API_KEY;
 const androidKey = process.env.EXPO_PUBLIC_REVENUECAT_ANDROID_API_KEY;
-export const revenueCatEntitlementId = process.env.EXPO_PUBLIC_REVENUECAT_ENTITLEMENT_ID ?? "coverly_access";
+
+function envValue(value: string | undefined) {
+  const trimmed = value?.trim();
+  return trimmed ? trimmed : null;
+}
+
+export const revenueCatPlusEntitlementId = envValue(process.env.EXPO_PUBLIC_REVENUECAT_PLUS_ENTITLEMENT_ID);
+export const revenueCatFamilyEntitlementId = envValue(process.env.EXPO_PUBLIC_REVENUECAT_FAMILY_ENTITLEMENT_ID);
 export const billingGatesEnabled = process.env.EXPO_PUBLIC_BILLING_GATES_ENABLED === "true";
+export const revenueCatEntitlementConfig: RevenueCatEntitlementConfig = {
+  plusEntitlementId: revenueCatPlusEntitlementId,
+  familyEntitlementId: revenueCatFamilyEntitlementId,
+};
 
 let configuredUserId: string | null = null;
 let sdkConfigured = false;
@@ -16,6 +35,17 @@ let identityOperation: Promise<void> = Promise.resolve();
 
 function apiKey() {
   return Platform.OS === "ios" ? iosKey : Platform.OS === "android" ? androidKey : undefined;
+}
+
+function billingDiagnostic(event: string, details: Record<string, unknown> = {}) {
+  if (!__DEV__) return;
+  console.info(`[billing] ${event}`, {
+    platform: Platform.OS,
+    hasApiKey: Boolean(apiKey()),
+    plusEntitlementConfigured: Boolean(revenueCatEntitlementConfig.plusEntitlementId),
+    familyEntitlementConfigured: Boolean(revenueCatEntitlementConfig.familyEntitlementId),
+    ...details,
+  });
 }
 
 async function sdk() {
@@ -41,7 +71,10 @@ export const billingAvailability = {
 
 export async function configureBilling(userId: string): Promise<BillingResult<void>> {
   const key = apiKey();
-  if (!key) return { ok: false, error: "RevenueCat is not configured for this platform." };
+  if (!key) {
+    billingDiagnostic("configure skipped");
+    return { ok: false, error: "RevenueCat is not configured for this platform." };
+  }
   return serialiseIdentityOperation(async () => {
     try {
       const { Purchases, LOG_LEVEL } = await sdk();
@@ -53,8 +86,10 @@ export async function configureBilling(userId: string): Promise<BillingResult<vo
         await Purchases.logIn(userId);
       }
       configuredUserId = userId;
+      billingDiagnostic("configured", { userAttached: true });
       return { ok: true, value: undefined };
     } catch (error) {
+      billingDiagnostic("configure failed", { message: error instanceof Error ? error.message : "unknown" });
       return { ok: false, error: error instanceof Error ? error.message : "Native purchases are unavailable in this build." };
     }
   });
@@ -80,8 +115,27 @@ export async function loadOffering(): Promise<BillingResult<PurchasesOffering | 
 }
 
 export async function loadCustomerInfo(): Promise<BillingResult<CustomerInfo>> {
-  try { const { Purchases } = await sdk(); return { ok: true, value: await Purchases.getCustomerInfo() }; }
-  catch (error) { return { ok: false, error: error instanceof Error ? error.message : "Could not refresh purchases." }; }
+  try {
+    const { Purchases } = await sdk();
+    const info = await Purchases.getCustomerInfo();
+    billingDiagnostic("customer info loaded", { hasActiveEntitlement: hasActiveRevenueCatEntitlement(info, revenueCatEntitlementConfig) });
+    return { ok: true, value: info };
+  }
+  catch (error) {
+    billingDiagnostic("customer info failed", { message: error instanceof Error ? error.message : "unknown" });
+    return { ok: false, error: error instanceof Error ? error.message : "Could not refresh purchases." };
+  }
+}
+
+export async function addCustomerInfoListener(listener: CustomerInfoUpdateListener): Promise<BillingResult<() => void>> {
+  try {
+    const { Purchases } = await sdk();
+    Purchases.addCustomerInfoUpdateListener(listener);
+    return { ok: true, value: () => { Purchases.removeCustomerInfoUpdateListener(listener); } };
+  } catch (error) {
+    billingDiagnostic("customer info listener failed", { message: error instanceof Error ? error.message : "unknown" });
+    return { ok: false, error: error instanceof Error ? error.message : "Could not listen for purchase updates." };
+  }
 }
 
 export async function buyPackage(pkg: PurchasesPackage): Promise<BillingResult<CustomerInfo>> {
@@ -99,4 +153,12 @@ export async function restoreBilling(): Promise<BillingResult<CustomerInfo>> {
   catch (error) { return { ok: false, error: error instanceof Error ? error.message : "Purchases could not be restored." }; }
 }
 
-export type { CustomerInfo, PurchasesOffering, PurchasesPackage };
+export function resolveCustomerPlan(customerInfo: CustomerInfo | null): RevenueCatPlanState {
+  return resolveRevenueCatPlan(customerInfo, revenueCatEntitlementConfig);
+}
+
+export function hasActiveCustomerEntitlement(customerInfo: CustomerInfo | null) {
+  return hasActiveRevenueCatEntitlement(customerInfo, revenueCatEntitlementConfig);
+}
+
+export type { CoverlyBillingPlan, CustomerInfo, PurchasesOffering, PurchasesPackage, RevenueCatPlanState };

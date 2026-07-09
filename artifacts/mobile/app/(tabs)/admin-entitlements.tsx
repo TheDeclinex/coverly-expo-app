@@ -147,7 +147,16 @@ export default function AdminEntitlementsScreen() {
               <AccountRow icon="hash" title="Customer ID" value={adminTextLabel(profile.revenueCatCustomerId)} />
               <AccountRow icon="box" title="Product ID" value={adminTextLabel(profile.revenueCatProductId)} />
               <AccountRow icon="award" title="Entitlement ID" value={adminTextLabel(profile.revenueCatEntitlementId)} />
-              <AccountRow icon="clock" title="Last sync" value={adminDateLabel(profile.revenueCatUpdatedAt)} last />
+              <AccountRow icon="calendar" title="Expiration" value={adminDateLabel(profile.revenueCatExpirationAt)} />
+              <AccountRow icon="clock" title="Last sync" value={adminDateLabel(profile.revenueCatUpdatedAt)} />
+              <AccountRow icon="hash" title="Last event ID" value={adminTextLabel(profile.revenueCatLastEventId)} last />
+            </AccountSection>
+
+            <AccountSection title="Latest RevenueCat webhook">
+              <AccountRow icon="activity" title="Event type" value={adminStatusLabel(debug.latestRevenueCatWebhookEvent?.eventType)} />
+              <AccountRow icon="toggle-left" title="Status" value={adminStatusLabel(debug.latestRevenueCatWebhookEvent?.status)} />
+              <AccountRow icon="calendar" title="Received" value={adminDateLabel(debug.latestRevenueCatWebhookEvent?.receivedAt)} />
+              <AccountRow icon="check-circle" title="Processed" value={adminDateLabel(debug.latestRevenueCatWebhookEvent?.processedAt)} last />
             </AccountSection>
 
             {!debug.revenueCatConnected ? <StateCard label={debug.revenueCatExplanation ?? "RevenueCat data is not connected for this user in Supabase."} /> : null}

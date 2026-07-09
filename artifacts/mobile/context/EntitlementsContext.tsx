@@ -5,15 +5,16 @@ import React, { createContext, useCallback, useContext, useEffect, useMemo, useR
 import { useAuth } from "@/context/AuthContext";
 import { useAccountProfile } from "@/hooks/useAccountProfile";
 import {
-  billingGatesEnabled, buyPackage, clearBillingUser, configureBilling, loadCustomerInfo,
-  loadOffering, restoreBilling, revenueCatEntitlementId,
+  addCustomerInfoListener, billingGatesEnabled, buyPackage, clearBillingUser, configureBilling, hasActiveCustomerEntitlement,
+  loadCustomerInfo, loadOffering, resolveCustomerPlan, restoreBilling,
   type CustomerInfo, type PurchasesOffering, type PurchasesPackage,
 } from "@/lib/billing";
+import type { CoverlyBillingPlan } from "@/lib/billing-entitlements";
 
 export type GatedFeature = "property" | "ai_scan" | "replacement_pricing" | "claim_pack";
 
 type EntitlementsValue = {
-  effectivePlan: "free" | "coverly_plus" | "coverly_family";
+  effectivePlan: CoverlyBillingPlan;
   subscriptionStatus: string | null; subscriptionPeriodEnd: string | null;
   isFree: boolean; isPlus: boolean; isFamily: boolean; isPaid: boolean;
   gatesEnabled: boolean; isLoading: boolean; isRefreshing: boolean; purchaseLoading: boolean;
@@ -29,6 +30,9 @@ type EntitlementsValue = {
 
 const Context = createContext<EntitlementsValue | null>(null);
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+const profilePlanToCode = (plan: string | null | undefined): CoverlyBillingPlan => (
+  plan === "Family" ? "coverly_family" : plan === "Plus" || plan === "Tester" ? "coverly_plus" : "free"
+);
 
 export function EntitlementsProvider({ children }: { children: React.ReactNode }) {
   const { session } = useAuth();
@@ -41,7 +45,9 @@ export function EntitlementsProvider({ children }: { children: React.ReactNode }
   const [error, setError] = useState<string | null>(null);
   const activeUserIdRef = useRef(session?.user.id ?? null);
   activeUserIdRef.current = session?.user.id ?? null;
-  const plan = profileQuery.profile?.plan === "Family" ? "coverly_family" : profileQuery.profile?.plan === "Plus" || profileQuery.profile?.plan === "Tester" ? "coverly_plus" : "free";
+  const profilePlan = profilePlanToCode(profileQuery.profile?.plan);
+  const revenueCatPlan = resolveCustomerPlan(customerInfo);
+  const plan = profilePlan !== "free" ? profilePlan : revenueCatPlan.plan ?? "free";
   const isPaid = plan !== "free";
 
   const refreshEntitlements = useCallback(async () => {
@@ -66,6 +72,7 @@ export function EntitlementsProvider({ children }: { children: React.ReactNode }
 
   useEffect(() => {
     let cancelled = false;
+    let removeCustomerInfoListener: (() => void) | null = null;
     if (!session?.user.id) {
       void clearBillingUser();
       setOffering(null); setCustomerInfo(null); setError(null);
@@ -76,12 +83,19 @@ export function EntitlementsProvider({ children }: { children: React.ReactNode }
     void (async () => {
       const configured = await configureBilling(session.user.id);
       if (!configured.ok) { if (!cancelled) setError(configured.error); return; }
+      const listener = await addCustomerInfoListener((info) => {
+        if (!cancelled && activeUserIdRef.current === session.user.id) setCustomerInfo(info);
+      });
+      if (listener.ok) {
+        if (cancelled) listener.value();
+        else removeCustomerInfoListener = listener.value;
+      }
       const [offer, info] = await Promise.all([loadOffering(), loadCustomerInfo()]);
       if (cancelled) return;
       if (offer.ok) setOffering(offer.value); else setError(offer.error);
       if (info.ok) setCustomerInfo(info.value); else setError((current) => current ?? info.error);
     })();
-    return () => { cancelled = true; };
+    return () => { cancelled = true; removeCustomerInfoListener?.(); };
   }, [session?.user.id]);
 
   const purchasePackage = useCallback(async (pkg: PurchasesPackage) => {
@@ -97,7 +111,7 @@ export function EntitlementsProvider({ children }: { children: React.ReactNode }
     const result = await restoreBilling();
     if (!result.ok) { setPurchaseLoading(false); setError(result.error); return { ok: false, message: result.error }; }
     setCustomerInfo(result.value); await refreshEntitlements(); setPurchaseLoading(false);
-    const active = Object.keys(result.value.entitlements.active).includes(revenueCatEntitlementId);
+    const active = hasActiveCustomerEntitlement(result.value);
     return { ok: active, message: active ? "Purchases restored and access refreshed." : "No active Coverly subscription was found." };
   }, [refreshEntitlements]);
 
@@ -120,14 +134,14 @@ export function EntitlementsProvider({ children }: { children: React.ReactNode }
   }, [shouldShowUpgradeFor]);
 
   const value = useMemo<EntitlementsValue>(() => ({
-    effectivePlan: plan, subscriptionStatus: profileQuery.profile?.subscriptionStatus ?? null,
-    subscriptionPeriodEnd: profileQuery.profile?.subscriptionPeriodEnd ?? null,
+    effectivePlan: plan, subscriptionStatus: profileQuery.profile?.subscriptionStatus ?? revenueCatPlan.subscriptionStatus,
+    subscriptionPeriodEnd: profileQuery.profile?.subscriptionPeriodEnd ?? revenueCatPlan.subscriptionPeriodEnd,
     isFree: !isPaid, isPlus: plan === "coverly_plus", isFamily: plan === "coverly_family", isPaid,
     gatesEnabled: billingGatesEnabled, isLoading: profileQuery.isLoading, isRefreshing, purchaseLoading,
     offering, customerInfo, error, canCreateProperty, canUseAiScan: canUseMeteredAiFeatures,
     canUseReplacementPricing: canUseMeteredAiFeatures, canExportClaimPack, shouldShowUpgradeFor, enforce,
     refreshEntitlements, purchasePackage, restorePurchases,
-  }), [plan, profileQuery.profile, profileQuery.isLoading, isRefreshing, purchaseLoading, offering, customerInfo, error, canCreateProperty, canExportClaimPack, shouldShowUpgradeFor, enforce, refreshEntitlements, purchasePackage, restorePurchases]);
+  }), [plan, profileQuery.profile, profileQuery.isLoading, isRefreshing, purchaseLoading, offering, customerInfo, error, canCreateProperty, canExportClaimPack, shouldShowUpgradeFor, enforce, refreshEntitlements, purchasePackage, restorePurchases, revenueCatPlan.subscriptionPeriodEnd, revenueCatPlan.subscriptionStatus]);
   return <Context.Provider value={value}>{children}</Context.Provider>;
 }
 

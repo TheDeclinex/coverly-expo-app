@@ -1,4 +1,5 @@
 import { Feather } from "@expo/vector-icons";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as Haptics from "expo-haptics";
 import { LinearGradient } from "expo-linear-gradient";
 import { Redirect, router } from "expo-router";
@@ -79,9 +80,11 @@ export default function OnboardingScreen() {
   const insets = useSafeAreaInsets();
   const { height } = useWindowDimensions();
   const compact = height < 760;
+  const userId = session?.user.id ?? null;
 
   type Step = 0 | 1 | 2 | 3;
   const [step, setStep] = useState<Step>(0);
+  const [hasPassedPrivacyStep, setHasPassedPrivacyStep] = useState<boolean | null>(null);
 
   const [propertyName, setPropertyName]     = useState("");
   const [propertyType, setPropertyType]     = useState<string | null>(null);
@@ -92,6 +95,33 @@ export default function OnboardingScreen() {
   const [newPropertyName, setNewPropertyName] = useState("");
 
   const nameInputRef = useRef<TextInput>(null);
+
+  useEffect(() => {
+    if (!userId) {
+      setHasPassedPrivacyStep(null);
+      return;
+    }
+
+    let cancelled = false;
+    const storageKey = `onboarding-privacy:${userId}`;
+
+    const loadPrivacyStep = async () => {
+      try {
+        const localValue = await AsyncStorage.getItem(storageKey);
+        if (!cancelled) setHasPassedPrivacyStep(localValue !== null);
+      } catch (error) {
+        if (__DEV__) console.warn("[onboarding] privacy step load failed", error);
+        if (!cancelled) setHasPassedPrivacyStep(false);
+      }
+    };
+
+    setHasPassedPrivacyStep(null);
+    void loadPrivacyStep();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [userId]);
 
   // ── Animated values ─────────────────────────────────────────────────────────
   // Step 0 brand mark bounce
@@ -161,11 +191,25 @@ export default function OnboardingScreen() {
   // ── Guards ──────────────────────────────────────────────────────────────────
   if (!session) return <Redirect href="/login" />;
   if (hasSeenOnboarding === true) return <Redirect href="/(tabs)" />;
+  if (hasPassedPrivacyStep === null) {
+    return (
+      <View style={styles.loadingScreen}>
+        <ActivityIndicator color={coverlyBrand.teal} />
+      </View>
+    );
+  }
 
   // ── Handlers ────────────────────────────────────────────────────────────────
   const advanceTo = async (next: Step) => {
     await Haptics.selectionAsync();
     setStep(next);
+  };
+
+  const handlePrivacyContinue = async () => {
+    if (!userId) return;
+    await Haptics.selectionAsync();
+    await AsyncStorage.setItem(`onboarding-privacy:${userId}`, "1");
+    setHasPassedPrivacyStep(true);
   };
 
   const handleSkipOnboarding = async () => {
@@ -215,6 +259,53 @@ export default function OnboardingScreen() {
   };
 
   // ── Step renders ────────────────────────────────────────────────────────────
+
+  const renderPrivacyStep = () => (
+    <View style={StyleSheet.absoluteFill}>
+      <View style={[styles.stepContainer, { paddingTop: insets.top + (compact ? 10 : 18), paddingBottom: insets.bottom + (compact ? 14 : 24) }]}>
+        <ScrollView
+          style={styles.privacyScroller}
+          contentContainerStyle={styles.privacyScrollerContent}
+          showsVerticalScrollIndicator={false}
+        >
+          <View style={[styles.privacyCard, { padding: compact ? 18 : 22 }]}>
+            <View style={styles.privacyIcon}>
+              <Feather name="shield" size={24} color={coverlyBrand.teal} />
+            </View>
+
+            <Text style={styles.privacyHeading}>Private and secure</Text>
+
+            <View style={styles.privacyCopyStack}>
+              <Text style={styles.privacyBody}>
+                Your inventory, photos, videos, receipts, and claim information are private to your account. Coverly uses account-based access controls and row-level security so other users cannot access your records or stored media.
+              </Text>
+              <Text style={styles.privacyBody}>
+                Camera and photo access are used only for app features, including identifying items, building your inventory, storing evidence, and creating claim packs.
+              </Text>
+              <Text style={styles.privacyBody}>
+                We do not sell your data or share it with insurers, assessors, advertisers, or other third parties unless you choose to export or send it.
+              </Text>
+              <Text style={styles.privacyBody}>
+                Your data is protected in transit using secure connections, and stored data is encrypted at rest through Coverly’s database and storage infrastructure.
+              </Text>
+            </View>
+          </View>
+        </ScrollView>
+
+        <View style={styles.actionStack}>
+          <Pressable
+            onPress={() => void handlePrivacyContinue()}
+            style={({ pressed }) => [styles.primaryBtn, { opacity: pressed ? 0.82 : 1 }]}
+          >
+            <LinearGradient colors={[BTN_TOP, BTN_BOT]} start={{ x: 0.5, y: 0 }} end={{ x: 0.5, y: 1 }} style={styles.primaryBtnInner}>
+              <Text style={styles.primaryBtnText}>Continue</Text>
+              <Feather name="arrow-right" size={16} color="rgba(255,255,255,0.7)" />
+            </LinearGradient>
+          </Pressable>
+        </View>
+      </View>
+    </View>
+  );
 
   const renderStep0 = () => (
     <View style={StyleSheet.absoluteFill}>
@@ -478,15 +569,16 @@ export default function OnboardingScreen() {
       <StatusBar style="dark" />
       <CoverlyAuthBackground style={StyleSheet.absoluteFill}>
         <Animated.View
-          key={step}
+          key={hasPassedPrivacyStep ? step : "privacy"}
           entering={FadeIn.duration(260)}
           exiting={FadeOut.duration(180)}
           style={StyleSheet.absoluteFill}
         >
-          {step === 0 && renderStep0()}
-          {step === 1 && renderStep1()}
-          {step === 2 && renderStep2()}
-          {step === 3 && renderStep3()}
+          {!hasPassedPrivacyStep && renderPrivacyStep()}
+          {hasPassedPrivacyStep && step === 0 && renderStep0()}
+          {hasPassedPrivacyStep && step === 1 && renderStep1()}
+          {hasPassedPrivacyStep && step === 2 && renderStep2()}
+          {hasPassedPrivacyStep && step === 3 && renderStep3()}
         </Animated.View>
       </CoverlyAuthBackground>
     </View>
@@ -505,6 +597,55 @@ const styles = StyleSheet.create({
     flexGrow: 1,
     paddingHorizontal: 24,
     gap: 14,
+  },
+  loadingScreen: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#F8FEFF",
+  },
+  privacyScroller: {
+    flex: 1,
+  },
+  privacyScrollerContent: {
+    flexGrow: 1,
+    justifyContent: "center",
+  },
+  privacyCard: {
+    backgroundColor: "rgba(255,255,255,0.96)",
+    borderRadius: 26,
+    borderWidth: 1,
+    borderColor: "rgba(224, 234, 240, 0.95)",
+    shadowColor: "#0F2A3C",
+    shadowOffset: { width: 0, height: 14 },
+    shadowOpacity: 0.1,
+    shadowRadius: 26,
+    elevation: 8,
+  },
+  privacyIcon: {
+    width: 48,
+    height: 48,
+    borderRadius: 16,
+    backgroundColor: coverlyBrand.inputBackground,
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 18,
+  },
+  privacyHeading: {
+    fontSize: 28,
+    fontFamily: "Inter_700Bold",
+    color: coverlyBrand.slate,
+    letterSpacing: 0,
+  },
+  privacyCopyStack: {
+    gap: 14,
+    marginTop: 16,
+  },
+  privacyBody: {
+    fontSize: 14,
+    fontFamily: "Inter_400Regular",
+    color: coverlyBrand.mutedText,
+    lineHeight: 21,
   },
   heroCard: {
     backgroundColor: "rgba(255,255,255,0.96)",

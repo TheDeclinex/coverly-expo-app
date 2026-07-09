@@ -14,13 +14,19 @@ test("claim pack review is collapsed by default in the builder", () => {
   assert.match(source, /const \[isReviewExpanded, setIsReviewExpanded\] = useState\(false\)/);
 });
 
-test("room selection appears before the compact review card", () => {
-  const roomsHeading = source.indexOf("Rooms in this claim pack");
-  const reviewCard = source.indexOf("<ClaimPackReviewCard");
+test("builder uses a guided four-step claim pack flow", () => {
+  assert.ok(source.includes("Step ${flowStep} of 4"));
+  for (const copy of ["Continue to select items", "Continue to review", "Continue to generate PDF"]) {
+    assert.ok(source.includes(copy), `Expected ${copy} step action`);
+  }
+  for (const guard of ["flowStep === 1", "flowStep === 3", "flowStep === 4"]) {
+    assert.ok(source.includes(guard), `Expected ${guard} render guard`);
+  }
+});
 
-  assert.notEqual(roomsHeading, -1);
-  assert.notEqual(reviewCard, -1);
-  assert.ok(roomsHeading < reviewCard);
+test("room cards focus users on choosing items", () => {
+  assert.ok(source.includes("Choose items"));
+  assert.equal(source.includes("Add items to claim pack"), false);
 });
 
 test("expanded review keeps issue actions available", () => {
