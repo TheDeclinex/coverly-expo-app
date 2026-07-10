@@ -1,4 +1,5 @@
 import { Feather } from "@expo/vector-icons";
+import Constants from "expo-constants";
 import { Stack, router, useFocusEffect } from "expo-router";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { ActivityIndicator, Alert, AppState, Platform, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
@@ -139,7 +140,7 @@ function logDisplayedPackages(displayPackages: DisplayPackage[]) {
 
 function storefrontDiagnosticText(label: string, diagnostic: BillingStorefrontDiagnostic | null) {
   if (!diagnostic) return `${label}=pending`;
-  return `${label}${diagnostic.trigger ? `(${diagnostic.trigger})` : ""}: configured=${diagnostic.sdkConfigured} userAttached=${diagnostic.userAttached} before=${diagnostic.storefrontBefore ?? "n/a"} after=${diagnostic.storefrontAfter ?? "n/a"}`;
+  return `${label}${diagnostic.trigger ? `(${diagnostic.trigger})` : ""}: stage=${diagnostic.stage} configured=${diagnostic.sdkConfigured} userAttached=${diagnostic.userAttached} before=${diagnostic.storefrontBefore ?? "n/a"} after=${diagnostic.storefrontAfter ?? "n/a"}`;
 }
 
 function billingDiagnosticText(
@@ -149,17 +150,30 @@ function billingDiagnosticText(
 ) {
   const { pkg, plan, period, product, price, priceSource, storefrontCountryCode, refreshedProduct } = displayPackage;
   const diagnosticProduct = product as RevenueCatProductDiagnostics;
+  const diagnosticRefreshedProduct = refreshedProduct as RevenueCatProductDiagnostics | null;
   const rawPrice = typeof diagnosticProduct.price === "number" ? diagnosticProduct.price : "n/a";
   const currencyCode = typeof diagnosticProduct.currencyCode === "string" ? diagnosticProduct.currencyCode : "n/a";
+  const refreshedRawPrice = typeof diagnosticRefreshedProduct?.price === "number" ? diagnosticRefreshedProduct.price : "n/a";
+  const refreshedCurrencyCode = typeof diagnosticRefreshedProduct?.currencyCode === "string" ? diagnosticRefreshedProduct.currencyCode : "n/a";
   const billingPeriod = typeof diagnosticProduct.subscriptionPeriod === "string" ? diagnosticProduct.subscriptionPeriod : pkg.packageType;
+  const appVersion = Constants.nativeAppVersion ?? Constants.expoConfig?.version ?? "n/a";
+  const nativeBuildNumber = Constants.nativeBuildVersion ?? (Platform.OS === "ios"
+    ? Constants.expoConfig?.ios?.buildNumber
+    : Platform.OS === "android"
+      ? Constants.expoConfig?.android?.versionCode?.toString()
+      : null) ?? "n/a";
+  const sourceCommit = typeof Constants.expoConfig?.extra?.sourceCommit === "string"
+    ? Constants.expoConfig.extra.sourceCommit
+    : "n/a";
   return [
+    `Build appVersion=${appVersion} nativeBuild=${nativeBuildNumber} sourceCommit=${sourceCommit}`,
     `Diag ${planLabels[plan]} ${periodLabel(period)} visible=${price}`,
     `pkg=${pkg.identifier} type=${pkg.packageType}`,
     `product=${product.identifier}`,
     `title=${product.title}`,
     `desc=${product.description}`,
-    `priceString=${product.priceString} raw=${rawPrice} currency=${currencyCode}`,
-    `refreshPriceString=${refreshedProduct?.priceString ?? "n/a"}`,
+    `offeringPriceString=${product.priceString} offeringRaw=${rawPrice} offeringCurrency=${currencyCode}`,
+    `refreshPriceString=${refreshedProduct?.priceString ?? "n/a"} refreshRaw=${refreshedRawPrice} refreshCurrency=${refreshedCurrencyCode}`,
     `period=${billingPeriod} platform=${Platform.OS} storefront=${storefrontCountryCode ?? "n/a"} source=${priceSource}`,
     storefrontDiagnosticText("offerings", offeringStorefrontDiagnostic),
     storefrontDiagnosticText("products", productStorefrontDiagnostic),
