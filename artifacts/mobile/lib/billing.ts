@@ -1,5 +1,5 @@
 import { Platform } from "react-native";
-import type { CustomerInfo, CustomerInfoUpdateListener, PurchasesOffering, PurchasesPackage } from "react-native-purchases";
+import type { CustomerInfo, CustomerInfoUpdateListener, PurchasesOffering, PurchasesPackage, PurchasesStoreProduct } from "react-native-purchases";
 
 import {
   hasActiveRevenueCatEntitlement,
@@ -114,6 +114,25 @@ export async function loadOffering(): Promise<BillingResult<PurchasesOffering | 
   } catch (error) { return { ok: false, error: error instanceof Error ? error.message : "Could not load subscription options." }; }
 }
 
+export async function loadStoreProducts(productIdentifiers: string[]): Promise<BillingResult<PurchasesStoreProduct[]>> {
+  const uniqueIdentifiers = [...new Set(productIdentifiers.map((id) => id.trim()).filter(Boolean))];
+  if (uniqueIdentifiers.length === 0) return { ok: true, value: [] };
+
+  try {
+    const { Purchases } = await sdk();
+    const products = await Purchases.getProducts(uniqueIdentifiers);
+    billingDiagnostic("store products loaded", {
+      requestedCount: uniqueIdentifiers.length,
+      returnedCount: products.length,
+      productIdentifiers: products.map((product) => product.identifier),
+    });
+    return { ok: true, value: products };
+  } catch (error) {
+    billingDiagnostic("store products failed", { message: error instanceof Error ? error.message : "unknown" });
+    return { ok: false, error: error instanceof Error ? error.message : "Could not refresh store product prices." };
+  }
+}
+
 export async function loadCustomerInfo(): Promise<BillingResult<CustomerInfo>> {
   try {
     const { Purchases } = await sdk();
@@ -161,4 +180,4 @@ export function hasActiveCustomerEntitlement(customerInfo: CustomerInfo | null) 
   return hasActiveRevenueCatEntitlement(customerInfo, revenueCatEntitlementConfig);
 }
 
-export type { CoverlyBillingPlan, CustomerInfo, PurchasesOffering, PurchasesPackage, RevenueCatPlanState };
+export type { CoverlyBillingPlan, CustomerInfo, PurchasesOffering, PurchasesPackage, PurchasesStoreProduct, RevenueCatPlanState };

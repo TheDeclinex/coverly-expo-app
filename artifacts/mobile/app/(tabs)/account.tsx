@@ -50,12 +50,12 @@ export default function AccountScreen() {
   const planStatusDetail = planStatusLabel === planLabel ? planStatusHelper : `${planStatusLabel} · ${planStatusHelper}`;
   const initialsSource = displayName ?? (email === "Email unavailable" ? "?" : email);
   const initials = initialsSource.slice(0, 1).toUpperCase();
-  const version = Constants.expoConfig?.version ?? "Unknown";
-  const build = Platform.OS === "ios"
+  const version = Constants.nativeAppVersion ?? Constants.expoConfig?.version ?? "Unknown";
+  const build = Constants.nativeBuildVersion ?? (Platform.OS === "ios"
     ? Constants.expoConfig?.ios?.buildNumber
     : Platform.OS === "android"
       ? Constants.expoConfig?.android?.versionCode?.toString()
-      : undefined;
+      : undefined);
 
   const openLegal = async (url: string | undefined, label: string) => {
     if (!url) return;
