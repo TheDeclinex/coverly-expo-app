@@ -1,12 +1,12 @@
 import { Feather } from "@expo/vector-icons";
-import { Stack, router } from "expo-router";
-import React, { useEffect, useMemo, useState } from "react";
-import { ActivityIndicator, Alert, Platform, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Stack, router, useFocusEffect } from "expo-router";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { ActivityIndicator, Alert, AppState, Platform, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { useEntitlements } from "@/context/EntitlementsContext";
 import { useColors } from "@/hooks/useColors";
-import { loadStoreProducts, type PurchasesPackage, type PurchasesStoreProduct } from "@/lib/billing";
+import { loadStorefront, loadStoreProducts, type PurchasesPackage, type PurchasesStoreProduct, type Storefront } from "@/lib/billing";
 
 type PlanGroup = "plus" | "family";
 type BillingPeriod = "monthly" | "annual" | "other";
@@ -17,7 +17,9 @@ type DisplayPackage = {
   period: BillingPeriod;
   product: PurchasesStoreProduct;
   price: string;
+  visiblePrice: string;
   priceSource: "store_product_refresh" | "offering_package";
+  storefrontCountryCode: string | null;
 };
 
 type RevenueCatProductDiagnostics = PurchasesPackage["product"] & {
@@ -32,6 +34,7 @@ const planLabels: Record<PlanGroup, string> = {
 };
 
 const showTemporaryBillingDiagnostics = true;
+const hideIosNumericPriceForInternalDiagnostics = true;
 
 function packageSearchText(pkg: PurchasesPackage) {
   return [
@@ -81,14 +84,27 @@ function sortPackage(a: DisplayPackage, b: DisplayPackage) {
     || a.pkg.identifier.localeCompare(b.pkg.identifier);
 }
 
-function buildDisplayPackages(packages: PurchasesPackage[], storeProductsById: Record<string, PurchasesStoreProduct>) {
+function displayPriceForProduct(product: PurchasesStoreProduct) {
+  if (Platform.OS === "ios" && showTemporaryBillingDiagnostics && hideIosNumericPriceForInternalDiagnostics) {
+    return "Price confirmed by Apple before purchase";
+  }
+  return packageDisplayPrice(product);
+}
+
+function buildDisplayPackages(
+  packages: PurchasesPackage[],
+  storeProductsById: Record<string, PurchasesStoreProduct>,
+  storefront: Storefront | null,
+) {
   const displayPackages = packages.map((pkg) => ({
     pkg,
     plan: packagePlan(pkg),
     period: packagePeriod(pkg),
     product: storeProductsById[pkg.product.identifier] ?? pkg.product,
     price: packageDisplayPrice(storeProductsById[pkg.product.identifier] ?? pkg.product),
+    visiblePrice: displayPriceForProduct(storeProductsById[pkg.product.identifier] ?? pkg.product),
     priceSource: storeProductsById[pkg.product.identifier] ? "store_product_refresh" as const : "offering_package" as const,
+    storefrontCountryCode: storefront?.countryCode ?? null,
   })).sort(sortPackage);
 
   return {
@@ -101,15 +117,17 @@ function logDisplayedPackages(displayPackages: DisplayPackage[]) {
   if (!__DEV__) return;
 
   for (const displayPackage of displayPackages) {
-    const { pkg, plan, period, price, priceSource } = displayPackage;
+    const { pkg, plan, period, price, priceSource, visiblePrice, storefrontCountryCode } = displayPackage;
     const product = pkg.product as RevenueCatProductDiagnostics;
     const displayProduct = displayPackage.product as RevenueCatProductDiagnostics;
     console.info("[billing] upgrade package displayed", {
       renderedPlanLabel: planLabels[plan],
       renderedPeriodLabel: periodLabel(period),
-      renderedVisiblePrice: price,
+      renderedVisiblePrice: visiblePrice,
+      resolvedProductPrice: price,
       priceSource,
       platform: Platform.OS,
+      storefrontCountryCode,
       packageIdentifier: pkg.identifier,
       packageType: pkg.packageType,
       productIdentifier: pkg.product.identifier,
@@ -127,19 +145,19 @@ function logDisplayedPackages(displayPackages: DisplayPackage[]) {
 }
 
 function billingDiagnosticText(displayPackage: DisplayPackage) {
-  const { pkg, plan, period, product, price, priceSource } = displayPackage;
+  const { pkg, plan, period, product, priceSource, storefrontCountryCode, visiblePrice } = displayPackage;
   const diagnosticProduct = product as RevenueCatProductDiagnostics;
   const rawPrice = typeof diagnosticProduct.price === "number" ? diagnosticProduct.price : "n/a";
   const currencyCode = typeof diagnosticProduct.currencyCode === "string" ? diagnosticProduct.currencyCode : "n/a";
   const billingPeriod = typeof diagnosticProduct.subscriptionPeriod === "string" ? diagnosticProduct.subscriptionPeriod : pkg.packageType;
   return [
-    `Diag ${planLabels[plan]} ${periodLabel(period)} ${price}`,
+    `Diag ${planLabels[plan]} ${periodLabel(period)} visible=${visiblePrice}`,
     `pkg=${pkg.identifier} type=${pkg.packageType}`,
     `product=${product.identifier}`,
     `title=${product.title}`,
     `desc=${product.description}`,
     `priceString=${product.priceString} raw=${rawPrice} currency=${currencyCode}`,
-    `period=${billingPeriod} platform=${Platform.OS} source=${priceSource}`,
+    `period=${billingPeriod} platform=${Platform.OS} storefront=${storefrontCountryCode ?? "n/a"} source=${priceSource}`,
   ].join("\n");
 }
 
@@ -149,24 +167,36 @@ export default function UpgradeScreen() {
   const { effectivePlan, offering, error, purchaseLoading, isRefreshing, purchasePackage, restorePurchases, gatesEnabled } = useEntitlements();
   const packages = offering?.availablePackages ?? [];
   const [storeProductsById, setStoreProductsById] = useState<Record<string, PurchasesStoreProduct>>({});
+  const [storefront, setStorefront] = useState<Storefront | null>(null);
   const productIdentifiersKey = useMemo(() => [...new Set(packages.map((pkg) => pkg.product.identifier))].sort().join("|"), [packages]);
-  const groupedPackages = useMemo(() => buildDisplayPackages(packages, storeProductsById), [packages, storeProductsById]);
+  const groupedPackages = useMemo(() => buildDisplayPackages(packages, storeProductsById, storefront), [packages, storeProductsById, storefront]);
   const displayedPackages = useMemo(() => [...groupedPackages.plus, ...groupedPackages.family], [groupedPackages]);
 
-  useEffect(() => {
-    let cancelled = false;
+  const refreshStoreDisplayData = useCallback(async () => {
     const productIdentifiers = productIdentifiersKey ? productIdentifiersKey.split("|") : [];
     setStoreProductsById({});
-    if (productIdentifiers.length === 0) return () => { cancelled = true; };
+    setStorefront(null);
+    if (productIdentifiers.length === 0) return;
 
-    void (async () => {
-      const result = await loadStoreProducts(productIdentifiers);
-      if (cancelled || !result.ok) return;
-      setStoreProductsById(Object.fromEntries(result.value.map((product) => [product.identifier, product])));
-    })();
+    const [storefrontResult, productsResult] = await Promise.all([
+      loadStorefront(),
+      loadStoreProducts(productIdentifiers),
+    ]);
 
-    return () => { cancelled = true; };
+    if (storefrontResult.ok) setStorefront(storefrontResult.value);
+    if (productsResult.ok) setStoreProductsById(Object.fromEntries(productsResult.value.map((product) => [product.identifier, product])));
   }, [productIdentifiersKey]);
+
+  useFocusEffect(useCallback(() => {
+    void refreshStoreDisplayData();
+  }, [refreshStoreDisplayData]));
+
+  useEffect(() => {
+    const subscription = AppState.addEventListener("change", (state) => {
+      if (state === "active") void refreshStoreDisplayData();
+    });
+    return () => subscription.remove();
+  }, [refreshStoreDisplayData]);
 
   useEffect(() => {
     logDisplayedPackages(displayedPackages);
@@ -205,7 +235,7 @@ export default function UpgradeScreen() {
                 <Text style={[styles.optionTitle, { color: colors.foreground }]}>{periodLabel(displayPackage.period)}</Text>
                 <Text style={[styles.body, { color: colors.mutedForeground }]}>{displayPackage.product.description || "AI features included. Fair use applies."}</Text>
               </View>
-              <Text style={[styles.price, { color: colors.foreground }]}>{displayPackage.price}</Text>
+              <Text style={[styles.price, { color: colors.foreground }]}>{displayPackage.visiblePrice}</Text>
             </View>
             {showTemporaryBillingDiagnostics ? <Text style={[styles.diagnostic, { color: colors.mutedForeground }]}>{billingDiagnosticText(displayPackage)}</Text> : null}
             <Pressable disabled={purchaseLoading} onPress={() => void buy(displayPackage.pkg)} style={[styles.button, { backgroundColor: colors.primary, opacity: purchaseLoading ? .6 : 1 }]}>

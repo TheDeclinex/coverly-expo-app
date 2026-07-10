@@ -13,6 +13,8 @@ export type BillingResult<T> =
   | { ok: true; value: T }
   | { ok: false; cancelled?: boolean; error: string };
 
+export type Storefront = { countryCode: string };
+
 const iosKey = process.env.EXPO_PUBLIC_REVENUECAT_IOS_API_KEY;
 const androidKey = process.env.EXPO_PUBLIC_REVENUECAT_ANDROID_API_KEY;
 
@@ -130,6 +132,18 @@ export async function loadStoreProducts(productIdentifiers: string[]): Promise<B
   } catch (error) {
     billingDiagnostic("store products failed", { message: error instanceof Error ? error.message : "unknown" });
     return { ok: false, error: error instanceof Error ? error.message : "Could not refresh store product prices." };
+  }
+}
+
+export async function loadStorefront(): Promise<BillingResult<Storefront | null>> {
+  try {
+    const { Purchases } = await sdk();
+    const storefront = await Purchases.getStorefront();
+    billingDiagnostic("storefront loaded", { countryCode: storefront?.countryCode ?? null });
+    return { ok: true, value: storefront };
+  } catch (error) {
+    billingDiagnostic("storefront failed", { message: error instanceof Error ? error.message : "unknown" });
+    return { ok: false, error: error instanceof Error ? error.message : "Could not load store account region." };
   }
 }
 
