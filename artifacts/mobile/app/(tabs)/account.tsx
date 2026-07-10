@@ -29,7 +29,15 @@ export default function AccountScreen() {
   const insets = useSafeAreaInsets();
   const { session, signOut } = useAuth();
   const { profile, isAdmin, isLoading, isError } = useAccountProfile();
-  const { subscriptionStatus, subscriptionPeriodEnd, purchaseLoading, restorePurchases, gatesEnabled } = useEntitlements();
+  const {
+    effectivePlan,
+    isSubscriptionSyncPending,
+    subscriptionStatus,
+    subscriptionPeriodEnd,
+    purchaseLoading,
+    restorePurchases,
+    gatesEnabled,
+  } = useEntitlements();
   const usageQuery = useQuery({
     queryKey: ["usage-allowances", session?.user.id],
     queryFn: loadUsageAllowances,
@@ -40,11 +48,20 @@ export default function AccountScreen() {
 
   const email = profile?.email ?? session?.user.email ?? "Email unavailable";
   const displayName = profile?.fullName ?? null;
-  const planLabel = isLoading ? "Loading…" : profile?.plan ?? "Plan unavailable";
-  const planStatusLabel = subscriptionStatus ?? (profile?.plan === "Free" ? "Free" : "Active");
+  const entitlementPlanLabel = effectivePlan === "coverly_family" ? "Family" : effectivePlan === "coverly_plus" ? "Plus" : "Free";
+  const planLabel = isLoading && effectivePlan === "free"
+    ? "Loading…"
+    : isSubscriptionSyncPending
+      ? entitlementPlanLabel
+      : profile?.plan === "Tester"
+        ? "Tester"
+        : entitlementPlanLabel;
+  const planStatusLabel = subscriptionStatus ?? (effectivePlan === "free" ? "Free" : "Active");
   const planStatusHelper = subscriptionPeriodEnd
     ? `Renews or expires ${new Date(subscriptionPeriodEnd).toLocaleDateString("en-NZ")}`
-    : profile?.plan === "Free"
+    : isSubscriptionSyncPending
+      ? "Purchase confirmed. Updating your account…"
+      : effectivePlan === "free"
       ? "Free plan"
       : "Tester or store-managed access";
   const planStatusDetail = planStatusLabel === planLabel ? planStatusHelper : `${planStatusLabel} · ${planStatusHelper}`;

@@ -6,7 +6,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { useEntitlements } from "@/context/EntitlementsContext";
 import { useColors } from "@/hooks/useColors";
-import { loadStorefront, loadStoreProducts, type PurchasesPackage, type PurchasesStoreProduct, type Storefront } from "@/lib/billing";
+import { loadStoreProductsWithStorefrontDiagnostics, type BillingStorefrontDiagnostic, type PurchasesPackage, type PurchasesStoreProduct } from "@/lib/billing";
 
 type PlanGroup = "plus" | "family";
 type BillingPeriod = "monthly" | "annual" | "other";
@@ -16,9 +16,9 @@ type DisplayPackage = {
   plan: PlanGroup;
   period: BillingPeriod;
   product: PurchasesStoreProduct;
+  refreshedProduct: PurchasesStoreProduct | null;
   price: string;
-  visiblePrice: string;
-  priceSource: "store_product_refresh" | "offering_package";
+  priceSource: "offering_package";
   storefrontCountryCode: string | null;
 };
 
@@ -34,7 +34,6 @@ const planLabels: Record<PlanGroup, string> = {
 };
 
 const showTemporaryBillingDiagnostics = true;
-const hideIosNumericPriceForInternalDiagnostics = true;
 
 function packageSearchText(pkg: PurchasesPackage) {
   return [
@@ -84,27 +83,22 @@ function sortPackage(a: DisplayPackage, b: DisplayPackage) {
     || a.pkg.identifier.localeCompare(b.pkg.identifier);
 }
 
-function displayPriceForProduct(product: PurchasesStoreProduct) {
-  if (Platform.OS === "ios" && showTemporaryBillingDiagnostics && hideIosNumericPriceForInternalDiagnostics) {
-    return "Price confirmed by Apple before purchase";
-  }
-  return packageDisplayPrice(product);
-}
-
 function buildDisplayPackages(
   packages: PurchasesPackage[],
   storeProductsById: Record<string, PurchasesStoreProduct>,
-  storefront: Storefront | null,
+  storefrontCountryCode: string | null,
 ) {
   const displayPackages = packages.map((pkg) => ({
     pkg,
     plan: packagePlan(pkg),
     period: packagePeriod(pkg),
-    product: storeProductsById[pkg.product.identifier] ?? pkg.product,
-    price: packageDisplayPrice(storeProductsById[pkg.product.identifier] ?? pkg.product),
-    visiblePrice: displayPriceForProduct(storeProductsById[pkg.product.identifier] ?? pkg.product),
-    priceSource: storeProductsById[pkg.product.identifier] ? "store_product_refresh" as const : "offering_package" as const,
-    storefrontCountryCode: storefront?.countryCode ?? null,
+    // The package and its product are the exact objects handed to RevenueCat
+    // for purchase. A separate getProducts refresh is diagnostic-only.
+    product: pkg.product,
+    refreshedProduct: storeProductsById[pkg.product.identifier] ?? null,
+    price: packageDisplayPrice(pkg.product),
+    priceSource: "offering_package" as const,
+    storefrontCountryCode,
   })).sort(sortPackage);
 
   return {
@@ -117,14 +111,13 @@ function logDisplayedPackages(displayPackages: DisplayPackage[]) {
   if (!__DEV__) return;
 
   for (const displayPackage of displayPackages) {
-    const { pkg, plan, period, price, priceSource, visiblePrice, storefrontCountryCode } = displayPackage;
+    const { pkg, plan, period, price, priceSource, storefrontCountryCode } = displayPackage;
     const product = pkg.product as RevenueCatProductDiagnostics;
-    const displayProduct = displayPackage.product as RevenueCatProductDiagnostics;
+    const refreshedProduct = displayPackage.refreshedProduct as RevenueCatProductDiagnostics | null;
     console.info("[billing] upgrade package displayed", {
       renderedPlanLabel: planLabels[plan],
       renderedPeriodLabel: periodLabel(period),
-      renderedVisiblePrice: visiblePrice,
-      resolvedProductPrice: price,
+      renderedVisiblePrice: price,
       priceSource,
       platform: Platform.OS,
       storefrontCountryCode,
@@ -134,66 +127,76 @@ function logDisplayedPackages(displayPackages: DisplayPackage[]) {
       productTitle: pkg.product.title ?? null,
       productDescription: pkg.product.description ?? null,
       packageProductPriceString: pkg.product.priceString ?? null,
-      refreshedProductPriceString: displayPackage.product.priceString ?? null,
+      refreshedProductPriceString: refreshedProduct?.priceString ?? null,
       rawPrice: typeof product.price === "number" ? product.price : null,
       currencyCode: typeof product.currencyCode === "string" ? product.currencyCode : null,
-      refreshedRawPrice: typeof displayProduct.price === "number" ? displayProduct.price : null,
-      refreshedCurrencyCode: typeof displayProduct.currencyCode === "string" ? displayProduct.currencyCode : null,
-      billingPeriod: typeof displayProduct.subscriptionPeriod === "string" ? displayProduct.subscriptionPeriod : pkg.packageType,
+      refreshedRawPrice: typeof refreshedProduct?.price === "number" ? refreshedProduct.price : null,
+      refreshedCurrencyCode: typeof refreshedProduct?.currencyCode === "string" ? refreshedProduct.currencyCode : null,
+      billingPeriod: typeof product.subscriptionPeriod === "string" ? product.subscriptionPeriod : pkg.packageType,
     });
   }
 }
 
-function billingDiagnosticText(displayPackage: DisplayPackage) {
-  const { pkg, plan, period, product, priceSource, storefrontCountryCode, visiblePrice } = displayPackage;
+function storefrontDiagnosticText(label: string, diagnostic: BillingStorefrontDiagnostic | null) {
+  if (!diagnostic) return `${label}=pending`;
+  return `${label}${diagnostic.trigger ? `(${diagnostic.trigger})` : ""}: configured=${diagnostic.sdkConfigured} userAttached=${diagnostic.userAttached} before=${diagnostic.storefrontBefore ?? "n/a"} after=${diagnostic.storefrontAfter ?? "n/a"}`;
+}
+
+function billingDiagnosticText(
+  displayPackage: DisplayPackage,
+  offeringStorefrontDiagnostic: BillingStorefrontDiagnostic | null,
+  productStorefrontDiagnostic: BillingStorefrontDiagnostic | null,
+) {
+  const { pkg, plan, period, product, price, priceSource, storefrontCountryCode, refreshedProduct } = displayPackage;
   const diagnosticProduct = product as RevenueCatProductDiagnostics;
   const rawPrice = typeof diagnosticProduct.price === "number" ? diagnosticProduct.price : "n/a";
   const currencyCode = typeof diagnosticProduct.currencyCode === "string" ? diagnosticProduct.currencyCode : "n/a";
   const billingPeriod = typeof diagnosticProduct.subscriptionPeriod === "string" ? diagnosticProduct.subscriptionPeriod : pkg.packageType;
   return [
-    `Diag ${planLabels[plan]} ${periodLabel(period)} visible=${visiblePrice}`,
+    `Diag ${planLabels[plan]} ${periodLabel(period)} visible=${price}`,
     `pkg=${pkg.identifier} type=${pkg.packageType}`,
     `product=${product.identifier}`,
     `title=${product.title}`,
     `desc=${product.description}`,
     `priceString=${product.priceString} raw=${rawPrice} currency=${currencyCode}`,
+    `refreshPriceString=${refreshedProduct?.priceString ?? "n/a"}`,
     `period=${billingPeriod} platform=${Platform.OS} storefront=${storefrontCountryCode ?? "n/a"} source=${priceSource}`,
+    storefrontDiagnosticText("offerings", offeringStorefrontDiagnostic),
+    storefrontDiagnosticText("products", productStorefrontDiagnostic),
   ].join("\n");
 }
 
 export default function UpgradeScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
-  const { effectivePlan, offering, error, purchaseLoading, isRefreshing, purchasePackage, restorePurchases, gatesEnabled } = useEntitlements();
+  const { effectivePlan, offering, error, offeringStorefrontDiagnostic, purchaseLoading, isRefreshing, purchasePackage, restorePurchases, gatesEnabled } = useEntitlements();
   const packages = offering?.availablePackages ?? [];
   const [storeProductsById, setStoreProductsById] = useState<Record<string, PurchasesStoreProduct>>({});
-  const [storefront, setStorefront] = useState<Storefront | null>(null);
+  const [productStorefrontDiagnostic, setProductStorefrontDiagnostic] = useState<BillingStorefrontDiagnostic | null>(null);
   const productIdentifiersKey = useMemo(() => [...new Set(packages.map((pkg) => pkg.product.identifier))].sort().join("|"), [packages]);
-  const groupedPackages = useMemo(() => buildDisplayPackages(packages, storeProductsById, storefront), [packages, storeProductsById, storefront]);
+  const storefrontCountryCode = productStorefrontDiagnostic?.storefrontAfter ?? offeringStorefrontDiagnostic?.storefrontAfter ?? null;
+  const groupedPackages = useMemo(() => buildDisplayPackages(packages, storeProductsById, storefrontCountryCode), [packages, storeProductsById, storefrontCountryCode]);
   const displayedPackages = useMemo(() => [...groupedPackages.plus, ...groupedPackages.family], [groupedPackages]);
 
-  const refreshStoreDisplayData = useCallback(async () => {
+  const refreshStoreDisplayData = useCallback(async (trigger: string) => {
     const productIdentifiers = productIdentifiersKey ? productIdentifiersKey.split("|") : [];
     setStoreProductsById({});
-    setStorefront(null);
+    setProductStorefrontDiagnostic(null);
     if (productIdentifiers.length === 0) return;
 
-    const [storefrontResult, productsResult] = await Promise.all([
-      loadStorefront(),
-      loadStoreProducts(productIdentifiers),
-    ]);
-
-    if (storefrontResult.ok) setStorefront(storefrontResult.value);
-    if (productsResult.ok) setStoreProductsById(Object.fromEntries(productsResult.value.map((product) => [product.identifier, product])));
+    const productsResult = await loadStoreProductsWithStorefrontDiagnostics(productIdentifiers);
+    if (!productsResult.ok) return;
+    setProductStorefrontDiagnostic({ ...productsResult.value.diagnostic, trigger });
+    setStoreProductsById(Object.fromEntries(productsResult.value.products.map((product) => [product.identifier, product])));
   }, [productIdentifiersKey]);
 
   useFocusEffect(useCallback(() => {
-    void refreshStoreDisplayData();
+    void refreshStoreDisplayData("screen_focus");
   }, [refreshStoreDisplayData]));
 
   useEffect(() => {
     const subscription = AppState.addEventListener("change", (state) => {
-      if (state === "active") void refreshStoreDisplayData();
+      if (state === "active") void refreshStoreDisplayData("app_active");
     });
     return () => subscription.remove();
   }, [refreshStoreDisplayData]);
@@ -203,7 +206,9 @@ export default function UpgradeScreen() {
   }, [displayedPackages]);
 
   const buy = async (pkg: PurchasesPackage) => {
+    await refreshStoreDisplayData("purchase_sheet_about_to_open");
     const result = await purchasePackage(pkg);
+    await refreshStoreDisplayData("purchase_sheet_returned");
     if (result.cancelled) return;
     Alert.alert(result.ok ? "You're covered" : "Purchase unavailable", result.message, result.ok ? [{ text: "Done", onPress: () => router.back() }] : undefined);
   };
@@ -235,9 +240,9 @@ export default function UpgradeScreen() {
                 <Text style={[styles.optionTitle, { color: colors.foreground }]}>{periodLabel(displayPackage.period)}</Text>
                 <Text style={[styles.body, { color: colors.mutedForeground }]}>{displayPackage.product.description || "AI features included. Fair use applies."}</Text>
               </View>
-              <Text style={[styles.price, { color: colors.foreground }]}>{displayPackage.visiblePrice}</Text>
+              <Text style={[styles.price, { color: colors.foreground }]}>{displayPackage.price}</Text>
             </View>
-            {showTemporaryBillingDiagnostics ? <Text style={[styles.diagnostic, { color: colors.mutedForeground }]}>{billingDiagnosticText(displayPackage)}</Text> : null}
+            {showTemporaryBillingDiagnostics ? <Text style={[styles.diagnostic, { color: colors.mutedForeground }]}>{billingDiagnosticText(displayPackage, offeringStorefrontDiagnostic, productStorefrontDiagnostic)}</Text> : null}
             <Pressable disabled={purchaseLoading} onPress={() => void buy(displayPackage.pkg)} style={[styles.button, { backgroundColor: colors.primary, opacity: purchaseLoading ? .6 : 1 }]}>
               <Text style={styles.buttonText}>{chooseLabel(displayPackage.period)}</Text>
             </Pressable>

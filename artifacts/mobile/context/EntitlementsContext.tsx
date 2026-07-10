@@ -6,8 +6,8 @@ import { useAuth } from "@/context/AuthContext";
 import { useAccountProfile } from "@/hooks/useAccountProfile";
 import {
   addCustomerInfoListener, billingGatesEnabled, buyPackage, clearBillingUser, configureBilling, hasActiveCustomerEntitlement,
-  loadCustomerInfo, loadOffering, resolveCustomerPlan, restoreBilling,
-  type CustomerInfo, type PurchasesOffering, type PurchasesPackage,
+  loadCustomerInfo, loadOfferingWithStorefrontDiagnostics, resolveCustomerPlan, restoreBilling,
+  type BillingStorefrontDiagnostic, type CustomerInfo, type PurchasesOffering, type PurchasesPackage,
 } from "@/lib/billing";
 import type { CoverlyBillingPlan } from "@/lib/billing-entitlements";
 
@@ -19,6 +19,8 @@ type EntitlementsValue = {
   isFree: boolean; isPlus: boolean; isFamily: boolean; isPaid: boolean;
   gatesEnabled: boolean; isLoading: boolean; isRefreshing: boolean; purchaseLoading: boolean;
   offering: PurchasesOffering | null; customerInfo: CustomerInfo | null; error: string | null;
+  offeringStorefrontDiagnostic: BillingStorefrontDiagnostic | null;
+  isSubscriptionSyncPending: boolean;
   canCreateProperty: (currentCount: number) => boolean;
   canUseAiScan: boolean; canUseReplacementPricing: boolean; canExportClaimPack: boolean;
   shouldShowUpgradeFor: (feature: GatedFeature, currentPropertyCount?: number) => boolean;
@@ -40,6 +42,7 @@ export function EntitlementsProvider({ children }: { children: React.ReactNode }
   const queryClient = useQueryClient();
   const [offering, setOffering] = useState<PurchasesOffering | null>(null);
   const [customerInfo, setCustomerInfo] = useState<CustomerInfo | null>(null);
+  const [offeringStorefrontDiagnostic, setOfferingStorefrontDiagnostic] = useState<BillingStorefrontDiagnostic | null>(null);
   const [purchaseLoading, setPurchaseLoading] = useState(false);
   const [isRefreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -48,6 +51,13 @@ export function EntitlementsProvider({ children }: { children: React.ReactNode }
   const profilePlan = profilePlanToCode(profileQuery.profile?.plan);
   const revenueCatPlan = resolveCustomerPlan(customerInfo);
   const plan = profilePlan !== "free" ? profilePlan : revenueCatPlan.plan ?? "free";
+  const isSubscriptionSyncPending = revenueCatPlan.plan !== null && profileQuery.isSuccess && profilePlan === "free";
+  const subscriptionStatus = isSubscriptionSyncPending
+    ? revenueCatPlan.subscriptionStatus ?? profileQuery.profile?.subscriptionStatus ?? null
+    : profileQuery.profile?.subscriptionStatus ?? revenueCatPlan.subscriptionStatus;
+  const subscriptionPeriodEnd = isSubscriptionSyncPending
+    ? revenueCatPlan.subscriptionPeriodEnd ?? profileQuery.profile?.subscriptionPeriodEnd ?? null
+    : profileQuery.profile?.subscriptionPeriodEnd ?? revenueCatPlan.subscriptionPeriodEnd;
   const isPaid = plan !== "free";
 
   const refreshEntitlements = useCallback(async () => {
@@ -75,11 +85,11 @@ export function EntitlementsProvider({ children }: { children: React.ReactNode }
     let removeCustomerInfoListener: (() => void) | null = null;
     if (!session?.user.id) {
       void clearBillingUser();
-      setOffering(null); setCustomerInfo(null); setError(null);
+      setOffering(null); setCustomerInfo(null); setOfferingStorefrontDiagnostic(null); setError(null);
       setPurchaseLoading(false); setRefreshing(false);
       return;
     }
-    setOffering(null); setCustomerInfo(null); setError(null);
+    setOffering(null); setCustomerInfo(null); setOfferingStorefrontDiagnostic(null); setError(null);
     void (async () => {
       const configured = await configureBilling(session.user.id);
       if (!configured.ok) { if (!cancelled) setError(configured.error); return; }
@@ -90,9 +100,12 @@ export function EntitlementsProvider({ children }: { children: React.ReactNode }
         if (cancelled) listener.value();
         else removeCustomerInfoListener = listener.value;
       }
-      const [offer, info] = await Promise.all([loadOffering(), loadCustomerInfo()]);
+      const [offer, info] = await Promise.all([loadOfferingWithStorefrontDiagnostics(), loadCustomerInfo()]);
       if (cancelled) return;
-      if (offer.ok) setOffering(offer.value); else setError(offer.error);
+      if (offer.ok) {
+        setOffering(offer.value.offering);
+        setOfferingStorefrontDiagnostic(offer.value.diagnostic);
+      } else setError(offer.error);
       if (info.ok) setCustomerInfo(info.value); else setError((current) => current ?? info.error);
     })();
     return () => { cancelled = true; removeCustomerInfoListener?.(); };
@@ -102,7 +115,11 @@ export function EntitlementsProvider({ children }: { children: React.ReactNode }
     setPurchaseLoading(true); setError(null);
     const result = await buyPackage(pkg);
     if (!result.ok) { setPurchaseLoading(false); if (!result.cancelled) setError(result.error); return { ok: false, cancelled: result.cancelled, message: result.cancelled ? "Purchase cancelled." : result.error }; }
-    setCustomerInfo(result.value); await refreshEntitlements(); setPurchaseLoading(false);
+    // RevenueCat returns confirmed CustomerInfo from the completed store
+    // purchase. Make that access available now while Supabase catches up.
+    setCustomerInfo(result.value);
+    void refreshEntitlements().catch(() => undefined);
+    setPurchaseLoading(false);
     return { ok: true, message: "Purchase received. Your access has been refreshed." };
   }, [refreshEntitlements]);
 
@@ -110,7 +127,9 @@ export function EntitlementsProvider({ children }: { children: React.ReactNode }
     setPurchaseLoading(true); setError(null);
     const result = await restoreBilling();
     if (!result.ok) { setPurchaseLoading(false); setError(result.error); return { ok: false, message: result.error }; }
-    setCustomerInfo(result.value); await refreshEntitlements(); setPurchaseLoading(false);
+    setCustomerInfo(result.value);
+    void refreshEntitlements().catch(() => undefined);
+    setPurchaseLoading(false);
     const active = hasActiveCustomerEntitlement(result.value);
     return { ok: active, message: active ? "Purchases restored and access refreshed." : "No active Coverly subscription was found." };
   }, [refreshEntitlements]);
@@ -134,14 +153,13 @@ export function EntitlementsProvider({ children }: { children: React.ReactNode }
   }, [shouldShowUpgradeFor]);
 
   const value = useMemo<EntitlementsValue>(() => ({
-    effectivePlan: plan, subscriptionStatus: profileQuery.profile?.subscriptionStatus ?? revenueCatPlan.subscriptionStatus,
-    subscriptionPeriodEnd: profileQuery.profile?.subscriptionPeriodEnd ?? revenueCatPlan.subscriptionPeriodEnd,
+    effectivePlan: plan, subscriptionStatus, subscriptionPeriodEnd,
     isFree: !isPaid, isPlus: plan === "coverly_plus", isFamily: plan === "coverly_family", isPaid,
     gatesEnabled: billingGatesEnabled, isLoading: profileQuery.isLoading, isRefreshing, purchaseLoading,
-    offering, customerInfo, error, canCreateProperty, canUseAiScan: canUseMeteredAiFeatures,
+    offering, customerInfo, error, offeringStorefrontDiagnostic, isSubscriptionSyncPending, canCreateProperty, canUseAiScan: canUseMeteredAiFeatures,
     canUseReplacementPricing: canUseMeteredAiFeatures, canExportClaimPack, shouldShowUpgradeFor, enforce,
     refreshEntitlements, purchasePackage, restorePurchases,
-  }), [plan, profileQuery.profile, profileQuery.isLoading, isRefreshing, purchaseLoading, offering, customerInfo, error, canCreateProperty, canExportClaimPack, shouldShowUpgradeFor, enforce, refreshEntitlements, purchasePackage, restorePurchases, revenueCatPlan.subscriptionPeriodEnd, revenueCatPlan.subscriptionStatus]);
+  }), [plan, subscriptionStatus, subscriptionPeriodEnd, profileQuery.profile, profileQuery.isLoading, isRefreshing, purchaseLoading, offering, customerInfo, error, offeringStorefrontDiagnostic, isSubscriptionSyncPending, canCreateProperty, canExportClaimPack, shouldShowUpgradeFor, enforce, refreshEntitlements, purchasePackage, restorePurchases]);
   return <Context.Provider value={value}>{children}</Context.Provider>;
 }
 

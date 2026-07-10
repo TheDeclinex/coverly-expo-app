@@ -15,6 +15,16 @@ export type BillingResult<T> =
 
 export type Storefront = { countryCode: string };
 
+export type BillingStorefrontDiagnostic = {
+  stage: "offerings" | "products";
+  platform: string;
+  sdkConfigured: boolean;
+  userAttached: boolean;
+  storefrontBefore: string | null;
+  storefrontAfter: string | null;
+  trigger?: string;
+};
+
 const iosKey = process.env.EXPO_PUBLIC_REVENUECAT_IOS_API_KEY;
 const androidKey = process.env.EXPO_PUBLIC_REVENUECAT_ANDROID_API_KEY;
 
@@ -58,6 +68,29 @@ async function sdk() {
   const Purchases = module.default ?? (module as unknown as typeof module.default);
   if (!Purchases?.configure) throw new Error("Native purchases are unavailable in this build.");
   return { Purchases, LOG_LEVEL: module.LOG_LEVEL, PURCHASES_ERROR_CODE: module.PURCHASES_ERROR_CODE };
+}
+
+async function storefrontCountryCode(Purchases: Awaited<ReturnType<typeof sdk>>["Purchases"]) {
+  try {
+    return (await Purchases.getStorefront())?.countryCode ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function storefrontDiagnostic(
+  stage: BillingStorefrontDiagnostic["stage"],
+  storefrontBefore: string | null,
+  storefrontAfter: string | null,
+): BillingStorefrontDiagnostic {
+  return {
+    stage,
+    platform: Platform.OS,
+    sdkConfigured,
+    userAttached: configuredUserId !== null,
+    storefrontBefore,
+    storefrontAfter,
+  };
 }
 
 function serialiseIdentityOperation<T>(operation: () => Promise<T>): Promise<T> {
@@ -116,6 +149,24 @@ export async function loadOffering(): Promise<BillingResult<PurchasesOffering | 
   } catch (error) { return { ok: false, error: error instanceof Error ? error.message : "Could not load subscription options." }; }
 }
 
+export async function loadOfferingWithStorefrontDiagnostics(): Promise<BillingResult<{
+  offering: PurchasesOffering | null;
+  diagnostic: BillingStorefrontDiagnostic;
+}>> {
+  try {
+    const { Purchases } = await sdk();
+    const storefrontBefore = await storefrontCountryCode(Purchases);
+    const offerings = await Purchases.getOfferings();
+    const storefrontAfter = await storefrontCountryCode(Purchases);
+    const wanted = process.env.EXPO_PUBLIC_REVENUECAT_OFFERING_ID;
+    const diagnostic = storefrontDiagnostic("offerings", storefrontBefore, storefrontAfter);
+    billingDiagnostic("offering loaded", diagnostic);
+    return { ok: true, value: { offering: (wanted ? offerings.all[wanted] : offerings.current) ?? null, diagnostic } };
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : "Could not load subscription options." };
+  }
+}
+
 export async function loadStoreProducts(productIdentifiers: string[]): Promise<BillingResult<PurchasesStoreProduct[]>> {
   const uniqueIdentifiers = [...new Set(productIdentifiers.map((id) => id.trim()).filter(Boolean))];
   if (uniqueIdentifiers.length === 0) return { ok: true, value: [] };
@@ -129,6 +180,40 @@ export async function loadStoreProducts(productIdentifiers: string[]): Promise<B
       productIdentifiers: products.map((product) => product.identifier),
     });
     return { ok: true, value: products };
+  } catch (error) {
+    billingDiagnostic("store products failed", { message: error instanceof Error ? error.message : "unknown" });
+    return { ok: false, error: error instanceof Error ? error.message : "Could not refresh store product prices." };
+  }
+}
+
+export async function loadStoreProductsWithStorefrontDiagnostics(productIdentifiers: string[]): Promise<BillingResult<{
+  products: PurchasesStoreProduct[];
+  diagnostic: BillingStorefrontDiagnostic;
+}>> {
+  const uniqueIdentifiers = [...new Set(productIdentifiers.map((id) => id.trim()).filter(Boolean))];
+  if (uniqueIdentifiers.length === 0) {
+    return {
+      ok: true,
+      value: {
+        products: [],
+        diagnostic: storefrontDiagnostic("products", null, null),
+      },
+    };
+  }
+
+  try {
+    const { Purchases } = await sdk();
+    const storefrontBefore = await storefrontCountryCode(Purchases);
+    const products = await Purchases.getProducts(uniqueIdentifiers, Purchases.PRODUCT_CATEGORY.SUBSCRIPTION);
+    const storefrontAfter = await storefrontCountryCode(Purchases);
+    const diagnostic = storefrontDiagnostic("products", storefrontBefore, storefrontAfter);
+    billingDiagnostic("store products loaded", {
+      ...diagnostic,
+      requestedCount: uniqueIdentifiers.length,
+      returnedCount: products.length,
+      productIdentifiers: products.map((product) => product.identifier),
+    });
+    return { ok: true, value: { products, diagnostic } };
   } catch (error) {
     billingDiagnostic("store products failed", { message: error instanceof Error ? error.message : "unknown" });
     return { ok: false, error: error instanceof Error ? error.message : "Could not refresh store product prices." };
