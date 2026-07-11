@@ -1047,7 +1047,7 @@ function DraftReview({
 
   const openItemEditor = (itemId: string) => {
     router.push({
-      pathname: "/(tabs)/edit-item/[id]",
+      pathname: "/(tabs)/item/[id]",
       params: { id: itemId },
     } as Href);
   };

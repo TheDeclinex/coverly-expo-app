@@ -35,6 +35,7 @@ import {
 import { ContextBackButton } from "@/components/ContextBackButton";
 import { ErrorState } from "@/components/ErrorState";
 import { ExpandableImage } from "@/components/ExpandableImage";
+import { ImageViewerModal } from "@/components/ImageViewerModal";
 import { LoadingState } from "@/components/LoadingState";
 import { QuantityStepper } from "@/components/QuantityStepper";
 import { ReliableImage } from "@/components/ReliableImage";
@@ -148,6 +149,13 @@ function roomItemHasPhoto(item: InventoryItem): boolean {
   return Boolean(item.image_url || item.photo_url);
 }
 
+function normalizedItemPin(item: InventoryItem): { x: number; y: number } | null {
+  const raw = item.image_pin as Record<string, unknown> | null | undefined;
+  return raw && typeof raw.x === "number" && typeof raw.y === "number"
+    ? { x: raw.x, y: raw.y }
+    : null;
+}
+
 function roomItemMatchesReadiness(item: InventoryItem, filter: RoomReadinessFilter): boolean {
   if (filter === "all") return true;
   if (filter === "needs_review") return needsRoomReview(item);
@@ -173,6 +181,7 @@ function ItemCard({
   onToggleSelected,
   onOpenItem,
   onRepositionPin,
+  onExpandImage,
 }: {
   item: InventoryItem;
   parentRoomName: string;
@@ -191,6 +200,7 @@ function ItemCard({
   onToggleSelected?: () => void;
   onOpenItem: (itemId: string) => void;
   onRepositionPin: (item: InventoryItem, x: number, y: number) => Promise<void>;
+  onExpandImage: (item: InventoryItem, uri: string) => void;
 }) {
   const queryClient = useQueryClient();
   const { showToast } = useToast();
@@ -521,6 +531,7 @@ function ItemCard({
             viewerTitle={item.name}
             pinPhotoIndex={0}
             onReposition={pin ? (x, y) => onRepositionPin(item, x, y) : undefined}
+            onExpand={() => onExpandImage(item, imageUri!)}
             disabled={selectionMode}
             onPermanentError={onImagePermanentError}
           />
@@ -1025,6 +1036,7 @@ function CompactItemCard({
   onToggleSelected,
   onOpenItem,
   onRepositionPin,
+  onExpandImage,
 }: {
   item: InventoryItem;
   parentRoomName: string;
@@ -1038,14 +1050,12 @@ function CompactItemCard({
   onToggleSelected?: () => void;
   onOpenItem: (itemId: string) => void;
   onRepositionPin: (item: InventoryItem, x: number, y: number) => Promise<void>;
+  onExpandImage: (item: InventoryItem, uri: string) => void;
 }) {
   const readinessChip = itemReadinessChip(item);
   const totalValue = getItemTotalValue(item);
   const placeholderIcon = categoryIcon(item.category);
-  const rawPin = item.image_pin as Record<string, unknown> | null | undefined;
-  const pin = rawPin && typeof rawPin.x === "number" && typeof rawPin.y === "number"
-    ? { x: rawPin.x, y: rawPin.y }
-    : null;
+  const pin = normalizedItemPin(item);
 
   const goToDetail = async () => {
     if (selectionMode) {
@@ -1113,6 +1123,7 @@ function CompactItemCard({
             pinPhotoIndex={0}
             viewerTitle={item.name}
             onReposition={pin ? (x, y) => onRepositionPin(item, x, y) : undefined}
+            onExpand={() => onExpandImage(item, resolvedImageUrl)}
             disabled={selectionMode}
             onPermanentError={onImagePermanentError}
           />
@@ -1141,6 +1152,39 @@ function CompactItemCard({
   );
 }
 
+function detailedCardPropsEqual(
+  previous: React.ComponentProps<typeof ItemCard>,
+  next: React.ComponentProps<typeof ItemCard>,
+): boolean {
+  return previous.item === next.item
+    && previous.colors === next.colors
+    && previous.parentRoomName === next.parentRoomName
+    && previous.parentPropertyName === next.parentPropertyName
+    && previous.resolvedImageUrl === next.resolvedImageUrl
+    && previous.evidenceCount === next.evidenceCount
+    && previous.isNew === next.isNew
+    && previous.editingTarget === next.editingTarget
+    && previous.selectionMode === next.selectionMode
+    && previous.isSelected === next.isSelected;
+}
+
+function compactCardPropsEqual(
+  previous: React.ComponentProps<typeof CompactItemCard>,
+  next: React.ComponentProps<typeof CompactItemCard>,
+): boolean {
+  return previous.item === next.item
+    && previous.colors === next.colors
+    && previous.parentRoomName === next.parentRoomName
+    && previous.parentPropertyName === next.parentPropertyName
+    && previous.resolvedImageUrl === next.resolvedImageUrl
+    && previous.isNew === next.isNew
+    && previous.selectionMode === next.selectionMode
+    && previous.isSelected === next.isSelected;
+}
+
+const MemoizedAnimatedItemCard = React.memo(AnimatedItemCard, detailedCardPropsEqual);
+const MemoizedCompactItemCard = React.memo(CompactItemCard, compactCardPropsEqual);
+
 export default function ItemsScreen() {
   const { id, name, fileId, fileName, addedCount } = useLocalSearchParams<{
     id: string;
@@ -1161,6 +1205,7 @@ export default function ItemsScreen() {
   const [coverSavedTick, setCoverSavedTick] = useState(false);
   const [archivingRoom, setArchivingRoom] = useState(false);
   const [newItemIds, setNewItemIds] = useState<Set<string>>(new Set());
+  const [roomImageViewer, setRoomImageViewer] = useState<{ item?: InventoryItem; uri: string; title: string } | null>(null);
   const [activeEdit, setActiveEdit] = useState<{
     itemId: string;
     target: CardEditTarget;
@@ -1179,6 +1224,18 @@ export default function ItemsScreen() {
   const openingItemRef = useRef(false);
   const restoredRoomScrollRef = useRef(false);
   const roomViewabilityConfig = useRef({ itemVisiblePercentThreshold: 20 }).current;
+  const liveScrollOffsetRef = useRef(initialViewSession?.offset ?? 0);
+
+  const persistRoomScrollSnapshot = React.useCallback(() => {
+    updateRoomViewSession(id, {
+      offset: liveScrollOffsetRef.current,
+      viewMode,
+      searchText,
+      categoryFilter,
+      readinessFilter,
+      sortOption,
+    });
+  }, [categoryFilter, id, readinessFilter, searchText, sortOption, viewMode]);
 
   useFocusEffect(
     React.useCallback(() => {
@@ -1225,9 +1282,10 @@ export default function ItemsScreen() {
   });
 
   const clearNewItemOnOpen = React.useCallback((itemId: string) => {
+    persistRoomScrollSnapshot();
     openingItemRef.current = true;
     setNewItemIds((current) => current.has(itemId) ? withoutRecentItem(current, itemId) : current);
-  }, []);
+  }, [persistRoomScrollSnapshot]);
 
   const removeNewItemIds = React.useCallback((itemIds: Iterable<string>) => {
     const idsToRemove = new Set(itemIds);
@@ -1348,11 +1406,26 @@ export default function ItemsScreen() {
       ["item", target.id, session?.user.id],
       (current: InventoryItem | undefined) => current ? itemWithCommittedPin(current, { x, y }) : committed,
     );
-    queryClient.setQueriesData<InventoryItem[]>(
-      { queryKey: ["all-items"] },
+    queryClient.setQueryData<InventoryItem[]>(
+      ["all-items", "home-valuation", session?.user.id],
+      (current) => replaceItemWithCommittedPin(current, target.id, { x, y }),
+    );
+    queryClient.setQueryData<InventoryItem[]>(
+      ["property-items", target.file_id, session?.user.id],
       (current) => replaceItemWithCommittedPin(current, target.id, { x, y }),
     );
   }, [id, queryClient, session?.user.id]);
+  const openRoomItemImage = React.useCallback((target: InventoryItem, uri: string) => {
+    setRoomImageViewer({ item: target, uri, title: target.name });
+  }, []);
+  const repositionRoomViewerPin = React.useCallback(async (x: number, y: number) => {
+    const target = roomImageViewer?.item;
+    if (!target) throw new Error("Item image is no longer available");
+    await repositionRoomItemPin(target, x, y);
+    setRoomImageViewer((current) => current?.item?.id === target.id
+      ? { ...current, item: itemWithCommittedPin(current.item, { x, y }) }
+      : current);
+  }, [repositionRoomItemPin, roomImageViewer?.item]);
   const roomCategoryOptions = React.useMemo(() => {
     const categorySet = new Set<string>();
     (items ?? []).forEach((item) => {
@@ -1944,6 +2017,10 @@ export default function ItemsScreen() {
             placeholderIconSize={54}
             placeholderIconColor={colors.primary}
             placeholderBackgroundColor={colors.secondary}
+            onExpand={() => setRoomImageViewer({
+              uri: localCoverUrl ?? signedCoverUrl!,
+              title: resolvedRoomName,
+            })}
             onPermanentError={() => recoverRoomCoverUrl(room?.cover_photo_url)}
           />
         </Animated.View>
@@ -2121,7 +2198,7 @@ export default function ItemsScreen() {
   const renderRoomItem = ({ item }: { item: InventoryItem }) => {
     if (viewMode === "compact") {
       return (
-        <CompactItemCard
+        <MemoizedCompactItemCard
           item={item}
           parentRoomName={resolvedRoomName}
           parentPropertyName={resolvedPropertyName}
@@ -2134,12 +2211,13 @@ export default function ItemsScreen() {
           onToggleSelected={() => toggleSelectedItem(item.id)}
           onOpenItem={clearNewItemOnOpen}
           onRepositionPin={repositionRoomItemPin}
+          onExpandImage={openRoomItemImage}
         />
       );
     }
 
     return (
-      <AnimatedItemCard
+      <MemoizedAnimatedItemCard
         item={item}
         parentRoomName={resolvedRoomName}
         parentPropertyName={resolvedPropertyName}
@@ -2154,6 +2232,7 @@ export default function ItemsScreen() {
         onToggleSelected={() => toggleSelectedItem(item.id)}
         onOpenItem={clearNewItemOnOpen}
         onRepositionPin={repositionRoomItemPin}
+        onExpandImage={openRoomItemImage}
         onBeginEdit={(target) => setActiveEdit({ itemId: item.id, target })}
         onCloseEdit={(target) =>
           setActiveEdit((current) =>
@@ -2194,6 +2273,7 @@ export default function ItemsScreen() {
                 accessibilityLabel={viewMode === "compact" ? "Show detailed list" : "Show compact grid"}
                 onPress={() => {
                   const nextMode = viewMode === "compact" ? "detailed" : "compact";
+                  liveScrollOffsetRef.current = 0;
                   updateRoomViewSession(id, { viewMode: nextMode, offset: 0, anchorItemId: null });
                   restoredRoomScrollRef.current = true;
                   setViewMode(nextMode);
@@ -2214,6 +2294,19 @@ export default function ItemsScreen() {
           ),
         }}
       />
+      <ImageViewerModal
+        uris={roomImageViewer ? [roomImageViewer.uri] : []}
+        visible={!!roomImageViewer}
+        title={roomImageViewer?.title ?? "Image preview"}
+        onClose={() => setRoomImageViewer(null)}
+        pin={roomImageViewer?.item ? normalizedItemPin(roomImageViewer.item) : null}
+        pinPhotoIndex={0}
+        onPinReposition={roomImageViewer?.item && normalizedItemPin(roomImageViewer.item) ? repositionRoomViewerPin : undefined}
+        onPermanentError={() => {
+          const imageRef = roomImageViewer?.item?.image_url ?? roomImageViewer?.item?.photo_url ?? room?.cover_photo_url;
+          recoverItemImageUrl(imageRef);
+        }}
+      />
       {isLoading ? (
         <LoadingState />
       ) : error ? (
@@ -2231,6 +2324,10 @@ export default function ItemsScreen() {
             keyExtractor={(item) => item.id}
             renderItem={renderRoomItem}
             numColumns={viewMode === "compact" ? 2 : 1}
+            initialNumToRender={8}
+            maxToRenderPerBatch={6}
+            windowSize={5}
+            updateCellsBatchingPeriod={40}
             columnWrapperStyle={viewMode === "compact" ? styles.gridRow : undefined}
             ListHeaderComponent={renderRoomCover}
             ListFooterComponent={<View style={{ height: insets.bottom + STICKY_ACTION_CLEARANCE }} />}
@@ -2247,10 +2344,12 @@ export default function ItemsScreen() {
               {
                 useNativeDriver: false,
                 listener: (event: { nativeEvent: { contentOffset: { y: number } } }) => {
-                  updateRoomViewSession(id, { offset: event.nativeEvent.contentOffset.y });
+                  liveScrollOffsetRef.current = event.nativeEvent.contentOffset.y;
                 },
               }
             )}
+            onScrollEndDrag={persistRoomScrollSnapshot}
+            onMomentumScrollEnd={persistRoomScrollSnapshot}
             onViewableItemsChanged={onRoomViewableItemsChanged}
             viewabilityConfig={roomViewabilityConfig}
             onScrollToIndexFailed={({ index, averageItemLength }) => {

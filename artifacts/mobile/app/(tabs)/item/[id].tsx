@@ -6,6 +6,8 @@ import React from "react";
 import {
   ActivityIndicator,
   Alert,
+  BackHandler,
+  KeyboardAvoidingView,
   Platform,
   Pressable,
   ScrollView,
@@ -20,6 +22,7 @@ import { ErrorState } from "@/components/ErrorState";
 import { ContextBackButton } from "@/components/ContextBackButton";
 import { ExpandableImage } from "@/components/ExpandableImage";
 import { ItemEvidenceSection } from "@/components/ItemEvidenceSection";
+import { ItemMaintenanceForm } from "@/components/ItemMaintenanceForm";
 import { LoadingState } from "@/components/LoadingState";
 import { QuantityStepper } from "@/components/QuantityStepper";
 import { VoiceFieldButton } from "@/components/voice/VoiceFieldButton";
@@ -36,11 +39,11 @@ import { formatCurrencyFull, getItemUnitPrice } from "@/lib/inventory-mappers";
 import { itemWithCommittedPin, replaceItemWithCommittedPin } from "@/lib/item-pin-state";
 import { supabase } from "@/lib/supabase";
 import { buildVoiceItemUpdatePayload } from "@/lib/voice-item-update";
-import type { InventoryItem } from "@/types";
+import type { InventoryItem, InventoryRoom } from "@/types";
 import type { VoiceItemField, VoiceItemPatch } from "@/types/voice";
 
 // One-line rollback for the item review/edit trial.
-const ITEM_REVIEW_EDIT_TRIAL = true;
+const ITEM_REVIEW_EDIT_TRIAL: boolean = false;
 const VOICE_EDIT_FALLBACK_MESSAGE = "Voice edit could not start. Please try again or type your changes manually.";
 
 type InlineField = "name" | "quantity" | "unit_estimated_price" | "brand_maker";
@@ -515,6 +518,7 @@ export default function ItemDetailScreen() {
   const [productDetailsExpanded, setProductDetailsExpanded] = React.useState(false);
   const [productDetailsDraft, setProductDetailsDraft] = React.useState<ProductPurchaseDraft>(emptyProductPurchaseDraft);
   const [savingProductDetails, setSavingProductDetails] = React.useState(false);
+  const [maintenanceDirty, setMaintenanceDirty] = React.useState(false);
 
   const {
     data: item,
@@ -533,6 +537,21 @@ export default function ItemDetailScreen() {
       return data as InventoryItem;
     },
     enabled: !!session && !!id,
+  });
+
+  const { data: rooms } = useQuery({
+    queryKey: ["rooms", item?.file_id, session?.user.id],
+    queryFn: async () => {
+      const { data, error: roomsError } = await supabase
+        .from("inventory_rooms")
+        .select("id, name, file_id")
+        .eq("file_id", item!.file_id)
+        .is("archived_at", null)
+        .order("sort_order", { ascending: true });
+      if (roomsError) throw roomsError;
+      return (data ?? []) as Pick<InventoryRoom, "id" | "name" | "file_id">[];
+    },
+    enabled: !!session && !!item?.file_id,
   });
 
   const rawPrimaryUri = item?.image_url ?? item?.photo_url;
@@ -573,13 +592,6 @@ export default function ItemDetailScreen() {
     item?.original_purchase_price,
     item?.notes,
   ]);
-
-  const handleEdit = () => {
-    router.push({
-      pathname: "/(tabs)/edit-item/[id]",
-      params: { id: id! },
-    });
-  };
 
   const openVoiceInput = (targetField?: VoiceItemField) => {
     if (!session?.user?.id || !id || !item || !item.room_id || !item.file_id) {
@@ -638,6 +650,26 @@ export default function ItemDetailScreen() {
 
     router.back();
   }, [fileId, fileName, item?.file_id, item?.room, item?.room_id, origin, roomId, roomName]);
+
+  const handleItemBack = React.useCallback(() => {
+    if (!maintenanceDirty) {
+      navigateToItemParent();
+      return;
+    }
+    Alert.alert("Discard unsaved changes?", "Your item changes have not been saved.", [
+      { text: "Keep editing", style: "cancel" },
+      { text: "Discard", style: "destructive", onPress: navigateToItemParent },
+    ]);
+  }, [maintenanceDirty, navigateToItemParent]);
+
+  React.useEffect(() => {
+    if (!maintenanceDirty) return;
+    const subscription = BackHandler.addEventListener("hardwareBackPress", () => {
+      handleItemBack();
+      return true;
+    });
+    return () => subscription.remove();
+  }, [handleItemBack, maintenanceDirty]);
 
   const invalidateItemCollections = React.useCallback(async (target: InventoryItem) => {
     await Promise.all([
@@ -920,8 +952,12 @@ export default function ItemDetailScreen() {
         { queryKey: ["items", item.room_id] },
         (current) => replaceItemWithCommittedPin(current, item.id, { x, y }),
       );
-      queryClient.setQueriesData<InventoryItem[]>(
-        { queryKey: ["all-items"] },
+      queryClient.setQueryData<InventoryItem[]>(
+        ["all-items", "home-valuation", session?.user.id],
+        (current) => replaceItemWithCommittedPin(current, item.id, { x, y }),
+      );
+      queryClient.setQueryData<InventoryItem[]>(
+        ["property-items", item.file_id, session?.user.id],
         (current) => replaceItemWithCommittedPin(current, item.id, { x, y }),
       );
     },
@@ -935,10 +971,11 @@ export default function ItemDetailScreen() {
           title: item?.name ?? name ?? "Item Detail",
           headerTitleAlign: "center",
           headerBackVisible: false,
+          gestureEnabled: !maintenanceDirty,
           headerLeft: () => (
             <ContextBackButton
               label={roomName ?? item?.room ?? "Room"}
-              onPress={navigateToItemParent}
+              onPress={handleItemBack}
             />
           ),
         }}
@@ -952,6 +989,7 @@ export default function ItemDetailScreen() {
           onRetry={refetch}
         />
       ) : item ? (
+        <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
         <ScrollView
           contentContainerStyle={[
             styles.scrollContent,
@@ -980,33 +1018,42 @@ export default function ItemDetailScreen() {
             onPermanentError={() => recoverItemImageUrl(rawPrimaryUri)}
           />
           <View style={styles.content}>
-            <View style={styles.titleRow}>
-              <Text style={[styles.itemName, { color: colors.foreground }]}>
-                {item.name}
-              </Text>
-              {item.category && (
-                <View
-                  style={[
-                    styles.categoryBadge,
-                    { backgroundColor: colors.accent, borderRadius: 8 },
-                  ]}
-                >
-                  <Text
-                    style={[styles.categoryText, { color: colors.accentForeground }]}
-                  >
-                    {item.category}
-                  </Text>
+            <ItemMaintenanceForm item={item} rooms={rooms ?? []} onDirtyChange={setMaintenanceDirty} />
+
+            <Section title="ACTIONS" colors={colors}>
+              <Pressable
+                onPress={handleReplacementPricing}
+                style={({ pressed }) => [
+                  styles.nextActionPrimary,
+                  { backgroundColor: colors.primary, opacity: pressed ? 0.82 : 1 },
+                ]}
+              >
+                <Feather name="search" size={16} color={colors.primaryForeground} />
+                <View style={styles.nextActionCopy}>
+                  <Text style={[styles.nextActionTitle, { color: colors.primaryForeground }]}>Review replacement price</Text>
+                  <Text style={[styles.nextActionHint, { color: colors.primaryForeground }]}>Find or update the current replacement value</Text>
                 </View>
-              )}
-            </View>
+                <Feather name="chevron-right" size={16} color={colors.primaryForeground} />
+              </Pressable>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Delete item"
+                onPress={handleDeleteItem}
+                disabled={deletingItem}
+                style={({ pressed }) => [
+                  styles.destructiveAction,
+                  { borderTopColor: colors.border, opacity: deletingItem || pressed ? 0.65 : 1 },
+                ]}
+              >
+                {deletingItem ? <ActivityIndicator size="small" color="#B91C1C" /> : <Feather name="trash-2" size={15} color="#B91C1C" />}
+                <View style={styles.nextActionCopy}>
+                  <Text style={styles.destructiveTitle}>Delete item</Text>
+                  <Text style={[styles.advancedEditHint, { color: colors.mutedForeground }]}>Remove this item from the inventory</Text>
+                </View>
+              </Pressable>
+            </Section>
 
-            {item.description && (
-              <Text style={[styles.description, { color: colors.mutedForeground }]}>
-                {item.description}
-              </Text>
-            )}
-
-            {ITEM_REVIEW_EDIT_TRIAL ? (
+            {ITEM_REVIEW_EDIT_TRIAL && (ITEM_REVIEW_EDIT_TRIAL ? (
               <>
                 <Section title="QUICK EDIT" colors={colors}>
                   <Pressable
@@ -1133,22 +1180,6 @@ export default function ItemDetailScreen() {
                   </Pressable>
                   <Pressable
                     accessibilityRole="button"
-                    accessibilityLabel="Open advanced item editing"
-                    onPress={handleEdit}
-                    style={({ pressed }) => [
-                      styles.advancedEditAction,
-                      { borderTopColor: colors.border, opacity: pressed ? 0.65 : 1 },
-                    ]}
-                  >
-                    <Feather name="sliders" size={15} color={colors.mutedForeground} />
-                    <View style={styles.nextActionCopy}>
-                      <Text style={[styles.advancedEditTitle, { color: colors.foreground }]}>Advanced edit</Text>
-                      <Text style={[styles.advancedEditHint, { color: colors.mutedForeground }]}>Manage photos, category, room and additional details</Text>
-                    </View>
-                    <Feather name="chevron-right" size={15} color={colors.mutedForeground} />
-                  </Pressable>
-                  <Pressable
-                    accessibilityRole="button"
                     accessibilityLabel="Delete item"
                     onPress={handleDeleteItem}
                     disabled={deletingItem}
@@ -1171,18 +1202,27 @@ export default function ItemDetailScreen() {
               </>
             ) : (
               <>
-                <ProductPurchaseDetailsSection
-                  expanded={productDetailsExpanded}
-                  colors={colors}
-                  draft={productDetailsDraft}
-                  saving={savingProductDetails}
-                  onToggle={() => setProductDetailsExpanded((value) => !value)}
-                  onChange={updateProductDetailsDraft}
-                  onSave={() => void saveProductDetails()}
-                  onCancel={cancelProductDetailsEdit}
-                />
                 <Pressable
-                  onPress={handleEdit}
+                  accessibilityRole="button"
+                  accessibilityLabel="Edit item with voice"
+                  onPress={() => openVoiceInput()}
+                  style={({ pressed }) => [
+                    styles.voiceEditAction,
+                    {
+                      borderColor: colors.primary,
+                      backgroundColor: colors.background,
+                      opacity: pressed ? 0.72 : 1,
+                    },
+                  ]}
+                >
+                  <Feather name="mic" size={16} color={colors.primary} />
+                  <View style={styles.voiceEditCopy}>
+                    <Text style={[styles.voiceEditTitle, { color: colors.primary }]}>Edit with voice</Text>
+                    <Text style={[styles.voiceEditHint, { color: colors.mutedForeground }]}>Speak item details, then review before applying</Text>
+                  </View>
+                </Pressable>
+                <Pressable
+                  onPress={() => undefined}
                   style={({ pressed }) => [
                     styles.editBtn,
                     {
@@ -1210,8 +1250,28 @@ export default function ItemDetailScreen() {
                   <Feather name="search" size={16} color={colors.primaryForeground} />
                   <Text style={[styles.pricingBtnText, { color: colors.primaryForeground }]}>Find replacement price</Text>
                 </Pressable>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Delete item"
+                  onPress={handleDeleteItem}
+                  disabled={deletingItem}
+                  style={({ pressed }) => [
+                    styles.destructiveAction,
+                    { borderTopColor: colors.border, opacity: deletingItem || pressed ? 0.65 : 1 },
+                  ]}
+                >
+                  {deletingItem ? (
+                    <ActivityIndicator size="small" color="#B91C1C" />
+                  ) : (
+                    <Feather name="trash-2" size={15} color="#B91C1C" />
+                  )}
+                  <View style={styles.nextActionCopy}>
+                    <Text style={styles.destructiveTitle}>Delete item</Text>
+                    <Text style={[styles.advancedEditHint, { color: colors.mutedForeground }]}>Remove this item from the inventory</Text>
+                  </View>
+                </Pressable>
               </>
-            )}
+            ))}
 
             <Section title="VALUATION CONTEXT" colors={colors}>
               {item.unit_estimated_price != null || item.estimated_price != null ? (
@@ -1279,6 +1339,7 @@ export default function ItemDetailScreen() {
             </Section>
           </View>
         </ScrollView>
+        </KeyboardAvoidingView>
       ) : null}
       {item ? (
         <BarcodeScanFlow

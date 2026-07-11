@@ -39,6 +39,8 @@ interface ExpandableImageProps {
    * Only pass this on editable screens — read-only contexts should omit it.
    */
   onReposition?: (x: number, y: number) => Promise<void>;
+  /** When provided, expansion is owned by a single parent-level viewer. */
+  onExpand?: () => void;
   onPermanentError?: () => void;
 }
 
@@ -59,6 +61,7 @@ export function ExpandableImage({
   pinColor = "#1D9E75",
   disabled = false,
   onReposition,
+  onExpand,
   onPermanentError,
 }: ExpandableImageProps) {
   const [lightboxVisible, setLightboxVisible] = useState(false);
@@ -143,7 +146,8 @@ export function ExpandableImage({
         disabled={disabled}
         onPress={(event) => {
           event.stopPropagation();
-          setLightboxVisible(true);
+          if (onExpand) onExpand();
+          else setLightboxVisible(true);
         }}
         style={[style, { overflow: "hidden" }]}
         onLayout={(e) => {
@@ -202,18 +206,20 @@ export function ExpandableImage({
           </View>
         ) : null}
       </Pressable>
-      <ImageViewerModal
-        uris={lightboxUris}
-        initialIndex={initialPhotoIndex}
-        visible={lightboxVisible}
-        onClose={() => setLightboxVisible(false)}
-        title={viewerTitle}
-        pin={pin}
-        pinPhotoIndex={pinPhotoIndex ?? initialPhotoIndex}
-        pinColor={pinColor}
-        onPinReposition={onReposition}
-        onPermanentError={onPermanentError}
-      />
+      {!onExpand ? (
+        <ImageViewerModal
+          uris={lightboxUris}
+          initialIndex={initialPhotoIndex}
+          visible={lightboxVisible}
+          onClose={() => setLightboxVisible(false)}
+          title={viewerTitle}
+          pin={pin}
+          pinPhotoIndex={pinPhotoIndex ?? initialPhotoIndex}
+          pinColor={pinColor}
+          onPinReposition={onReposition}
+          onPermanentError={onPermanentError}
+        />
+      ) : null}
     </>
   );
 }

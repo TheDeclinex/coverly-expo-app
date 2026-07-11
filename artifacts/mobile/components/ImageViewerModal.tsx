@@ -22,6 +22,14 @@ import { ReliableImage } from "@/components/ReliableImage";
 import { useColors } from "@/hooks/useColors";
 import { pinBelongsToPhoto, viewerAllowsPinEditing } from "@/lib/image-viewer-config";
 import { pinMarkerPosition, renderedImageRect, type NormalizedPin } from "@/lib/pin-position";
+import {
+  beginViewerPinEdit,
+  cancelViewerPinEdit,
+  commitViewerPinDraft,
+  createViewerPinState,
+  syncIncomingViewerPin,
+  updateViewerPinDraft,
+} from "@/lib/viewer-pin-state";
 
 interface ImageViewerModalProps {
   uris: string[];
@@ -151,14 +159,16 @@ export function ImageViewerModal({
   const { width, height } = useWindowDimensions();
   const safeInitial = Math.max(0, Math.min(initialIndex, Math.max(0, uris.length - 1)));
   const [currentIndex, setCurrentIndex] = useState(safeInitial);
-  const [editingPin, setEditingPin] = useState(false);
-  const [viewerPin, setViewerPin] = useState<NormalizedPin | null>(pin ?? null);
-  const [draftPin, setDraftPin] = useState<NormalizedPin>(pin ?? { x: 0.5, y: 0.5 });
+  const [pinState, setPinState] = useState(() => createViewerPinState(pin));
   const [savingPin, setSavingPin] = useState(false);
   const [pinError, setPinError] = useState<string | null>(null);
   const [reduceMotion, setReduceMotion] = useState(false);
   const progress = useRef(new Animated.Value(0)).current;
   const flatListRef = useRef<FlatList<string>>(null);
+  const wasVisibleRef = useRef(false);
+  const viewerPin = pinState.committedPin;
+  const draftPin = pinState.draftPin;
+  const editingPin = pinState.editing;
   const pinIndex = pinPhotoIndex ?? initialIndex;
   const canEditPin = viewerAllowsPinEditing({ pin: viewerPin, hasSaveHandler: Boolean(onPinReposition), currentIndex, pinPhotoIndex: pinIndex });
   const cardHeight = Math.max(220, height - insets.top - insets.bottom - 170);
@@ -168,20 +178,27 @@ export function ImageViewerModal({
   }, []);
 
   useEffect(() => {
-    if (!visible) return;
+    if (!visible) {
+      wasVisibleRef.current = false;
+      return;
+    }
+    if (wasVisibleRef.current) return;
+    wasVisibleRef.current = true;
     setCurrentIndex(safeInitial);
-    setEditingPin(false);
-    setViewerPin(pin ?? null);
-    setDraftPin(pin ?? { x: 0.5, y: 0.5 });
+    setPinState(createViewerPinState(pin));
     setPinError(null);
     progress.setValue(reduceMotion ? 1 : 0);
     if (!reduceMotion) Animated.timing(progress, { toValue: 1, duration: 220, useNativeDriver: true }).start();
-  }, [pin, progress, reduceMotion, safeInitial, visible]);
+  }, [pin?.x, pin?.y, progress, reduceMotion, safeInitial, visible]);
+
+  useEffect(() => {
+    if (!visible) return;
+    setPinState((current) => syncIncomingViewerPin(current, pin));
+  }, [editingPin, pin?.x, pin?.y, visible]);
 
   const close = useCallback(() => {
     if (editingPin) {
-      setDraftPin(viewerPin ?? { x: 0.5, y: 0.5 });
-      setEditingPin(false);
+      setPinState((current) => cancelViewerPinEdit(current));
       setPinError(null);
       return;
     }
@@ -192,7 +209,7 @@ export function ImageViewerModal({
     Animated.timing(progress, { toValue: 0, duration: 180, useNativeDriver: true }).start(({ finished }) => {
       if (finished) onClose();
     });
-  }, [editingPin, onClose, progress, reduceMotion, viewerPin]);
+  }, [editingPin, onClose, progress, reduceMotion]);
 
   const savePin = async () => {
     if (!onPinReposition || savingPin) return;
@@ -200,8 +217,7 @@ export function ImageViewerModal({
     setPinError(null);
     try {
       await onPinReposition(draftPin.x, draftPin.y);
-      setViewerPin(draftPin);
-      setEditingPin(false);
+      setPinState((current) => commitViewerPinDraft(current));
     } catch (error) {
       setPinError(error instanceof Error ? error.message : "Could not save pin position.");
     } finally {
@@ -265,7 +281,7 @@ export function ImageViewerModal({
                 draftPin={draftPin}
                 pinColor={pinColor}
                 editingPin={editingPin && index === pinIndex}
-                onDraftPin={setDraftPin}
+                onDraftPin={(nextPin) => setPinState((current) => updateViewerPinDraft(current, nextPin))}
                 onBackdropPress={close}
                 onPermanentError={onPermanentError}
               />
@@ -284,7 +300,7 @@ export function ImageViewerModal({
                 </Pressable>
               </>
             ) : canEditPin ? (
-              <Pressable accessibilityRole="button" accessibilityLabel="Move item pin" onPress={() => { setDraftPin(viewerPin!); setEditingPin(true); }} style={[styles.movePin, { backgroundColor: colors.card, borderColor: colors.border }]}>
+              <Pressable accessibilityRole="button" accessibilityLabel="Move item pin" onPress={() => setPinState((current) => beginViewerPinEdit(current))} style={[styles.movePin, { backgroundColor: colors.card, borderColor: colors.border }]}>
                 <Feather name="move" size={16} color={colors.primary} />
                 <Text style={[styles.actionText, { color: colors.primary }]}>Move pin</Text>
               </Pressable>

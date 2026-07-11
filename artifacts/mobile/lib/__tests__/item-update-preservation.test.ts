@@ -51,6 +51,7 @@ test("explicit form fields update while unrelated metadata remains omitted", () 
     notes: "Receipt is in evidence",
     brandMaker: "Samsung",
     modelSeries: "QN90B",
+    conditionLabel: "Good",
     purchaseSource: "Harvey Norman",
     purchaseYearApprox: "2022",
     originalPurchasePrice: 1800,
@@ -58,9 +59,9 @@ test("explicit form fields update while unrelated metadata remains omitted", () 
   assert.equal(update.notes, "Receipt is in evidence");
   assert.equal(update.brand_maker, "Samsung");
   assert.equal(update.model_series, "QN90B");
+  assert.equal(update.condition_label, "Good");
   assert.equal(update.purchase_source, "Harvey Norman");
   assert.equal(update.purchase_year_approx, "2022");
   assert.equal(update.original_purchase_price, 1800);
-  assert.equal("condition_label" in update, false);
   assert.equal("price_source_type" in update, false);
 });
