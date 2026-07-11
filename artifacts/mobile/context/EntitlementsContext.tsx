@@ -6,8 +6,8 @@ import { useAuth } from "@/context/AuthContext";
 import { useAccountProfile } from "@/hooks/useAccountProfile";
 import {
   addCustomerInfoListener, billingGatesEnabled, buyPackage, clearBillingUser, configureBilling, hasActiveCustomerEntitlement,
-  loadCustomerInfo, loadOfferingWithStorefrontDiagnostics, resolveCustomerPlan, restoreBilling,
-  type BillingStorefrontDiagnostic, type CustomerInfo, type PurchasesOffering, type PurchasesPackage,
+  loadCustomerInfo, loadOffering, resolveCustomerPlan, restoreBilling,
+  type CustomerInfo, type PurchasesOffering, type PurchasesPackage,
 } from "@/lib/billing";
 import type { CoverlyBillingPlan } from "@/lib/billing-entitlements";
 
@@ -19,7 +19,6 @@ type EntitlementsValue = {
   isFree: boolean; isPlus: boolean; isFamily: boolean; isPaid: boolean;
   gatesEnabled: boolean; isLoading: boolean; isRefreshing: boolean; purchaseLoading: boolean;
   offering: PurchasesOffering | null; customerInfo: CustomerInfo | null; error: string | null;
-  offeringStorefrontDiagnostic: BillingStorefrontDiagnostic | null;
   isSubscriptionSyncPending: boolean;
   canCreateProperty: (currentCount: number) => boolean;
   canUseAiScan: boolean; canUseReplacementPricing: boolean; canExportClaimPack: boolean;
@@ -42,7 +41,6 @@ export function EntitlementsProvider({ children }: { children: React.ReactNode }
   const queryClient = useQueryClient();
   const [offering, setOffering] = useState<PurchasesOffering | null>(null);
   const [customerInfo, setCustomerInfo] = useState<CustomerInfo | null>(null);
-  const [offeringStorefrontDiagnostic, setOfferingStorefrontDiagnostic] = useState<BillingStorefrontDiagnostic | null>(null);
   const [purchaseLoading, setPurchaseLoading] = useState(false);
   const [isRefreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -85,11 +83,11 @@ export function EntitlementsProvider({ children }: { children: React.ReactNode }
     let removeCustomerInfoListener: (() => void) | null = null;
     if (!session?.user.id) {
       void clearBillingUser();
-      setOffering(null); setCustomerInfo(null); setOfferingStorefrontDiagnostic(null); setError(null);
+      setOffering(null); setCustomerInfo(null); setError(null);
       setPurchaseLoading(false); setRefreshing(false);
       return;
     }
-    setOffering(null); setCustomerInfo(null); setOfferingStorefrontDiagnostic(null); setError(null);
+    setOffering(null); setCustomerInfo(null); setError(null);
     void (async () => {
       const configured = await configureBilling(session.user.id);
       if (!configured.ok) { if (!cancelled) setError(configured.error); return; }
@@ -100,12 +98,9 @@ export function EntitlementsProvider({ children }: { children: React.ReactNode }
         if (cancelled) listener.value();
         else removeCustomerInfoListener = listener.value;
       }
-      const [offer, info] = await Promise.all([loadOfferingWithStorefrontDiagnostics(), loadCustomerInfo()]);
+      const [offer, info] = await Promise.all([loadOffering(), loadCustomerInfo()]);
       if (cancelled) return;
-      if (offer.ok) {
-        setOffering(offer.value.offering);
-        setOfferingStorefrontDiagnostic(offer.value.diagnostic);
-      } else setError(offer.error);
+      if (offer.ok) setOffering(offer.value); else setError(offer.error);
       if (info.ok) setCustomerInfo(info.value); else setError((current) => current ?? info.error);
     })();
     return () => { cancelled = true; removeCustomerInfoListener?.(); };
@@ -156,10 +151,10 @@ export function EntitlementsProvider({ children }: { children: React.ReactNode }
     effectivePlan: plan, subscriptionStatus, subscriptionPeriodEnd,
     isFree: !isPaid, isPlus: plan === "coverly_plus", isFamily: plan === "coverly_family", isPaid,
     gatesEnabled: billingGatesEnabled, isLoading: profileQuery.isLoading, isRefreshing, purchaseLoading,
-    offering, customerInfo, error, offeringStorefrontDiagnostic, isSubscriptionSyncPending, canCreateProperty, canUseAiScan: canUseMeteredAiFeatures,
+    offering, customerInfo, error, isSubscriptionSyncPending, canCreateProperty, canUseAiScan: canUseMeteredAiFeatures,
     canUseReplacementPricing: canUseMeteredAiFeatures, canExportClaimPack, shouldShowUpgradeFor, enforce,
     refreshEntitlements, purchasePackage, restorePurchases,
-  }), [plan, subscriptionStatus, subscriptionPeriodEnd, profileQuery.profile, profileQuery.isLoading, isRefreshing, purchaseLoading, offering, customerInfo, error, offeringStorefrontDiagnostic, isSubscriptionSyncPending, canCreateProperty, canExportClaimPack, shouldShowUpgradeFor, enforce, refreshEntitlements, purchasePackage, restorePurchases]);
+  }), [plan, subscriptionStatus, subscriptionPeriodEnd, profileQuery.profile, profileQuery.isLoading, isRefreshing, purchaseLoading, offering, customerInfo, error, isSubscriptionSyncPending, canCreateProperty, canExportClaimPack, shouldShowUpgradeFor, enforce, refreshEntitlements, purchasePackage, restorePurchases]);
   return <Context.Provider value={value}>{children}</Context.Provider>;
 }
 

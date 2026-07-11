@@ -69,9 +69,9 @@ export default function AccountScreen() {
   const initials = initialsSource.slice(0, 1).toUpperCase();
   const version = Constants.nativeAppVersion ?? Constants.expoConfig?.version ?? "Unknown";
   const build = Constants.nativeBuildVersion ?? (Platform.OS === "ios"
-    ? Constants.expoConfig?.ios?.buildNumber
+    ? Constants.platform?.ios?.buildNumber ?? Constants.expoConfig?.ios?.buildNumber
     : Platform.OS === "android"
-      ? Constants.expoConfig?.android?.versionCode?.toString()
+      ? Constants.platform?.android?.versionCode?.toString() ?? Constants.expoConfig?.android?.versionCode?.toString()
       : undefined);
 
   const openLegal = async (url: string | undefined, label: string) => {
