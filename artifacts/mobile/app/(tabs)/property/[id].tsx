@@ -52,6 +52,11 @@ import {
   needsReview,
 } from "@/lib/inventory-mappers";
 import { formatUploadFailure, uploadCoverPhoto } from "@/lib/photo-upload";
+import {
+  DUPLICATE_ROOM_NAME_MESSAGE,
+  formatRoomCreationError,
+  hasActiveRoomNameDuplicate,
+} from "@/lib/room-creation";
 import { supabase } from "@/lib/supabase";
 import type { InventoryFile, InventoryItem, InventoryRoom } from "@/types";
 
@@ -1690,6 +1695,7 @@ export default function PropertyDetailScreen() {
   const [addRoomType, setAddRoomType] = useState<string | null>(null);
   const [addRoomSaving, setAddRoomSaving] = useState(false);
   const [addRoomError, setAddRoomError] = useState<string | null>(null);
+  const addRoomInputRef = useRef<TextInput>(null);
   // Optimistic local state — holds the 1-hr signed displayUrl right after upload
   // so the hero shows immediately without waiting for a query refetch + URL resolution.
   const [localCoverUrl, setLocalCoverUrl] = useState<string | null>(null);
@@ -1898,6 +1904,11 @@ export default function PropertyDetailScreen() {
       return;
     }
     if (!session?.user.id) return;
+    if (hasActiveRoomNameDuplicate(rooms ?? [], trimmed)) {
+      setAddRoomError(DUPLICATE_ROOM_NAME_MESSAGE);
+      requestAnimationFrame(() => addRoomInputRef.current?.focus());
+      return;
+    }
     setAddRoomError(null);
     setAddRoomSaving(true);
     try {
@@ -1916,7 +1927,8 @@ export default function PropertyDetailScreen() {
         sort_order: (rooms?.length ?? 0) + 1,
       });
       if (error) {
-        setAddRoomError(error.message);
+        setAddRoomError(formatRoomCreationError(error));
+        requestAnimationFrame(() => addRoomInputRef.current?.focus());
         return;
       }
       await queryClient.invalidateQueries({ queryKey: ["rooms", id] });
@@ -1937,7 +1949,8 @@ export default function PropertyDetailScreen() {
         },
       });
     } catch (err) {
-      setAddRoomError(err instanceof Error ? err.message : "Failed to create room.");
+      setAddRoomError(formatRoomCreationError(err));
+      requestAnimationFrame(() => addRoomInputRef.current?.focus());
     } finally {
       setAddRoomSaving(false);
     }
@@ -2902,6 +2915,7 @@ export default function PropertyDetailScreen() {
                 ROOM NAME
               </Text>
               <TextInput
+                ref={addRoomInputRef}
                 value={addRoomName}
                 onChangeText={(t) => { setAddRoomName(t); setAddRoomError(null); }}
                 placeholder="e.g. Master Bedroom"

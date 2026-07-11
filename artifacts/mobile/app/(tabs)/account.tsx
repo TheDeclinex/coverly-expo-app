@@ -5,7 +5,7 @@ import * as Haptics from "expo-haptics";
 import { Stack, router, type Href } from "expo-router";
 import * as WebBrowser from "expo-web-browser";
 import React from "react";
-import { Alert, Platform, ScrollView, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Alert, Platform, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { AccountRow, AccountSection } from "@/components/AccountMenu";
@@ -31,12 +31,9 @@ export default function AccountScreen() {
   const { profile, isAdmin, isLoading, isError } = useAccountProfile();
   const {
     effectivePlan,
-    isSubscriptionSyncPending,
-    subscriptionStatus,
-    subscriptionPeriodEnd,
     purchaseLoading,
     restorePurchases,
-    gatesEnabled,
+    error: billingError,
   } = useEntitlements();
   const usageQuery = useQuery({
     queryKey: ["usage-allowances", session?.user.id],
@@ -51,20 +48,7 @@ export default function AccountScreen() {
   const entitlementPlanLabel = effectivePlan === "coverly_family" ? "Family" : effectivePlan === "coverly_plus" ? "Plus" : "Free";
   const planLabel = isLoading && effectivePlan === "free"
     ? "Loading…"
-    : isSubscriptionSyncPending
-      ? entitlementPlanLabel
-      : profile?.plan === "Tester"
-        ? "Tester"
-        : entitlementPlanLabel;
-  const planStatusLabel = subscriptionStatus ?? (effectivePlan === "free" ? "Free" : "Active");
-  const planStatusHelper = subscriptionPeriodEnd
-    ? `Renews or expires ${new Date(subscriptionPeriodEnd).toLocaleDateString("en-NZ")}`
-    : isSubscriptionSyncPending
-      ? "Purchase confirmed. Updating your account…"
-      : effectivePlan === "free"
-      ? "Free plan"
-      : "Tester or store-managed access";
-  const planStatusDetail = planStatusLabel === planLabel ? planStatusHelper : `${planStatusLabel} · ${planStatusHelper}`;
+    : entitlementPlanLabel;
   const initialsSource = displayName ?? (email === "Email unavailable" ? "?" : email);
   const initials = initialsSource.slice(0, 1).toUpperCase();
   const version = Constants.nativeAppVersion ?? Constants.expoConfig?.version ?? "Unknown";
@@ -169,35 +153,17 @@ export default function AccountScreen() {
 
         <ClaimPacksSection onOpen={() => router.push("/(tabs)/claim-packs" as Href)} />
 
-        <AccountSection title="Subscription & usage">
-          <AccountRow icon="credit-card" title="Current plan" subtitle={planStatusDetail} value={planLabel} />
-          <AccountRow icon="arrow-up-circle" title="Change plan" subtitle="View access options for this tester build." onPress={() => router.push("/upgrade" as Href)} />
-          <AccountRow
-            icon="refresh-cw"
-            title="Restore purchases"
-            subtitle="Use after reinstalling or signing in again if store purchases are enabled."
-            value={purchaseLoading ? "Restoring…" : undefined}
-            disabled={purchaseLoading}
-            onPress={() => void restore()}
-            last={!isAdmin}
-          />
-          {isAdmin ? (
-            <AccountRow
-              icon="list"
-              title="Access level"
-              subtitle={profile?.plan === "Free" ? "Free plan limits are visible in the app" : "AI features included - fair use applies"}
-              value={gatesEnabled ? "Standard" : "Preview"}
-              last
-            />
-          ) : null}
-        </AccountSection>
-
-        <UsageAllowanceCard
+        <PlanUsageSection
+          planLabel={planLabel}
+          effectivePlan={effectivePlan}
           allowances={usageQuery.data ?? []}
           isLoading={usageQuery.isLoading}
           isError={usageQuery.isError}
           isAdmin={isAdmin}
-          onUpgrade={() => router.push("/upgrade" as Href)}
+          billingUnavailable={!!billingError}
+          purchaseLoading={purchaseLoading}
+          onManagePlan={() => router.push("/upgrade" as Href)}
+          onRestore={() => void restore()}
         />
 
         <AccountSection title="Support & help">
@@ -281,93 +247,94 @@ function formatResetDate(value: string | null): string {
   return date.toLocaleDateString("en-NZ", { day: "numeric", month: "short" });
 }
 
-function featureLabel(feature: UsageAllowance["feature"]): string {
-  return feature === "ai_scan" ? "AI scans" : "Replacement price searches";
-}
-
-function featureDescription(allowance: UsageAllowance, isLimited: boolean): string {
-  if (!isLimited) return "Included with your plan · Fair use applies";
-  const remaining = allowance.remainingUnits ?? Math.max(0, allowance.limitUnits - allowance.usedUnits - allowance.reservedUnits);
-  return `${allowance.usedUnits} / ${allowance.limitUnits} used this month · ${remaining} remaining`;
-}
-
-function UsageAllowanceCard({
+function PlanUsageSection({
+  planLabel,
+  effectivePlan,
   allowances,
   isLoading,
   isError,
   isAdmin,
-  onUpgrade,
+  billingUnavailable,
+  purchaseLoading,
+  onManagePlan,
+  onRestore,
 }: {
+  planLabel: string;
+  effectivePlan: "free" | "coverly_plus" | "coverly_family";
   allowances: UsageAllowance[];
   isLoading: boolean;
   isError: boolean;
   isAdmin: boolean;
-  onUpgrade: () => void;
+  billingUnavailable: boolean;
+  purchaseLoading: boolean;
+  onManagePlan: () => void;
+  onRestore: () => void;
 }) {
   const colors = useColors();
-  const aiScans = allowances.find((row) => row.feature === "ai_scan") ?? null;
-  const replacementPricing = allowances.find((row) => row.feature === "replacement_pricing") ?? null;
-  const resetAt = aiScans?.resetAt ?? replacementPricing?.resetAt ?? null;
-  const isLimited = !isAdmin && allowances.some((row) => row.isLimited);
-  const hasEmptyAllowance = !isAdmin && allowances.some((row) => usageWarningLevel(row) === "empty");
-  const hasLowAllowance = !isAdmin && allowances.some((row) => usageWarningLevel(row) === "low");
-
-  let helper = "Loading your monthly usage…";
-  if (isError) helper = "Usage allowance could not be loaded. Your account access is unchanged.";
-  else if (!isLoading && allowances.length === 0) helper = "Usage allowance is not available yet.";
-  else if (!isLimited || isAdmin) helper = "AI scans and replacement pricing are included with your plan. Fair use applies.";
-  else if (hasEmptyAllowance) helper = "One of your Free monthly allowances is used up. Manual inventory tools are still available.";
-  else if (hasLowAllowance) helper = "You are getting close to one of your Free monthly limits.";
-  else helper = `Free allowances reset on ${formatResetDate(resetAt)}.`;
+  const rows = allowances.filter((row) => row.feature === "ai_scan" || row.feature === "replacement_pricing");
+  const resetAt = rows[0]?.resetAt ?? null;
+  const included = effectivePlan !== "free" || isAdmin || (rows.length > 0 && rows.every((row) => !row.isLimited));
+  const planName = planLabel.startsWith("Loading") ? planLabel : `Coverly ${planLabel}`;
 
   return (
-    <View style={[styles.usageCard, { backgroundColor: colors.card, borderColor: colors.border, borderRadius: colors.radius }]}>
-      <View style={styles.usageHeader}>
-        <View style={[styles.usageIcon, { backgroundColor: colors.accent }]}>
-          <Feather name="activity" size={17} color={colors.primary} />
+    <AccountSection title="Plan & usage">
+      <View style={styles.planUsageContent}>
+        <View style={styles.planSummary}>
+          <Text style={[styles.planName, { color: colors.foreground }]}>{planName}</Text>
+          <Text style={[styles.planDescription, { color: colors.mutedForeground }]}>
+            {included
+              ? "AI scans and replacement pricing included. Fair use applies."
+              : "Monthly AI scans and price searches are included up to your Free plan limits."}
+          </Text>
         </View>
-        <View style={styles.usageHeaderCopy}>
-          <Text style={[styles.usageTitle, { color: colors.foreground }]}>Monthly usage</Text>
-          <Text style={[styles.usageHelper, { color: isError ? colors.warning : colors.mutedForeground }]}>{helper}</Text>
-        </View>
-      </View>
 
-      {isLoading ? (
-        <Text style={[styles.usagePlaceholder, { color: colors.mutedForeground }]}>Checking allowances…</Text>
-      ) : isError || allowances.length === 0 ? null : (
-        <View style={styles.usageRows}>
-          {[aiScans, replacementPricing].filter((row): row is UsageAllowance => row !== null).map((row) => {
-            const rowIsLimited = !isAdmin && row.isLimited;
-            const warning = rowIsLimited ? usageWarningLevel(row) : "none";
-            const tone = warning === "empty" ? colors.destructive : warning === "low" ? colors.warning : colors.foreground;
-            return (
-              <View key={row.feature} style={[styles.usageRow, { borderTopColor: colors.border }]}>
-                <View style={styles.usageRowCopy}>
-                  <Text style={[styles.usageRowTitle, { color: colors.foreground }]}>{featureLabel(row.feature)}</Text>
-                  <Text style={[styles.usageRowSubtitle, { color: tone }]}>{featureDescription(row, rowIsLimited)}</Text>
-                </View>
-                {rowIsLimited ? (
-                  <Text style={[styles.usagePill, { color: tone, backgroundColor: warning === "none" ? colors.secondary : colors.accent }]}>
-                    {row.remainingUnits ?? 0} left
+        <Pressable accessibilityRole="button" onPress={onManagePlan} style={({ pressed }) => [styles.manageRow, { borderColor: colors.border, opacity: pressed ? 0.72 : 1 }]}>
+          <Text style={[styles.manageText, { color: colors.foreground }]}>{effectivePlan === "free" ? "Upgrade plan" : "Manage plan"}</Text>
+          <Feather name="chevron-right" size={17} color={colors.mutedForeground} />
+        </Pressable>
+
+        <Text style={[styles.usageHeading, { color: colors.mutedForeground }]}>Usage this month</Text>
+        {isLoading ? (
+          <View style={styles.usageLoading}>
+            <ActivityIndicator size="small" color={colors.primary} />
+            <Text style={[styles.usagePlaceholder, { color: colors.mutedForeground }]}>Checking usage…</Text>
+          </View>
+        ) : isError || rows.length === 0 ? (
+          <Text style={[styles.usagePlaceholder, { color: isError ? colors.warning : colors.mutedForeground }]}>Usage information is currently unavailable.</Text>
+        ) : (
+          <View style={styles.usageRows}>
+            {rows.map((row) => {
+              const limited = !included && row.isLimited;
+              const warning = limited ? usageWarningLevel(row) : "none";
+              const tone = warning === "empty" ? colors.destructive : warning === "low" ? colors.warning : colors.foreground;
+              return (
+                <View key={row.feature} style={styles.compactUsageRow}>
+                  <Text style={[styles.usageRowTitle, { color: colors.foreground }]}>{row.feature === "ai_scan" ? "AI scans" : "Price searches"}</Text>
+                  <Text style={[styles.usageValue, { color: limited ? tone : colors.primary }]}>
+                    {limited ? `${row.usedUnits} / ${row.limitUnits} used · ${row.remainingUnits ?? 0} left` : "Included"}
                   </Text>
-                ) : (
-                  <Text style={[styles.usagePill, { color: colors.primary, backgroundColor: colors.accent }]}>Included</Text>
-                )}
-              </View>
-            );
-          })}
-          {isLimited ? (
-            <Text style={[styles.usageReset, { color: colors.mutedForeground }]}>Resets {formatResetDate(resetAt)}</Text>
-          ) : null}
-        </View>
-      )}
+                </View>
+              );
+            })}
+            {!included ? <Text style={[styles.usageReset, { color: colors.mutedForeground }]}>Resets {formatResetDate(resetAt)}</Text> : null}
+          </View>
+        )}
 
-      {isLimited && hasEmptyAllowance ? (
-        <Text onPress={onUpgrade} style={[styles.usageUpgrade, { color: colors.primary }]}>
-          View plan options
-        </Text>
-      ) : null}
-    </View>
+        {billingUnavailable ? <Text style={[styles.billingUnavailable, { color: colors.warning }]}>Store services are currently unavailable.</Text> : null}
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Restore purchases"
+          accessibilityHint="Restore a previous App Store or Google Play purchase."
+          disabled={purchaseLoading}
+          onPress={onRestore}
+          style={({ pressed }) => [styles.restoreAction, { opacity: purchaseLoading ? 0.55 : pressed ? 0.72 : 1 }]}
+        >
+          {purchaseLoading ? <ActivityIndicator size="small" color={colors.primary} /> : null}
+          <Text style={[styles.restoreText, { color: colors.primary }]}>{purchaseLoading ? "Restoring purchases…" : "Restore purchases"}</Text>
+        </Pressable>
+        <Text style={[styles.restoreHelper, { color: colors.mutedForeground }]}>Restore a previous App Store or Google Play purchase.</Text>
+      </View>
+    </AccountSection>
   );
 }
 
@@ -384,19 +351,22 @@ const styles = StyleSheet.create({
   badgeText: { fontSize: 11, fontFamily: "Inter_600SemiBold" },
   version: { fontSize: 11, fontFamily: "Inter_400Regular" },
   profileWarning: { fontSize: 11, fontFamily: "Inter_400Regular" },
-  usageCard: { borderWidth: 1, padding: 16, gap: 13 },
-  usageHeader: { flexDirection: "row", gap: 11, alignItems: "flex-start" },
-  usageIcon: { width: 34, height: 34, borderRadius: 17, alignItems: "center", justifyContent: "center" },
-  usageHeaderCopy: { flex: 1, gap: 3 },
-  usageTitle: { fontSize: 14, fontFamily: "Inter_700Bold" },
-  usageHelper: { fontSize: 12, lineHeight: 17, fontFamily: "Inter_400Regular" },
+  planUsageContent: { paddingHorizontal: 16, paddingBottom: 14, gap: 12 },
+  planSummary: { gap: 4 },
+  planName: { fontSize: 16, fontFamily: "Inter_700Bold" },
+  planDescription: { fontSize: 12, lineHeight: 17, fontFamily: "Inter_400Regular" },
+  manageRow: { minHeight: 44, borderTopWidth: StyleSheet.hairlineWidth, borderBottomWidth: StyleSheet.hairlineWidth, flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  manageText: { fontSize: 14, fontFamily: "Inter_600SemiBold" },
+  usageHeading: { fontSize: 11, fontFamily: "Inter_600SemiBold", letterSpacing: 0.5 },
+  usageLoading: { flexDirection: "row", alignItems: "center", gap: 8 },
+  compactUsageRow: { minHeight: 30, flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12 },
+  usageValue: { flexShrink: 1, textAlign: "right", fontSize: 12, fontFamily: "Inter_600SemiBold" },
+  billingUnavailable: { fontSize: 11, lineHeight: 16, fontFamily: "Inter_400Regular" },
+  restoreAction: { alignSelf: "flex-start", minHeight: 28, flexDirection: "row", alignItems: "center", gap: 7 },
+  restoreText: { fontSize: 12, fontFamily: "Inter_600SemiBold" },
+  restoreHelper: { marginTop: -9, fontSize: 10, lineHeight: 15, fontFamily: "Inter_400Regular" },
   usagePlaceholder: { fontSize: 12, fontFamily: "Inter_400Regular" },
   usageRows: { gap: 0 },
-  usageRow: { borderTopWidth: StyleSheet.hairlineWidth, paddingVertical: 10, flexDirection: "row", gap: 10, alignItems: "center" },
-  usageRowCopy: { flex: 1, gap: 3 },
   usageRowTitle: { fontSize: 13, fontFamily: "Inter_600SemiBold" },
-  usageRowSubtitle: { fontSize: 11, lineHeight: 16, fontFamily: "Inter_400Regular" },
-  usagePill: { overflow: "hidden", borderRadius: 999, paddingHorizontal: 9, paddingVertical: 4, fontSize: 11, fontFamily: "Inter_700Bold" },
   usageReset: { marginTop: 2, fontSize: 11, fontFamily: "Inter_400Regular" },
-  usageUpgrade: { alignSelf: "flex-start", fontSize: 12, fontFamily: "Inter_700Bold" },
 });

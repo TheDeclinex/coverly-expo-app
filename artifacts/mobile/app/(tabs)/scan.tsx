@@ -53,6 +53,11 @@ import {
   type UploadFailure,
 } from "@/lib/photo-upload";
 import { markRecentItem, markRecentItems } from "@/lib/recent-items";
+import {
+  DUPLICATE_ROOM_NAME_MESSAGE,
+  formatRoomCreationError,
+  hasActiveRoomNameDuplicate,
+} from "@/lib/room-creation";
 import { supabase } from "@/lib/supabase";
 import type { InventoryFile, InventoryItem, InventoryRoom } from "@/types";
 import type {
@@ -571,6 +576,7 @@ export default function ScanScreen() {
   const [selectedFileId, setSelectedFileId] = useState(paramFileId ?? "");
   const [selectedRoomId, setSelectedRoomId] = useState(paramRoomId ?? "");
   const [newRoomName, setNewRoomName] = useState("");
+  const roomNameInputRef = useRef<TextInput>(null);
   const [images, setImages] = useState<ScanEncodedImage[]>([]);
   const [scanStatus, setScanStatus] = useState<ScanStatus>("idle");
   const [detectedItems, setDetectedItems] = useState<ScanDetectedItem[]>([]);
@@ -772,19 +778,34 @@ export default function ScanScreen() {
     if (!selectedFileId) { setScanError("Select a property first."); return; }
     if (!trimmedName) { setScanError("Enter a room name before scanning."); return; }
     if (!session?.user.id) { setScanError("You must be signed in to create a room."); return; }
+    if (hasActiveRoomNameDuplicate(rooms ?? [], trimmedName)) {
+      setScanError(DUPLICATE_ROOM_NAME_MESSAGE);
+      requestAnimationFrame(() => roomNameInputRef.current?.focus());
+      return;
+    }
 
     const roomId = "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
       const r = (Math.random() * 16) | 0;
       return (c === "x" ? r : (r & 0x3) | 0x8).toString(16);
     });
-    const { error: roomErr } = await supabase.from("inventory_rooms").insert({
-      id: roomId,
-      file_id: selectedFileId,
-      user_id: session.user.id,
-      name: trimmedName,
-      sort_order: (rooms?.length ?? 0) + 1,
-    });
-    if (roomErr) { setScanError(`Could not create room: ${roomErr.message}`); return; }
+    try {
+      const { error: roomErr } = await supabase.from("inventory_rooms").insert({
+        id: roomId,
+        file_id: selectedFileId,
+        user_id: session.user.id,
+        name: trimmedName,
+        sort_order: (rooms?.length ?? 0) + 1,
+      });
+      if (roomErr) {
+        setScanError(formatRoomCreationError(roomErr));
+        requestAnimationFrame(() => roomNameInputRef.current?.focus());
+        return;
+      }
+    } catch (error) {
+      setScanError(formatRoomCreationError(error));
+      requestAnimationFrame(() => roomNameInputRef.current?.focus());
+      return;
+    }
 
     setSelectedRoomId(roomId);
     setScanError(null);
@@ -2494,6 +2515,7 @@ export default function ScanScreen() {
                   subtitle="This scan will save items into the room you create."
                 />
                 <TextInput
+                  ref={roomNameInputRef}
                   value={newRoomName}
                   onChangeText={setNewRoomName}
                   placeholder="e.g. Living Room, Kitchen"
