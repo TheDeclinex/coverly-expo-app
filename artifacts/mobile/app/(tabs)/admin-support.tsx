@@ -1,12 +1,12 @@
 import { Feather } from "@expo/vector-icons";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Redirect, Stack, type Href } from "expo-router";
-import * as WebBrowser from "expo-web-browser";
 import React from "react";
 import { ActivityIndicator, Alert, Modal, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { LoadingState } from "@/components/LoadingState";
+import { ImageViewerModal } from "@/components/ImageViewerModal";
 import { useAuth } from "@/context/AuthContext";
 import { useAccountProfile } from "@/hooks/useAccountProfile";
 import { useColors } from "@/hooks/useColors";
@@ -246,6 +246,7 @@ function FeedbackTicketModal({
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const [openingScreenshot, setOpeningScreenshot] = React.useState(false);
+  const [screenshotViewerUri, setScreenshotViewerUri] = React.useState<string | null>(null);
   const [technicalOpen, setTechnicalOpen] = React.useState(false);
 
   React.useEffect(() => {
@@ -257,7 +258,7 @@ function FeedbackTicketModal({
     setOpeningScreenshot(true);
     try {
       const signedUrl = await createFeedbackScreenshotSignedUrl(report.screenshot_url);
-      await WebBrowser.openBrowserAsync(signedUrl);
+      setScreenshotViewerUri(signedUrl);
     } catch (error) {
       if (__DEV__) console.warn("[adminFeedback] screenshot open failed", { error: serializeError(error) });
       Alert.alert("Couldn't open screenshot", "Please try again.");
@@ -271,6 +272,7 @@ function FeedbackTicketModal({
     : null;
 
   return (
+    <>
     <Modal visible={visible} animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
       <View style={[styles.modalRoot, { backgroundColor: colors.background, paddingTop: insets.top + 10 }]}>
         <View style={[styles.modalHeader, { borderBottomColor: colors.border }]}>
@@ -394,6 +396,13 @@ function FeedbackTicketModal({
         ) : null}
       </View>
     </Modal>
+    <ImageViewerModal
+      uris={screenshotViewerUri ? [screenshotViewerUri] : []}
+      visible={!!screenshotViewerUri}
+      title="Feedback screenshot"
+      onClose={() => setScreenshotViewerUri(null)}
+    />
+    </>
   );
 }
 

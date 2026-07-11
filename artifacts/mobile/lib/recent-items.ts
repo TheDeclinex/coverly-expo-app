@@ -1,20 +1,20 @@
-const RECENT_ITEM_TTL_MS = 5500;
-const recentItemExpiries = new Map<string, number>();
+const pendingRoomBatches = new Map<string, Set<string>>();
 
-export function markRecentItem(itemId: string): void {
-  recentItemExpiries.set(itemId, Date.now() + RECENT_ITEM_TTL_MS);
+/** Stage exactly one newly scanned batch for the next Room screen focus. */
+export function stageRecentItemBatch(roomId: string, itemIds: string[]): void {
+  pendingRoomBatches.set(roomId, new Set(itemIds.filter(Boolean)));
 }
 
-export function markRecentItems(itemIds: string[]): void {
-  for (const itemId of itemIds) markRecentItem(itemId);
+/** Consume a staged batch once so refreshes cannot recreate New badges. */
+export function takeRecentItemBatch(roomId: string): Set<string> | null {
+  const batch = pendingRoomBatches.get(roomId);
+  if (!batch) return null;
+  pendingRoomBatches.delete(roomId);
+  return new Set(batch);
 }
 
-export function isRecentItem(itemId: string): boolean {
-  const expiry = recentItemExpiries.get(itemId);
-  if (!expiry) return false;
-  if (expiry <= Date.now()) {
-    recentItemExpiries.delete(itemId);
-    return false;
-  }
-  return true;
+export function withoutRecentItem(itemIds: ReadonlySet<string>, itemId: string): Set<string> {
+  const next = new Set(itemIds);
+  next.delete(itemId);
+  return next;
 }

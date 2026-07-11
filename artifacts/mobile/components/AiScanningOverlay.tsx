@@ -8,8 +8,9 @@
  * the scan screen its own premium AI identity.
  */
 
+import { Feather } from "@expo/vector-icons";
 import React, { useEffect, useState } from "react";
-import { Dimensions, StyleSheet, Text, View } from "react-native";
+import { Dimensions, Pressable, StyleSheet, Text, View } from "react-native";
 import Animated, {
   Easing,
   useAnimatedStyle,
@@ -51,8 +52,10 @@ const CORNERS = [
 
 export function AiScanningOverlay({
   images,
+  onCancel,
 }: {
   images: ScanEncodedImage[];
+  onCancel: () => void;
 }) {
   const [statusIdx, setStatusIdx] = useState(0);
   const [photoIdx, setPhotoIdx] = useState(0);
@@ -141,6 +144,16 @@ export function AiScanningOverlay({
 
   return (
     <View style={styles.container}>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel="Cancel scan"
+        onPress={onCancel}
+        hitSlop={10}
+        style={({ pressed }) => [styles.cancelButton, { opacity: pressed ? 0.7 : 1 }]}
+      >
+        <Feather name="x" size={20} color="#F8FAFC" />
+        <Text style={styles.cancelText}>Cancel</Text>
+      </Pressable>
 
       {/* ── AI badge ────────────────────────────────────────────────────────── */}
       <View style={styles.badge}>
@@ -245,6 +258,20 @@ function PulsingDot() {
 }
 
 const styles = StyleSheet.create({
+  cancelButton: {
+    position: "absolute",
+    zIndex: 2,
+    top: 52,
+    right: 18,
+    minHeight: 40,
+    paddingHorizontal: 12,
+    borderRadius: 20,
+    backgroundColor: "rgba(15, 23, 42, 0.72)",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  cancelText: { color: "#F8FAFC", fontSize: 14, fontFamily: "Inter_600SemiBold" },
   container: {
     flex: 1,
     backgroundColor: "#0D1117",

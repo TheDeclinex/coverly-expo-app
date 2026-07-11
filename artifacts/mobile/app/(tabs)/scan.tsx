@@ -52,7 +52,7 @@ import {
   uploadScanPhoto,
   type UploadFailure,
 } from "@/lib/photo-upload";
-import { markRecentItem, markRecentItems } from "@/lib/recent-items";
+import { stageRecentItemBatch } from "@/lib/recent-items";
 import { pinMarkerPosition } from "@/lib/pin-position";
 import {
   DUPLICATE_ROOM_NAME_MESSAGE,
@@ -121,7 +121,7 @@ const SCAN_MODES: ScanModeCard[] = [
     icon: "video",
     title: "Video room scan",
     subtitle: VIDEO_SCAN_LIMIT_COPY,
-    creditLabel: `First ${VIDEO_SCAN_USED_SECONDS} seconds`,
+    creditLabel: `First ${VIDEO_SCAN_USED_SECONDS} seconds · 3 credits`,
   },
 ];
 
@@ -603,7 +603,9 @@ export default function ScanScreen() {
   const aiScanEntitlementCheckedRef = useRef(false);
   const videoProcessingRef = useRef<{ key: string; sessionId: number } | null>(null);
   const videoProcessingSessionRef = useRef(0);
+  const scanAttemptRef = useRef(0);
   const saveAllInFlightRef = useRef(false);
+  const completionNavigationRef = useRef(false);
   const restoredAndroidScanStateRef = useRef(false);
 
   useEffect(() => () => {
@@ -746,6 +748,10 @@ export default function ScanScreen() {
   }, [paramRoomId, rooms, selectedFileId, selectedRoomId]);
 
   const clearCaptureState = () => {
+    scanAttemptRef.current += 1;
+    videoProcessingSessionRef.current += 1;
+    videoProcessingRef.current = null;
+    completionNavigationRef.current = false;
     if (multiPhotoCameraTimerRef.current) {
       clearTimeout(multiPhotoCameraTimerRef.current);
       multiPhotoCameraTimerRef.current = null;
@@ -755,6 +761,7 @@ export default function ScanScreen() {
     pendingMultiPhotoCameraRef.current = false;
     setSelectedMode(null);
     setImages([]);
+    setScanStatus("idle");
     setScanError(null);
     setCompatibilityPrompt(null);
     setLimitModal(null);
@@ -1024,6 +1031,7 @@ export default function ScanScreen() {
         maxFrames: MAX_VIDEO_SCAN_FRAMES,
       });
       const frames = await extractVideoFrames(asset.uri, asset.duration);
+      if (videoProcessingRef.current?.sessionId !== sessionId) return;
       scanLog("video frame extraction completed", {
         sessionId,
         frameCount: frames.length,
@@ -1325,6 +1333,8 @@ export default function ScanScreen() {
     const validationError = validateScanInput(input);
     if (validationError) { setScanError(validationError); return; }
 
+    const scanAttemptId = scanAttemptRef.current + 1;
+    scanAttemptRef.current = scanAttemptId;
     setScanStatus("scanning");
     void persistAndroidScanState("scan_started").catch((error) => {
       scanLog("android scan state persist failed", { message: errorMessage(error) });
@@ -1333,7 +1343,9 @@ export default function ScanScreen() {
     let result;
     try {
       result = await runAiScan(input);
+      if (scanAttemptRef.current !== scanAttemptId) return;
     } catch (error) {
+      if (scanAttemptRef.current !== scanAttemptId) return;
       const message = error instanceof Error ? error.message : "Scan failed. Please try again.";
       const expectedNetworkFailure = /timed out|network request failed|network request timed out|failed to fetch/i.test(message);
       if (__DEV__ && !expectedNetworkFailure) console.error("[Scan] unexpected scan failure", error);
@@ -1411,7 +1423,7 @@ export default function ScanScreen() {
       setActiveSourcePhotoIdx(0);
       setActivePinIndex(null);
       setDetectedItems(itemsWithThumbs);
-      setScanStatus("saving");
+      setScanStatus("auto_saving");
       setCompatibilityPrompt(null);
       void clearAndroidScanState("scan_auto_saving");
       await saveDetectedItems(itemsWithThumbs, "auto");
@@ -1568,7 +1580,7 @@ export default function ScanScreen() {
       setScanSaveError(`Failed to save "${item.name}": ${error.message}`);
     } else {
       void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-      markRecentItem(payload.id);
+      stageRecentItemBatch(selectedRoomId, [payload.id]);
       showToast(`${item.name} added`);
       invalidateRoomQueries();
       setDetectedItems((prev) => prev.filter((_, i) => i !== index));
@@ -1581,10 +1593,10 @@ export default function ScanScreen() {
     trigger: "auto" | "review" = "review",
   ) => {
     if (!selectedFileId || !selectedRoomId) return;
-    if (saveAllInFlightRef.current || scanStatus === "saving") return;
+    if (saveAllInFlightRef.current || (trigger === "review" && scanStatus === "saving")) return;
 
     saveAllInFlightRef.current = true;
-    setScanStatus("saving");
+    setScanStatus(trigger === "auto" ? "auto_saving" : "saving");
     setScanSaveError(null);
     setPartialFailures([]);
 
@@ -1723,7 +1735,7 @@ export default function ScanScreen() {
     if (failures.length > 0) {
       // Keep unsaved items in review; surface partial failure list
       if (savedItemIds.length > 0) {
-        markRecentItems(savedItemIds);
+        stageRecentItemBatch(selectedRoomId, savedItemIds);
         showToast(`${savedItemIds.length} item${savedItemIds.length === 1 ? "" : "s"} saved`);
       }
       setDetectedItems(itemsToSave.filter((_, i) => !savedIndices.includes(i)));
@@ -1738,22 +1750,22 @@ export default function ScanScreen() {
     }
 
     void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    markRecentItems(savedItemIds);
+    stageRecentItemBatch(selectedRoomId, savedItemIds);
     showToast(`${savedItemIds.length} item${savedItemIds.length === 1 ? "" : "s"} added to ${getDestRoomName() ?? "room"}`);
-    setScanStatus("done");
-    setDetectedItems([]);
-
     const roomName = getDestRoomName() ?? "Room";
-    router.replace({
-      pathname: "/(tabs)/room/[id]",
-      params: {
-        id: selectedRoomId,
-        name: roomName,
-        fileId: selectedFileId,
-        fileName: paramFileName ?? "Property",
-        addedCount: String(savedItemIds.length),
-      },
-    });
+    if (!completionNavigationRef.current) {
+      completionNavigationRef.current = true;
+      router.replace({
+        pathname: "/(tabs)/room/[id]",
+        params: {
+          id: selectedRoomId,
+          name: roomName,
+          fileId: selectedFileId,
+          fileName: paramFileName ?? "Property",
+          addedCount: String(savedItemIds.length),
+        },
+      });
+    }
     scanLog("save completed", {
       stage: "scan-review-save",
       mode: trigger === "auto" ? "auto-save" : "batch",
@@ -1802,6 +1814,8 @@ export default function ScanScreen() {
   };
 
   const goBackToRoom = () => {
+    if (completionNavigationRef.current) return;
+    completionNavigationRef.current = true;
     if (!selectedRoomId) {
       if (selectedFileId) {
         router.replace({
@@ -1824,6 +1838,10 @@ export default function ScanScreen() {
     });
   };
 
+  const returnToScanTypeSelection = () => {
+    clearCaptureState();
+  };
+
   // ── Confidence badge helpers ─────────────────────────────────────────────────
 
   const confidenceBadgeStyle = (confidence: string | null | undefined) => {
@@ -1835,6 +1853,28 @@ export default function ScanScreen() {
   };
 
   // ── Review screen ────────────────────────────────────────────────────────────
+
+  if (scanStatus === "auto_saving") {
+    return (
+      <>
+        <Stack.Screen options={{ title: "Saving items…", headerShown: false }} />
+        <View style={[styles.preparingScreen, { backgroundColor: colors.background }]}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Back to room"
+            onPress={goBackToRoom}
+            style={styles.preparingCancelButton}
+          >
+            <Feather name="x" size={18} color={colors.primary} />
+            <Text style={[styles.preparingCancelText, { color: colors.primary }]}>Back to room</Text>
+          </Pressable>
+          <ActivityIndicator color={colors.primary} />
+          <Text style={[styles.preparingTitle, { color: colors.foreground }]}>Saving items</Text>
+          <Text style={[styles.preparingText, { color: colors.mutedForeground }]}>Adding detected items to your room…</Text>
+        </View>
+      </>
+    );
+  }
 
   if ((scanStatus === "reviewing" || scanStatus === "saving") && detectedItems.length === 0) {
     return (
@@ -1954,7 +1994,7 @@ export default function ScanScreen() {
                       borderRadius: 10, overflow: "hidden",
                       backgroundColor: colors.secondary,
                     }}>
-                      <ExpandableImage uri={sourceUri} style={{ width: PHOTO_W, height: PHOTO_H }} contentFit="cover" />
+                      <ExpandableImage uri={sourceUri} style={{ width: PHOTO_W, height: PHOTO_H }} contentFit="cover" viewerTitle="Scan source photo" />
                       {/* Numbered pin markers */}
                       {visiblePins.map(({ item, idx }) => {
                         const position = pinMarkerPosition({
@@ -2083,6 +2123,7 @@ export default function ScanScreen() {
                       placeholderIconSize={18}
                       placeholderIconColor={colors.border}
                       placeholderBackgroundColor={colors.secondary}
+                      viewerTitle={item.name}
                     />
                     {/* Pin number badge — only shown when item has a pin */}
                     {item.pin != null && (
@@ -2387,7 +2428,7 @@ export default function ScanScreen() {
     return (
       <>
         <Stack.Screen options={{ title: "Scanning…", headerShown: false }} />
-        <AiScanningOverlay images={images} />
+        <AiScanningOverlay images={images} onCancel={returnToScanTypeSelection} />
       </>
     );
   }
@@ -2397,6 +2438,15 @@ export default function ScanScreen() {
       <>
         <Stack.Screen options={{ title: "Preparing video…", headerShown: false }} />
         <View style={[styles.preparingScreen, { backgroundColor: colors.background }]}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Cancel video preparation"
+            onPress={returnToScanTypeSelection}
+            style={styles.preparingCancelButton}
+          >
+            <Feather name="x" size={18} color={colors.primary} />
+            <Text style={[styles.preparingCancelText, { color: colors.primary }]}>Cancel</Text>
+          </Pressable>
           <ActivityIndicator color={colors.primary} />
           <Text style={[styles.preparingTitle, { color: colors.foreground }]}>Preparing video frames</Text>
           <Text style={[styles.preparingText, { color: colors.mutedForeground }]}>
@@ -2797,6 +2847,21 @@ export default function ScanScreen() {
                   <Feather name="image" size={14} color="#991B1B" />
                   <Text style={[styles.errorActionText, { color: "#991B1B" }]}>Choose from gallery</Text>
                 </Pressable>
+                <Pressable
+                  onPress={returnToScanTypeSelection}
+                  style={({ pressed }) => [
+                    styles.errorActionButton,
+                    {
+                      backgroundColor: colors.card,
+                      borderColor: colors.border,
+                      borderRadius: colors.radius,
+                      opacity: pressed ? 0.76 : 1,
+                    },
+                  ]}
+                >
+                  <Feather name="x" size={14} color={colors.primary} />
+                  <Text style={[styles.errorActionText, { color: colors.primary }]}>Choose another scan type</Text>
+                </Pressable>
               </View>
             ) : null}
           </View>
@@ -2879,6 +2944,12 @@ export default function ScanScreen() {
               <Feather name="check-circle" size={18} color={colors.primary} />
               <Text style={[styles.captureModalButtonText, { color: colors.primary }]}>Done</Text>
             </Pressable>
+            <Pressable
+              onPress={returnToScanTypeSelection}
+              style={({ pressed }) => [styles.captureModalCancel, { opacity: pressed ? 0.7 : 1 }]}
+            >
+              <Text style={[styles.captureModalCancelText, { color: colors.mutedForeground }]}>Cancel</Text>
+            </Pressable>
           </View>
         </View>
       </Modal>
@@ -2886,11 +2957,11 @@ export default function ScanScreen() {
         visible={!!limitModal}
         content={limitModal}
         onPrimary={() => {
-          setLimitModal(null);
+          returnToScanTypeSelection();
           router.push({ pathname: "/upgrade", params: { feature: "ai_scan" } } as Href);
         }}
         onSecondary={() => {
-          setLimitModal(null);
+          returnToScanTypeSelection();
           router.push({
             pathname: "/(tabs)/add-item",
             params: {
@@ -2901,7 +2972,7 @@ export default function ScanScreen() {
             },
           } as Href);
         }}
-        onDismiss={() => setLimitModal(null)}
+        onDismiss={returnToScanTypeSelection}
       />
     </>
   );
@@ -2950,6 +3021,17 @@ const styles = StyleSheet.create({
   comingSoonTitle: { fontSize: 16, fontFamily: "Inter_600SemiBold", textAlign: "center" },
   comingSoonSub: { fontSize: 13, fontFamily: "Inter_400Regular", textAlign: "center", lineHeight: 20 },
   preparingScreen: { flex: 1, alignItems: "center", justifyContent: "center", padding: 24, gap: 10 },
+  preparingCancelButton: {
+    position: "absolute",
+    top: 52,
+    right: 18,
+    minHeight: 40,
+    paddingHorizontal: 12,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+  },
+  preparingCancelText: { fontSize: 14, fontFamily: "Inter_600SemiBold" },
   preparingTitle: { fontSize: 18, fontFamily: "Inter_700Bold", textAlign: "center" },
   preparingText: { fontSize: 13, lineHeight: 19, fontFamily: "Inter_400Regular", textAlign: "center" },
   videoHelper: { fontSize: 13, lineHeight: 18, fontFamily: "Inter_400Regular" },
@@ -3012,6 +3094,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
   },
   captureModalButtonText: { fontSize: 15, fontFamily: "Inter_600SemiBold" },
+  captureModalCancel: { paddingHorizontal: 14, paddingVertical: 8 },
+  captureModalCancelText: { fontSize: 14, fontFamily: "Inter_600SemiBold" },
 });
 
 const revStyles = StyleSheet.create({

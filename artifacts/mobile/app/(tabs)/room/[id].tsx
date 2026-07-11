@@ -2,7 +2,7 @@ import { Feather, MaterialCommunityIcons } from "@expo/vector-icons";
 import * as ImagePicker from "expo-image-picker";
 import * as Haptics from "expo-haptics";
 import * as WebBrowser from "expo-web-browser";
-import { Stack, router, useLocalSearchParams, type Href } from "expo-router";
+import { Stack, router, useFocusEffect, useLocalSearchParams, type Href } from "expo-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import React, { useEffect, useRef, useState } from "react";
 import {
@@ -54,7 +54,9 @@ import {
 import { useSignedImageRecovery, useSignedUrl, useSignedUrls } from "@/hooks/useSignedUrls";
 import { isStoragePath } from "@/lib/storage-helpers";
 import { formatUploadFailure, uploadCoverPhoto } from "@/lib/photo-upload";
-import { isRecentItem } from "@/lib/recent-items";
+import { itemWithCommittedPin, replaceItemWithCommittedPin } from "@/lib/item-pin-state";
+import { takeRecentItemBatch, withoutRecentItem } from "@/lib/recent-items";
+import { clearRoomViewSession, getRoomViewSession, resolveRoomRestoreIndex, updateRoomViewSession } from "@/lib/room-view-session";
 import { supabase } from "@/lib/supabase";
 import { subtractDeletedItems, withoutRoomItems } from "@/lib/room-deletion";
 import type { InventoryItem, InventoryRoom } from "@/types";
@@ -142,8 +144,6 @@ type RoomViewMode = "detailed" | "compact";
 type RoomReadinessFilter = "all" | "needs_review" | "missing_photo" | "missing_value";
 type RoomSortOption = "recent" | "value_desc" | "value_asc" | "name_asc";
 
-const roomScrollOffsets = new Map<string, number>();
-
 function roomItemHasPhoto(item: InventoryItem): boolean {
   return Boolean(item.image_url || item.photo_url);
 }
@@ -171,6 +171,8 @@ function ItemCard({
   selectionMode = false,
   isSelected = false,
   onToggleSelected,
+  onOpenItem,
+  onRepositionPin,
 }: {
   item: InventoryItem;
   parentRoomName: string;
@@ -187,6 +189,8 @@ function ItemCard({
   selectionMode?: boolean;
   isSelected?: boolean;
   onToggleSelected?: () => void;
+  onOpenItem: (itemId: string) => void;
+  onRepositionPin: (item: InventoryItem, x: number, y: number) => Promise<void>;
 }) {
   const queryClient = useQueryClient();
   const { showToast } = useToast();
@@ -382,6 +386,7 @@ function ItemCard({
   };
 
   const goToDetail = async () => {
+    onOpenItem(item.id);
     await Haptics.selectionAsync();
     router.push({
       pathname: "/(tabs)/item/[id]",
@@ -392,11 +397,13 @@ function ItemCard({
         roomName: parentRoomName,
         fileId: item.file_id,
         fileName: parentPropertyName,
+        origin: "room",
       },
     });
   };
 
   const goToEvidence = async () => {
+    onOpenItem(item.id);
     await Haptics.selectionAsync();
     router.push({
       pathname: "/(tabs)/item/[id]",
@@ -408,6 +415,7 @@ function ItemCard({
         roomName: parentRoomName,
         fileId: item.file_id,
         fileName: parentPropertyName,
+        origin: "room",
       },
     });
   };
@@ -510,6 +518,9 @@ function ItemCard({
             placeholderIconColor={TEAL}
             placeholderBackgroundColor={colors.muted}
             pin={pin}
+            viewerTitle={item.name}
+            pinPhotoIndex={0}
+            onReposition={pin ? (x, y) => onRepositionPin(item, x, y) : undefined}
             disabled={selectionMode}
             onPermanentError={onImagePermanentError}
           />
@@ -1012,6 +1023,8 @@ function CompactItemCard({
   selectionMode = false,
   isSelected = false,
   onToggleSelected,
+  onOpenItem,
+  onRepositionPin,
 }: {
   item: InventoryItem;
   parentRoomName: string;
@@ -1023,16 +1036,23 @@ function CompactItemCard({
   selectionMode?: boolean;
   isSelected?: boolean;
   onToggleSelected?: () => void;
+  onOpenItem: (itemId: string) => void;
+  onRepositionPin: (item: InventoryItem, x: number, y: number) => Promise<void>;
 }) {
   const readinessChip = itemReadinessChip(item);
   const totalValue = getItemTotalValue(item);
   const placeholderIcon = categoryIcon(item.category);
+  const rawPin = item.image_pin as Record<string, unknown> | null | undefined;
+  const pin = rawPin && typeof rawPin.x === "number" && typeof rawPin.y === "number"
+    ? { x: rawPin.x, y: rawPin.y }
+    : null;
 
   const goToDetail = async () => {
     if (selectionMode) {
       onToggleSelected?.();
       return;
     }
+    onOpenItem(item.id);
     await Haptics.selectionAsync();
     router.push({
       pathname: "/(tabs)/item/[id]",
@@ -1043,6 +1063,7 @@ function CompactItemCard({
         roomName: parentRoomName,
         fileId: item.file_id,
         fileName: parentPropertyName,
+        origin: "room",
       },
     });
   };
@@ -1080,16 +1101,20 @@ function CompactItemCard({
           </View>
         ) : null}
         {resolvedImageUrl ? (
-          <ReliableImage
+          <ExpandableImage
             uri={resolvedImageUrl}
             style={styles.gridThumb}
             contentFit="cover"
+            placeholderIcon={placeholderIcon}
+            placeholderIconSize={24}
+            placeholderIconColor={TEAL}
+            placeholderBackgroundColor={colors.muted}
+            pin={pin}
+            pinPhotoIndex={0}
+            viewerTitle={item.name}
+            onReposition={pin ? (x, y) => onRepositionPin(item, x, y) : undefined}
+            disabled={selectionMode}
             onPermanentError={onImagePermanentError}
-            fallback={
-              <View style={[styles.gridThumb, styles.gridThumbPlaceholder, { backgroundColor: colors.muted }]}>
-                <Feather name={placeholderIcon} size={24} color={TEAL} />
-              </View>
-            }
           />
         ) : (
           <View style={[styles.gridThumb, styles.gridThumbPlaceholder, { backgroundColor: colors.muted }]}>
@@ -1129,27 +1154,46 @@ export default function ItemsScreen() {
   const insets = useSafeAreaInsets();
   const queryClient = useQueryClient();
   const { showToast } = useToast();
+  const initialViewSession = React.useMemo(() => getRoomViewSession(id), [id]);
 
   const [coverUploading, setCoverUploading] = useState(false);
   const [localCoverUrl, setLocalCoverUrl] = useState<string | null>(null);
   const [coverSavedTick, setCoverSavedTick] = useState(false);
   const [archivingRoom, setArchivingRoom] = useState(false);
-  const [recentTick, setRecentTick] = useState(0);
+  const [newItemIds, setNewItemIds] = useState<Set<string>>(new Set());
   const [activeEdit, setActiveEdit] = useState<{
     itemId: string;
     target: CardEditTarget;
   } | null>(null);
-  const [viewMode, setViewMode] = useState<RoomViewMode>("detailed");
+  const [viewMode, setViewMode] = useState<RoomViewMode>((initialViewSession?.viewMode as RoomViewMode | undefined) ?? "detailed");
   const [filterModalVisible, setFilterModalVisible] = useState(false);
-  const [searchText, setSearchText] = useState("");
-  const [categoryFilter, setCategoryFilter] = useState<string>("all");
-  const [readinessFilter, setReadinessFilter] = useState<RoomReadinessFilter>("all");
-  const [sortOption, setSortOption] = useState<RoomSortOption>("recent");
+  const [searchText, setSearchText] = useState(initialViewSession?.searchText ?? "");
+  const [categoryFilter, setCategoryFilter] = useState<string>(initialViewSession?.categoryFilter ?? "all");
+  const [readinessFilter, setReadinessFilter] = useState<RoomReadinessFilter>((initialViewSession?.readinessFilter as RoomReadinessFilter | undefined) ?? "all");
+  const [sortOption, setSortOption] = useState<RoomSortOption>((initialViewSession?.sortOption as RoomSortOption | undefined) ?? "recent");
   const [selectionMode, setSelectionMode] = useState(false);
   const [selectedItemIds, setSelectedItemIds] = useState<Set<string>>(new Set());
   const [bulkWorking, setBulkWorking] = useState(false);
   const [moveModalVisible, setMoveModalVisible] = useState(false);
   const [categorySummaryExpanded, setCategorySummaryExpanded] = useState(false);
+  const openingItemRef = useRef(false);
+  const restoredRoomScrollRef = useRef(false);
+  const roomViewabilityConfig = useRef({ itemVisiblePercentThreshold: 20 }).current;
+
+  useFocusEffect(
+    React.useCallback(() => {
+      const latestBatch = takeRecentItemBatch(id);
+      if (latestBatch) setNewItemIds(latestBatch);
+
+      return () => {
+        if (openingItemRef.current) {
+          openingItemRef.current = false;
+          return;
+        }
+        setNewItemIds(new Set());
+      };
+    }, [id]),
+  );
 
   // Parallax hero — scrollY drives image translateY 0→-40 as user scrolls down
   const scrollY = useRef(new Animated.Value(0)).current;
@@ -1180,11 +1224,18 @@ export default function ItemsScreen() {
     enabled: !!session && !!id,
   });
 
-  useEffect(() => {
-    if (!(items ?? []).some((item) => isRecentItem(item.id))) return;
-    const timer = setTimeout(() => setRecentTick((value) => value + 1), 6000);
-    return () => clearTimeout(timer);
-  }, [items]);
+  const clearNewItemOnOpen = React.useCallback((itemId: string) => {
+    openingItemRef.current = true;
+    setNewItemIds((current) => current.has(itemId) ? withoutRecentItem(current, itemId) : current);
+  }, []);
+
+  const removeNewItemIds = React.useCallback((itemIds: Iterable<string>) => {
+    const idsToRemove = new Set(itemIds);
+    setNewItemIds((current) => {
+      const next = new Set([...current].filter((itemId) => !idsToRemove.has(itemId)));
+      return next.size === current.size ? current : next;
+    });
+  }, []);
 
   const { data: room } = useQuery({
     queryKey: ["room", id, session?.user.id],
@@ -1281,6 +1332,27 @@ export default function ItemsScreen() {
   );
   const itemSignedUrls = useSignedUrls(itemImagePaths);
   const recoverItemImageUrl = useSignedImageRecovery(itemImagePaths);
+  const repositionRoomItemPin = React.useCallback(async (target: InventoryItem, x: number, y: number) => {
+    const committed = itemWithCommittedPin(target, { x, y });
+    const { error: updateError } = await supabase
+      .from("inventory_items")
+      .update({ image_pin: committed.image_pin })
+      .eq("id", target.id);
+    if (updateError) throw new Error(updateError.message);
+
+    queryClient.setQueriesData<InventoryItem[]>(
+      { queryKey: ["items", id] },
+      (current) => replaceItemWithCommittedPin(current, target.id, { x, y }),
+    );
+    queryClient.setQueryData(
+      ["item", target.id, session?.user.id],
+      (current: InventoryItem | undefined) => current ? itemWithCommittedPin(current, { x, y }) : committed,
+    );
+    queryClient.setQueriesData<InventoryItem[]>(
+      { queryKey: ["all-items"] },
+      (current) => replaceItemWithCommittedPin(current, target.id, { x, y }),
+    );
+  }, [id, queryClient, session?.user.id]);
   const roomCategoryOptions = React.useMemo(() => {
     const categorySet = new Set<string>();
     (items ?? []).forEach((item) => {
@@ -1301,6 +1373,16 @@ export default function ItemsScreen() {
     setReadinessFilter("all");
     setSortOption("recent");
   }, []);
+
+  useEffect(() => {
+    updateRoomViewSession(id, {
+      viewMode,
+      searchText,
+      categoryFilter,
+      readinessFilter,
+      sortOption,
+    });
+  }, [categoryFilter, id, readinessFilter, searchText, sortOption, viewMode]);
   const visibleItems = React.useMemo(() => {
     const filtered = (items ?? []).filter((item) => {
       const matchesSearch =
@@ -1347,14 +1429,29 @@ export default function ItemsScreen() {
   }, [items]);
 
   useEffect(() => {
-    if (filtersActive || viewMode !== "detailed" || isLoading) return;
-    const savedOffset = roomScrollOffsets.get(id);
-    if (savedOffset == null || savedOffset <= 0) return;
+    if (isLoading || visibleItems.length === 0 || restoredRoomScrollRef.current) return;
+    const saved = getRoomViewSession(id);
+    if (!saved) return;
+    restoredRoomScrollRef.current = true;
     const frame = requestAnimationFrame(() => {
-      listRef.current?.scrollToOffset({ offset: savedOffset, animated: false });
+      if (saved.offset > 0) {
+        listRef.current?.scrollToOffset({ offset: saved.offset, animated: false });
+        return;
+      }
+      const anchorIndex = resolveRoomRestoreIndex(saved, visibleItems.map((item) => item.id));
+      if (anchorIndex != null) {
+        listRef.current?.scrollToIndex({ index: anchorIndex, animated: false, viewPosition: 0.2 });
+      }
     });
     return () => cancelAnimationFrame(frame);
-  }, [filtersActive, id, isLoading, viewMode, visibleItems.length]);
+  }, [id, isLoading, visibleItems]);
+
+  const onRoomViewableItemsChanged = React.useCallback(
+    ({ viewableItems }: { viewableItems: Array<{ item: InventoryItem }> }) => {
+      updateRoomViewSession(id, { anchorItemId: viewableItems[0]?.item.id ?? null });
+    },
+    [id],
+  );
 
   useEffect(() => {
     if (!selectionMode) return;
@@ -1447,6 +1544,7 @@ export default function ItemsScreen() {
       if (deleteError) throw deleteError;
 
       ids.forEach((itemId) => queryClient.removeQueries({ queryKey: ["item", itemId] }));
+      removeNewItemIds(ids);
       await invalidateRoomBulkQueries();
       showToast(`${ids.length} item${ids.length === 1 ? "" : "s"} deleted`);
       clearSelection();
@@ -1458,7 +1556,7 @@ export default function ItemsScreen() {
     } finally {
       setBulkWorking(false);
     }
-  }, [bulkWorking, clearSelection, invalidateRoomBulkQueries, queryClient, selectedCount, selectedItemIds, showToast]);
+  }, [bulkWorking, clearSelection, invalidateRoomBulkQueries, queryClient, removeNewItemIds, selectedCount, selectedItemIds, showToast]);
 
   const confirmDeleteSelectedItems = React.useCallback(() => {
     if (selectedCount === 0 || bulkWorking) return;
@@ -1498,6 +1596,7 @@ export default function ItemsScreen() {
       }
 
       await invalidateRoomBulkQueries(targetRoom.id);
+      removeNewItemIds(ids);
       showToast(`Moved ${ids.length} item${ids.length === 1 ? "" : "s"} to ${targetRoom.name}`);
       clearSelection();
     } catch (moveFailure) {
@@ -1512,6 +1611,7 @@ export default function ItemsScreen() {
     bulkWorking,
     clearSelection,
     invalidateRoomBulkQueries,
+    removeNewItemIds,
     resolvedFileId,
     selectedCount,
     selectedItemIds,
@@ -1522,6 +1622,7 @@ export default function ItemsScreen() {
     if (!ENABLE_RECOMMENDED_ACTIONS || !items) return null;
 
     const openItem = (item: InventoryItem, extraParams?: Record<string, string>) => {
+      clearNewItemOnOpen(item.id);
       router.push({
         pathname: "/(tabs)/item/[id]",
         params: {
@@ -1531,6 +1632,7 @@ export default function ItemsScreen() {
           roomName: resolvedRoomName,
           fileId: resolvedFileId ?? "",
           fileName: resolvedPropertyName,
+          origin: "room",
           ...extraParams,
         },
       });
@@ -1583,6 +1685,7 @@ export default function ItemsScreen() {
 
     return null;
   }, [
+    clearNewItemOnOpen,
     evidenceCounts,
     evidenceCountsLoading,
     handleScanRoom,
@@ -1595,6 +1698,7 @@ export default function ItemsScreen() {
 
 
   const navigateToProperty = React.useCallback(() => {
+    clearRoomViewSession(id);
     if (resolvedFileId) {
       router.replace({
         pathname: "/(tabs)/property/[id]",
@@ -1603,7 +1707,7 @@ export default function ItemsScreen() {
       return;
     }
     router.replace("/(tabs)");
-  }, [resolvedFileId, resolvedPropertyName]);
+  }, [id, resolvedFileId, resolvedPropertyName]);
 
   const archiveRoom = React.useCallback(async () => {
     if (!id || archivingRoom) return;
@@ -1831,21 +1935,16 @@ export default function ItemsScreen() {
             transform: [{ translateY: heroTranslateY }],
           }}
         >
-          <ReliableImage
+          <ExpandableImage
             uri={localCoverUrl ?? signedCoverUrl}
             style={StyleSheet.absoluteFill}
             contentFit="cover"
+            viewerTitle={resolvedRoomName}
+            placeholderIcon="image"
+            placeholderIconSize={54}
+            placeholderIconColor={colors.primary}
+            placeholderBackgroundColor={colors.secondary}
             onPermanentError={() => recoverRoomCoverUrl(room?.cover_photo_url)}
-            fallback={
-              <View style={styles.coverPlaceholder}>
-                <MaterialCommunityIcons
-                  name={getRoomPlaceholderIcon(room?.room_type, room?.name ?? name)}
-                  size={72}
-                  color={colors.primary}
-                  style={{ opacity: 0.55 }}
-                />
-              </View>
-            }
           />
         </Animated.View>
       ) : (
@@ -2027,12 +2126,14 @@ export default function ItemsScreen() {
           parentRoomName={resolvedRoomName}
           parentPropertyName={resolvedPropertyName}
           colors={colors}
-          isNew={isRecentItem(item.id) && recentTick >= 0}
+          isNew={newItemIds.has(item.id)}
           resolvedImageUrl={itemSignedUrls.get(item.image_url ?? item.photo_url ?? "") ?? null}
           onImagePermanentError={() => recoverItemImageUrl(item.image_url ?? item.photo_url)}
           selectionMode={selectionMode}
           isSelected={selectedItemIds.has(item.id)}
           onToggleSelected={() => toggleSelectedItem(item.id)}
+          onOpenItem={clearNewItemOnOpen}
+          onRepositionPin={repositionRoomItemPin}
         />
       );
     }
@@ -2044,13 +2145,15 @@ export default function ItemsScreen() {
         parentPropertyName={resolvedPropertyName}
         colors={colors}
         evidenceCount={evidenceCounts[item.id] ?? 0}
-        isNew={isRecentItem(item.id) && recentTick >= 0}
+        isNew={newItemIds.has(item.id)}
         resolvedImageUrl={itemSignedUrls.get(item.image_url ?? item.photo_url ?? "") ?? null}
         onImagePermanentError={() => recoverItemImageUrl(item.image_url ?? item.photo_url)}
         editingTarget={activeEdit?.itemId === item.id ? activeEdit.target : null}
         selectionMode={selectionMode}
         isSelected={selectedItemIds.has(item.id)}
         onToggleSelected={() => toggleSelectedItem(item.id)}
+        onOpenItem={clearNewItemOnOpen}
+        onRepositionPin={repositionRoomItemPin}
         onBeginEdit={(target) => setActiveEdit({ itemId: item.id, target })}
         onCloseEdit={(target) =>
           setActiveEdit((current) =>
@@ -2089,7 +2192,12 @@ export default function ItemsScreen() {
               <Pressable
                 accessibilityRole="button"
                 accessibilityLabel={viewMode === "compact" ? "Show detailed list" : "Show compact grid"}
-                onPress={() => setViewMode((current) => (current === "compact" ? "detailed" : "compact"))}
+                onPress={() => {
+                  const nextMode = viewMode === "compact" ? "detailed" : "compact";
+                  updateRoomViewSession(id, { viewMode: nextMode, offset: 0, anchorItemId: null });
+                  restoredRoomScrollRef.current = true;
+                  setViewMode(nextMode);
+                }}
                 style={styles.headerIconButton}
                 hitSlop={8}
               >
@@ -2139,12 +2247,19 @@ export default function ItemsScreen() {
               {
                 useNativeDriver: false,
                 listener: (event: { nativeEvent: { contentOffset: { y: number } } }) => {
-                  if (!filtersActive && viewMode === "detailed") {
-                    roomScrollOffsets.set(id, event.nativeEvent.contentOffset.y);
-                  }
+                  updateRoomViewSession(id, { offset: event.nativeEvent.contentOffset.y });
                 },
               }
             )}
+            onViewableItemsChanged={onRoomViewableItemsChanged}
+            viewabilityConfig={roomViewabilityConfig}
+            onScrollToIndexFailed={({ index, averageItemLength }) => {
+              const saved = getRoomViewSession(id);
+              listRef.current?.scrollToOffset({
+                offset: saved?.offset ?? Math.max(0, index * averageItemLength),
+                animated: false,
+              });
+            }}
             scrollEventThrottle={16}
             refreshControl={
               <RefreshControl

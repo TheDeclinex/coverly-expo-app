@@ -5,11 +5,10 @@ import React, { useEffect, useRef, useState } from "react";
 import { Pressable, View } from "react-native";
 import type { StyleProp, ViewStyle } from "react-native";
 
-import { DraggablePinLayer } from "@/components/DraggablePinLayer";
 import { ImageViewerModal } from "@/components/ImageViewerModal";
 import { ItemPinMarker, PIN_MARKER_SIZE } from "@/components/ItemPinMarker";
 import { isDisplayableUri } from "@/lib/storage-helpers";
-import { pinMarkerPosition } from "@/lib/pin-position";
+import { focalCoverRect, pinMarkerPosition, pinMarkerPositionInRect } from "@/lib/pin-position";
 
 const IMAGE_LOAD_RETRY_DELAYS_MS = [350, 900];
 
@@ -23,6 +22,9 @@ interface ExpandableImageProps {
   placeholderBackgroundColor?: string;
   allUris?: string[];
   initialPhotoIndex?: number;
+  pinPhotoIndex?: number;
+  viewerTitle?: string;
+  pinAwareCover?: boolean;
   /**
    * Pin marker in 0–1 normalised coords (as stored in inventory_items.image_pin).
    * The TIP of the pin-drop marker aligns with this coordinate.
@@ -50,6 +52,9 @@ export function ExpandableImage({
   placeholderBackgroundColor = "#f1f5f9",
   allUris,
   initialPhotoIndex = 0,
+  pinPhotoIndex,
+  viewerTitle,
+  pinAwareCover = false,
   pin,
   pinColor = "#1D9E75",
   disabled = false,
@@ -61,7 +66,6 @@ export function ExpandableImage({
   const [naturalDims, setNaturalDims] = useState({ w: 0, h: 0 });
   const [hasError, setHasError] = useState(false);
   const [loadAttempt, setLoadAttempt] = useState(0);
-  const suppressNextPress = useRef(false);
   const retryTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const clearRetryTimeout = () => {
@@ -86,8 +90,13 @@ export function ExpandableImage({
   const { w: pinW, h: pinH } = PIN_MARKER_SIZE.sm;
   const hasPin =
     !!pin && isFinite(pin.x) && isFinite(pin.y) && dims.w > 0 && dims.h > 0 && naturalDims.w > 0 && naturalDims.h > 0;
+  const focalRect = hasPin && pinAwareCover && contentFit === "cover"
+    ? focalCoverRect({ container: dims, image: naturalDims, focalPoint: pin })
+    : null;
   const markerPosition = hasPin
-    ? pinMarkerPosition({ pin: pin!, container: dims, image: naturalDims, fit: contentFit === "contain" ? "contain" : "cover", marker: { w: pinW, h: pinH } })
+    ? focalRect
+      ? pinMarkerPositionInRect({ pin: pin!, rect: focalRect, container: dims, marker: { w: pinW, h: pinH } })
+      : pinMarkerPosition({ pin: pin!, container: dims, image: naturalDims, fit: contentFit === "contain" ? "contain" : "cover", marker: { w: pinW, h: pinH } })
     : null;
 
   // Guard: only render <Image> for URIs that expo-image can actually load.
@@ -134,10 +143,6 @@ export function ExpandableImage({
         disabled={disabled}
         onPress={(event) => {
           event.stopPropagation();
-          if (suppressNextPress.current) {
-            suppressNextPress.current = false;
-            return;
-          }
           setLightboxVisible(true);
         }}
         style={[style, { overflow: "hidden" }]}
@@ -156,8 +161,10 @@ export function ExpandableImage({
           source={{ uri: safeUri }}
           recyclingKey={imageRenderKey}
           cachePolicy={loadAttempt > 0 ? "none" : "memory-disk"}
-          style={{ width: "100%", height: "100%" }}
-          contentFit={contentFit}
+          style={focalRect
+            ? { position: "absolute", left: focalRect.x, top: focalRect.y, width: focalRect.w, height: focalRect.h }
+            : { width: "100%", height: "100%" }}
+          contentFit={focalRect ? "fill" : contentFit}
           onLoad={(event) => {
             clearRetryTimeout();
             const { width, height } = event.source;
@@ -182,15 +189,7 @@ export function ExpandableImage({
             onPermanentError?.();
           }}
         />
-        {hasPin && onReposition ? (
-          <DraggablePinLayer
-            pin={pin!}
-            dims={dims}
-            onReposition={onReposition}
-            onTap={() => setLightboxVisible(true)}
-            pinColor={pinColor}
-          />
-        ) : markerPosition ? (
+        {markerPosition ? (
           <View
             pointerEvents="none"
             style={{
@@ -208,8 +207,9 @@ export function ExpandableImage({
         initialIndex={initialPhotoIndex}
         visible={lightboxVisible}
         onClose={() => setLightboxVisible(false)}
+        title={viewerTitle}
         pin={pin}
-        pinPhotoIndex={initialPhotoIndex}
+        pinPhotoIndex={pinPhotoIndex ?? initialPhotoIndex}
         pinColor={pinColor}
         onPinReposition={onReposition}
         onPermanentError={onPermanentError}

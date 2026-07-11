@@ -1,15 +1,17 @@
 import { Feather } from "@expo/vector-icons";
+import { BlurView } from "expo-blur";
 import type { ImageLoadEventData } from "expo-image";
-import React, { useCallback, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  AccessibilityInfo,
   ActivityIndicator,
-  Dimensions,
+  Animated,
   FlatList,
   Modal,
   Pressable,
-  StatusBar,
   StyleSheet,
   Text,
+  useWindowDimensions,
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -17,21 +19,17 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { DraggablePinLayer } from "@/components/DraggablePinLayer";
 import { ItemPinMarker, PIN_MARKER_SIZE } from "@/components/ItemPinMarker";
 import { ReliableImage } from "@/components/ReliableImage";
-import { pinMarkerPosition } from "@/lib/pin-position";
-
-const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get("window");
+import { useColors } from "@/hooks/useColors";
+import { pinBelongsToPhoto, viewerAllowsPinEditing } from "@/lib/image-viewer-config";
+import { pinMarkerPosition, renderedImageRect, type NormalizedPin } from "@/lib/pin-position";
 
 interface ImageViewerModalProps {
   uris: string[];
   initialIndex?: number;
   visible: boolean;
   onClose: () => void;
-  /**
-   * Pin in 0–1 normalised coords (as stored in inventory_items.image_pin).
-   * Letterbox offsets are computed from the natural image size via onLoad so
-   * the TIP of the pin-drop lands precisely on the item, even in contain mode.
-   */
-  pin?: { x: number; y: number } | null;
+  title?: string;
+  pin?: NormalizedPin | null;
   pinPhotoIndex?: number;
   pinColor?: string;
   onPinReposition?: (x: number, y: number) => Promise<void>;
@@ -40,116 +38,98 @@ interface ImageViewerModalProps {
 
 function ImagePage({
   uri,
-  onClose,
+  pageWidth,
+  cardHeight,
   pin,
-  pinColor = "#1D9E75",
-  onPinReposition,
+  draftPin,
+  pinColor,
+  editingPin,
+  onDraftPin,
+  onBackdropPress,
   onPermanentError,
 }: {
   uri: string;
-  onClose: () => void;
-  pin?: { x: number; y: number } | null;
-  pinColor?: string;
-  onPinReposition?: (x: number, y: number) => Promise<void>;
+  pageWidth: number;
+  cardHeight: number;
+  pin?: NormalizedPin | null;
+  draftPin: NormalizedPin;
+  pinColor: string;
+  editingPin: boolean;
+  onDraftPin: (pin: NormalizedPin) => void;
+  onBackdropPress: () => void;
   onPermanentError?: () => void;
 }) {
   const [imgSize, setImgSize] = useState<{ w: number; h: number } | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
-
-  const { w: pinW, h: pinH } = PIN_MARKER_SIZE.lg;
-
-  /**
-   * Pin position for contentFit="contain" with letterboxing.
-   * We need the natural image dimensions (from onLoad) to compute the
-   * rendered rect and apply the correct letterbox offsets.
-   *
-   * Tip-anchor: centre of SVG horizontally, bottom (tip) at pin coordinate.
-   *   left = ox + pin.x * rw - pinW / 2
-   *   top  = oy + pin.y * rh - pinH
-   */
-  const imageLayout = useMemo(() => {
-    if (!pin || !imgSize) return null;
-    const scale = Math.min(SCREEN_W / imgSize.w, SCREEN_H / imgSize.h);
-    const rw = imgSize.w * scale;
-    const rh = imgSize.h * scale;
-    const ox = (SCREEN_W - rw) / 2;
-    const oy = (SCREEN_H - rh) / 2;
-    return { ox, oy, rw, rh };
-  }, [pin, imgSize]);
-
-  const pinPos = useMemo(() => {
-    if (!pin || !imgSize) return null;
-    return pinMarkerPosition({
-      pin,
-      container: { w: SCREEN_W, h: SCREEN_H },
-      image: imgSize,
-      fit: "contain",
-      marker: { w: pinW, h: pinH },
-    });
-  }, [pin, imgSize, pinW, pinH]);
+  const cardWidth = Math.max(1, pageWidth - 32);
+  const activePin = editingPin ? draftPin : pin;
+  const marker = PIN_MARKER_SIZE.lg;
+  const rect = useMemo(
+    () => imgSize ? renderedImageRect({ container: { w: cardWidth, h: cardHeight }, image: imgSize, fit: "contain" }) : null,
+    [cardHeight, cardWidth, imgSize],
+  );
+  const pinPosition = useMemo(
+    () => activePin && imgSize
+      ? pinMarkerPosition({
+          pin: activePin,
+          container: { w: cardWidth, h: cardHeight },
+          image: imgSize,
+          fit: "contain",
+          marker,
+        })
+      : null,
+    [activePin, cardHeight, cardWidth, imgSize, marker],
+  );
 
   return (
-    <Pressable style={styles.page} onPress={onClose}>
-      {error ? (
-        <View style={styles.errorState}>
-          <Feather name="image" size={48} color="rgba(255,255,255,0.4)" />
-          <Text style={styles.errorText}>Image unavailable</Text>
-        </View>
-      ) : (
-        <>
-          <ReliableImage
-            uri={uri}
-            style={styles.image}
-            contentFit="contain"
-            onLoad={(e: ImageLoadEventData) => {
-              setLoading(false);
-              const { width, height } = e.source;
-              if (width > 0 && height > 0) setImgSize({ w: width, h: height });
-            }}
-            onPermanentError={() => {
-              setLoading(false);
-              setError(true);
-              onPermanentError?.();
-            }}
-          />
-          {loading && (
-            <View style={styles.loadingOverlay} pointerEvents="none">
-              <ActivityIndicator size="large" color="rgba(255,255,255,0.7)" />
-            </View>
-          )}
-        </>
-      )}
-      {pin && imageLayout && !error && onPinReposition ? (
-        <View
-          pointerEvents="box-none"
-          style={[
-            styles.draggablePinFrame,
-            {
-              left: imageLayout.ox,
-              top: imageLayout.oy,
-              width: imageLayout.rw,
-              height: imageLayout.rh,
-            },
-          ]}
-        >
-          <DraggablePinLayer
-            pin={pin}
-            dims={{ w: imageLayout.rw, h: imageLayout.rh }}
-            onReposition={onPinReposition}
-            onTap={onClose}
-            pinColor={pinColor}
-            markerSize="lg"
-          />
-        </View>
-      ) : pinPos && !error ? (
-        <View
-          pointerEvents="none"
-          style={[styles.pinWrap, { left: pinPos.left, top: pinPos.top }]}
-        >
-          <ItemPinMarker size="lg" color={pinColor} />
-        </View>
-      ) : null}
+    <Pressable accessibilityRole="button" accessibilityLabel="Close image viewer" onPress={onBackdropPress} style={[styles.page, { width: pageWidth }]}>
+      <Pressable onPress={(event) => event.stopPropagation()} style={[styles.imageCard, { width: cardWidth, height: cardHeight }]}>
+        {error ? (
+          <View style={styles.errorState}>
+            <Feather name="image" size={44} color="#94A3B8" />
+            <Text style={styles.errorText}>Image unavailable</Text>
+          </View>
+        ) : (
+          <>
+            <ReliableImage
+              uri={uri}
+              style={StyleSheet.absoluteFill}
+              contentFit="contain"
+              onLoad={(event: ImageLoadEventData) => {
+                setLoading(false);
+                if (event.source.width > 0 && event.source.height > 0) {
+                  setImgSize({ w: event.source.width, h: event.source.height });
+                }
+              }}
+              onPermanentError={() => {
+                setLoading(false);
+                setError(true);
+                onPermanentError?.();
+              }}
+            />
+            {loading ? <View style={styles.loading}><ActivityIndicator size="large" color="#64748B" /></View> : null}
+          </>
+        )}
+
+        {editingPin && rect && !error ? (
+          <View style={[styles.pinFrame, { left: rect.x, top: rect.y, width: rect.w, height: rect.h }]}>
+            <DraggablePinLayer
+              pin={draftPin}
+              dims={{ w: rect.w, h: rect.h }}
+              onReposition={async (x, y) => onDraftPin({ x, y })}
+              onTap={() => undefined}
+              pinColor={pinColor}
+              markerSize="lg"
+              activationDelayMs={0}
+            />
+          </View>
+        ) : pinPosition && !error ? (
+          <View pointerEvents="none" style={[styles.pinMarker, { left: pinPosition.left, top: pinPosition.top }]}>
+            <ItemPinMarker size="lg" color={pinColor} />
+          </View>
+        ) : null}
+      </Pressable>
     </Pressable>
   );
 }
@@ -159,217 +139,184 @@ export function ImageViewerModal({
   initialIndex = 0,
   visible,
   onClose,
+  title = "Image preview",
   pin,
   pinPhotoIndex,
   pinColor = "#1D9E75",
   onPinReposition,
   onPermanentError,
 }: ImageViewerModalProps) {
+  const colors = useColors();
   const insets = useSafeAreaInsets();
-  const [currentIndex, setCurrentIndex] = useState(initialIndex);
+  const { width, height } = useWindowDimensions();
+  const safeInitial = Math.max(0, Math.min(initialIndex, Math.max(0, uris.length - 1)));
+  const [currentIndex, setCurrentIndex] = useState(safeInitial);
+  const [editingPin, setEditingPin] = useState(false);
+  const [viewerPin, setViewerPin] = useState<NormalizedPin | null>(pin ?? null);
+  const [draftPin, setDraftPin] = useState<NormalizedPin>(pin ?? { x: 0.5, y: 0.5 });
+  const [savingPin, setSavingPin] = useState(false);
+  const [pinError, setPinError] = useState<string | null>(null);
+  const [reduceMotion, setReduceMotion] = useState(false);
+  const progress = useRef(new Animated.Value(0)).current;
   const flatListRef = useRef<FlatList<string>>(null);
+  const pinIndex = pinPhotoIndex ?? initialIndex;
+  const canEditPin = viewerAllowsPinEditing({ pin: viewerPin, hasSaveHandler: Boolean(onPinReposition), currentIndex, pinPhotoIndex: pinIndex });
+  const cardHeight = Math.max(220, height - insets.top - insets.bottom - 170);
 
-  const safeInitial = Math.max(0, Math.min(initialIndex, uris.length - 1));
-  const multi = uris.length > 1;
-  const pinIdx = pinPhotoIndex ?? initialIndex;
+  useEffect(() => {
+    void AccessibilityInfo.isReduceMotionEnabled().then(setReduceMotion);
+  }, []);
 
-  const scrollToIndex = useCallback(
-    (index: number) => {
-      const target = Math.max(0, Math.min(index, uris.length - 1));
-      flatListRef.current?.scrollToIndex({ index: target, animated: true });
-      setCurrentIndex(target);
-    },
-    [uris.length],
-  );
+  useEffect(() => {
+    if (!visible) return;
+    setCurrentIndex(safeInitial);
+    setEditingPin(false);
+    setViewerPin(pin ?? null);
+    setDraftPin(pin ?? { x: 0.5, y: 0.5 });
+    setPinError(null);
+    progress.setValue(reduceMotion ? 1 : 0);
+    if (!reduceMotion) Animated.timing(progress, { toValue: 1, duration: 220, useNativeDriver: true }).start();
+  }, [pin, progress, reduceMotion, safeInitial, visible]);
 
-  const onViewableItemsChanged = useRef(
-    ({ viewableItems }: { viewableItems: Array<{ index: number | null }> }) => {
-      if (viewableItems.length > 0 && viewableItems[0].index !== null) {
-        setCurrentIndex(viewableItems[0].index);
-      }
-    },
-  ).current;
+  const close = useCallback(() => {
+    if (editingPin) {
+      setDraftPin(viewerPin ?? { x: 0.5, y: 0.5 });
+      setEditingPin(false);
+      setPinError(null);
+      return;
+    }
+    if (reduceMotion) {
+      onClose();
+      return;
+    }
+    Animated.timing(progress, { toValue: 0, duration: 180, useNativeDriver: true }).start(({ finished }) => {
+      if (finished) onClose();
+    });
+  }, [editingPin, onClose, progress, reduceMotion, viewerPin]);
 
-  const viewabilityConfig = useRef({ itemVisiblePercentThreshold: 50 }).current;
+  const savePin = async () => {
+    if (!onPinReposition || savingPin) return;
+    setSavingPin(true);
+    setPinError(null);
+    try {
+      await onPinReposition(draftPin.x, draftPin.y);
+      setViewerPin(draftPin);
+      setEditingPin(false);
+    } catch (error) {
+      setPinError(error instanceof Error ? error.message : "Could not save pin position.");
+    } finally {
+      setSavingPin(false);
+    }
+  };
+
+  const scrollToIndex = (index: number) => {
+    if (editingPin) return;
+    const target = Math.max(0, Math.min(index, uris.length - 1));
+    flatListRef.current?.scrollToIndex({ index: target, animated: true });
+    setCurrentIndex(target);
+  };
 
   if (uris.length === 0) return null;
 
   return (
-    <Modal
-      visible={visible}
-      animationType="fade"
-      onRequestClose={onClose}
-      statusBarTranslucent
-    >
-      <StatusBar hidden />
-      <View style={styles.backdrop}>
-        <FlatList
-          ref={flatListRef}
-          data={uris}
-          keyExtractor={(_, i) => String(i)}
-          horizontal
-          pagingEnabled
-          showsHorizontalScrollIndicator={false}
-          initialScrollIndex={safeInitial}
-          style={{ flex: 1 }}
-          getItemLayout={(_, index) => ({
-            length: SCREEN_W,
-            offset: SCREEN_W * index,
-            index,
-          })}
-          onViewableItemsChanged={onViewableItemsChanged}
-          viewabilityConfig={viewabilityConfig}
-          renderItem={({ item: uri, index }) => (
-            <ImagePage
-              uri={uri}
-              onClose={onClose}
-              pin={index === pinIdx ? pin : undefined}
-              pinColor={pinColor}
-              onPinReposition={index === pinIdx ? onPinReposition : undefined}
-              onPermanentError={onPermanentError}
-            />
-          )}
-        />
-
-        {multi && (
-          <>
-            <Pressable
-              onPress={() => scrollToIndex(currentIndex - 1)}
-              style={[styles.arrowBtn, styles.arrowLeft]}
-              hitSlop={12}
-              disabled={currentIndex === 0}
-            >
-              <Feather
-                name="chevron-left"
-                size={26}
-                color={
-                  currentIndex === 0 ? "rgba(255,255,255,0.25)" : "#FFFFFF"
-                }
-              />
-            </Pressable>
-            <Pressable
-              onPress={() => scrollToIndex(currentIndex + 1)}
-              style={[styles.arrowBtn, styles.arrowRight]}
-              hitSlop={12}
-              disabled={currentIndex === uris.length - 1}
-            >
-              <Feather
-                name="chevron-right"
-                size={26}
-                color={
-                  currentIndex === uris.length - 1
-                    ? "rgba(255,255,255,0.25)"
-                    : "#FFFFFF"
-                }
-              />
-            </Pressable>
-
-            <View style={[styles.dots, { bottom: insets.bottom + 20 }]}>
-              {uris.map((_, i) => (
-                <Pressable key={i} onPress={() => scrollToIndex(i)} hitSlop={6}>
-                  <View
-                    style={[
-                      styles.dot,
-                      i === currentIndex ? styles.dotActive : styles.dotInactive,
-                    ]}
-                  />
-                </Pressable>
-              ))}
-            </View>
-          </>
-        )}
-
-        <Pressable
-          onPress={onClose}
-          style={[styles.closeBtn, { top: insets.top + 12 }]}
-          hitSlop={12}
+    <Modal visible={visible} transparent animationType="none" onRequestClose={close} statusBarTranslucent accessibilityViewIsModal>
+      <View style={styles.modalRoot} accessibilityLabel={title}>
+        <BlurView intensity={35} tint="default" style={StyleSheet.absoluteFill} />
+        <Animated.View style={[styles.dim, { opacity: progress.interpolate({ inputRange: [0, 1], outputRange: [0, 0.58] }) }]} />
+        <Animated.View
+          style={[
+            styles.viewer,
+            {
+              paddingTop: insets.top + 12,
+              paddingBottom: insets.bottom + 12,
+              opacity: progress,
+              transform: [{ scale: progress.interpolate({ inputRange: [0, 1], outputRange: [0.94, 1] }) }],
+            },
+          ]}
         >
-          <Feather name="x" size={22} color="#FFFFFF" />
-        </Pressable>
+          <View style={styles.topBar}>
+            <View style={[styles.titlePill, { backgroundColor: colors.card }]}>
+              <Text style={[styles.title, { color: colors.foreground }]} numberOfLines={1}>{title}</Text>
+              {uris.length > 1 ? <Text style={[styles.count, { color: colors.mutedForeground }]}>{currentIndex + 1} / {uris.length}</Text> : null}
+            </View>
+            <Pressable accessibilityRole="button" accessibilityLabel={editingPin ? "Cancel pin movement" : "Close image viewer"} onPress={close} hitSlop={10} style={[styles.close, { backgroundColor: colors.card }]}>
+              <Feather name="x" size={21} color={colors.foreground} />
+            </Pressable>
+          </View>
+
+          <FlatList
+            ref={flatListRef}
+            style={styles.gallery}
+            data={uris}
+            horizontal
+            pagingEnabled
+            scrollEnabled={!editingPin && uris.length > 1}
+            showsHorizontalScrollIndicator={false}
+            initialScrollIndex={safeInitial}
+            getItemLayout={(_, index) => ({ length: width, offset: width * index, index })}
+            onMomentumScrollEnd={(event) => setCurrentIndex(Math.round(event.nativeEvent.contentOffset.x / width))}
+            keyExtractor={(_, index) => String(index)}
+            renderItem={({ item, index }) => (
+              <ImagePage
+                uri={item}
+                pageWidth={width}
+                cardHeight={cardHeight}
+                pin={pinBelongsToPhoto(index, pinIndex) ? viewerPin : null}
+                draftPin={draftPin}
+                pinColor={pinColor}
+                editingPin={editingPin && index === pinIndex}
+                onDraftPin={setDraftPin}
+                onBackdropPress={close}
+                onPermanentError={onPermanentError}
+              />
+            )}
+          />
+
+          <View style={styles.actions}>
+            {pinError ? <Text style={styles.pinError}>{pinError}</Text> : null}
+            {editingPin ? (
+              <>
+                <Pressable accessibilityRole="button" accessibilityLabel="Cancel pin movement" onPress={close} style={[styles.actionSecondary, { backgroundColor: colors.card, borderColor: colors.border }]}>
+                  <Text style={[styles.actionText, { color: colors.foreground }]}>Cancel</Text>
+                </Pressable>
+                <Pressable accessibilityRole="button" accessibilityLabel="Save pin position" disabled={savingPin} onPress={() => void savePin()} style={[styles.actionPrimary, { backgroundColor: colors.primary, opacity: savingPin ? 0.65 : 1 }]}>
+                  {savingPin ? <ActivityIndicator color={colors.primaryForeground} /> : <Text style={[styles.actionText, { color: colors.primaryForeground }]}>Done</Text>}
+                </Pressable>
+              </>
+            ) : canEditPin ? (
+              <Pressable accessibilityRole="button" accessibilityLabel="Move item pin" onPress={() => { setDraftPin(viewerPin!); setEditingPin(true); }} style={[styles.movePin, { backgroundColor: colors.card, borderColor: colors.border }]}>
+                <Feather name="move" size={16} color={colors.primary} />
+                <Text style={[styles.actionText, { color: colors.primary }]}>Move pin</Text>
+              </Pressable>
+            ) : null}
+          </View>
+        </Animated.View>
       </View>
     </Modal>
   );
 }
 
 const styles = StyleSheet.create({
-  backdrop: {
-    flex: 1,
-    backgroundColor: "#000",
-  },
-  page: {
-    width: SCREEN_W,
-    flex: 1,
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  image: {
-    width: SCREEN_W,
-    height: SCREEN_H,
-  },
-  loadingOverlay: {
-    ...StyleSheet.absoluteFillObject,
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  errorState: {
-    alignItems: "center",
-    gap: 12,
-  },
-  errorText: {
-    color: "rgba(255,255,255,0.5)",
-    fontSize: 15,
-    fontFamily: "Inter_400Regular",
-  },
-  pinWrap: {
-    position: "absolute",
-  },
-  draggablePinFrame: {
-    position: "absolute",
-  },
-  closeBtn: {
-    position: "absolute",
-    right: 16,
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: "rgba(0,0,0,0.55)",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  arrowBtn: {
-    position: "absolute",
-    top: "50%",
-    marginTop: -20,
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: "rgba(0,0,0,0.40)",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  arrowLeft: {
-    left: 12,
-  },
-  arrowRight: {
-    right: 12,
-  },
-  dots: {
-    position: "absolute",
-    left: 0,
-    right: 0,
-    flexDirection: "row",
-    justifyContent: "center",
-    gap: 7,
-  },
-  dot: {
-    width: 7,
-    height: 7,
-    borderRadius: 4,
-  },
-  dotActive: {
-    backgroundColor: "#FFFFFF",
-  },
-  dotInactive: {
-    backgroundColor: "rgba(255,255,255,0.35)",
-  },
+  modalRoot: { flex: 1 },
+  dim: { ...StyleSheet.absoluteFillObject, backgroundColor: "#0F172A" },
+  viewer: { flex: 1 },
+  topBar: { minHeight: 48, paddingHorizontal: 16, flexDirection: "row", justifyContent: "space-between", alignItems: "center", gap: 10 },
+  titlePill: { minHeight: 40, maxWidth: "78%", paddingHorizontal: 14, borderRadius: 20, flexDirection: "row", alignItems: "center", gap: 10, shadowColor: "#0F172A", shadowOpacity: 0.12, shadowRadius: 12, elevation: 3 },
+  title: { fontSize: 14, fontFamily: "Inter_600SemiBold", flexShrink: 1 },
+  count: { fontSize: 12, fontFamily: "Inter_500Medium" },
+  close: { width: 40, height: 40, borderRadius: 20, alignItems: "center", justifyContent: "center", shadowColor: "#0F172A", shadowOpacity: 0.12, shadowRadius: 12, elevation: 3 },
+  page: { flex: 1, alignItems: "center", justifyContent: "center", paddingHorizontal: 16 },
+  gallery: { flex: 1 },
+  imageCard: { borderRadius: 22, overflow: "hidden", backgroundColor: "rgba(248,250,252,0.96)", shadowColor: "#0F172A", shadowOpacity: 0.24, shadowRadius: 22, shadowOffset: { width: 0, height: 12 }, elevation: 10 },
+  loading: { ...StyleSheet.absoluteFillObject, alignItems: "center", justifyContent: "center" },
+  errorState: { flex: 1, alignItems: "center", justifyContent: "center", gap: 10 },
+  errorText: { color: "#64748B", fontSize: 14, fontFamily: "Inter_500Medium" },
+  pinFrame: { position: "absolute" },
+  pinMarker: { position: "absolute" },
+  actions: { minHeight: 54, paddingHorizontal: 16, paddingTop: 8, flexDirection: "row", justifyContent: "center", alignItems: "center", gap: 10, flexWrap: "wrap" },
+  movePin: { minHeight: 42, borderWidth: 1, borderRadius: 21, paddingHorizontal: 16, flexDirection: "row", alignItems: "center", gap: 7 },
+  actionSecondary: { minWidth: 110, minHeight: 44, borderWidth: 1, borderRadius: 22, alignItems: "center", justifyContent: "center", paddingHorizontal: 18 },
+  actionPrimary: { minWidth: 110, minHeight: 44, borderRadius: 22, alignItems: "center", justifyContent: "center", paddingHorizontal: 18 },
+  actionText: { fontSize: 14, fontFamily: "Inter_600SemiBold" },
+  pinError: { width: "100%", textAlign: "center", color: "#B91C1C", fontSize: 12, fontFamily: "Inter_500Medium" },
 });

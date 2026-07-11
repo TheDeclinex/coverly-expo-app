@@ -33,6 +33,7 @@ import { useAuth } from "@/context/AuthContext";
 import { useColors } from "@/hooks/useColors";
 import { useSignedImageRecovery, useSignedUrls } from "@/hooks/useSignedUrls";
 import { formatCurrencyFull, getItemUnitPrice } from "@/lib/inventory-mappers";
+import { itemWithCommittedPin, replaceItemWithCommittedPin } from "@/lib/item-pin-state";
 import { supabase } from "@/lib/supabase";
 import { buildVoiceItemUpdatePayload } from "@/lib/voice-item-update";
 import type { InventoryItem } from "@/types";
@@ -489,7 +490,7 @@ function QuickEditRow({
 }
 
 export default function ItemDetailScreen() {
-  const { id, name, evidence, roomId, roomName, fileId, fileName } = useLocalSearchParams<{
+  const { id, name, evidence, roomId, roomName, fileId, fileName, origin } = useLocalSearchParams<{
     id: string;
     name: string;
     evidence?: string;
@@ -497,6 +498,7 @@ export default function ItemDetailScreen() {
     roomName?: string;
     fileId?: string;
     fileName?: string;
+    origin?: string;
   }>();
   const { session } = useAuth();
   const colors = useColors();
@@ -610,6 +612,10 @@ export default function ItemDetailScreen() {
     const targetFileId = fileId ?? item?.file_id ?? "";
 
     if (targetRoomId) {
+      if (origin === "room" && router.canGoBack()) {
+        router.back();
+        return;
+      }
       router.replace({
         pathname: "/(tabs)/room/[id]",
         params: {
@@ -631,7 +637,7 @@ export default function ItemDetailScreen() {
     }
 
     router.back();
-  }, [fileId, fileName, item?.file_id, item?.room, item?.room_id, roomId, roomName]);
+  }, [fileId, fileName, item?.file_id, item?.room, item?.room_id, origin, roomId, roomName]);
 
   const invalidateItemCollections = React.useCallback(async (target: InventoryItem) => {
     await Promise.all([
@@ -908,7 +914,16 @@ export default function ItemDetailScreen() {
         })
         .eq("id", item.id);
       if (error) throw new Error(error.message);
-      queryClient.invalidateQueries({ queryKey: ["item", id, session?.user.id] });
+      const committedItem = itemWithCommittedPin(item, { x, y });
+      queryClient.setQueryData(["item", id, session?.user.id], committedItem);
+      queryClient.setQueriesData<InventoryItem[]>(
+        { queryKey: ["items", item.room_id] },
+        (current) => replaceItemWithCommittedPin(current, item.id, { x, y }),
+      );
+      queryClient.setQueriesData<InventoryItem[]>(
+        { queryKey: ["all-items"] },
+        (current) => replaceItemWithCommittedPin(current, item.id, { x, y }),
+      );
     },
     [item, id, session?.user.id, queryClient],
   );
@@ -957,16 +972,13 @@ export default function ItemDetailScreen() {
             placeholderBackgroundColor={colors.secondary}
             allUris={allPhotoUris}
             initialPhotoIndex={0}
+            pinPhotoIndex={0}
+            viewerTitle={item.name}
             pin={itemPin}
+            pinAwareCover
             onReposition={itemPin ? handleRepositionPin : undefined}
             onPermanentError={() => recoverItemImageUrl(rawPrimaryUri)}
           />
-          {itemPin && (
-            <Text style={[styles.pinHint, { color: colors.mutedForeground }]}>
-              Long-press the pin to reposition it
-            </Text>
-          )}
-
           <View style={styles.content}>
             <View style={styles.titleRow}>
               <Text style={[styles.itemName, { color: colors.foreground }]}>
@@ -1559,11 +1571,4 @@ const styles = StyleSheet.create({
   },
   detailLink: { flex: 1 },
   linkText: { textDecorationLine: "underline" },
-  pinHint: {
-    fontSize: 11,
-    fontFamily: "Inter_400Regular",
-    textAlign: "center",
-    paddingVertical: 5,
-    opacity: 0.7,
-  },
 });

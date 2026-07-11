@@ -29,8 +29,8 @@ import { useAuth } from "@/context/AuthContext";
 import { useColors } from "@/hooks/useColors";
 import { formatCurrencyFull } from "@/lib/inventory-mappers";
 import { buildItemInsertPayload } from "@/lib/item-insert-helpers";
+import { stageRecentItemBatch } from "@/lib/recent-items";
 import { formatUploadFailure, uploadItemPhoto } from "@/lib/photo-upload";
-import { markRecentItem } from "@/lib/recent-items";
 import { supabase } from "@/lib/supabase";
 import type { InventoryFile, InventoryRoom } from "@/types";
 import type { VoiceItemField, VoiceItemPatch } from "@/types/voice";
@@ -406,7 +406,7 @@ export default function AddItemScreen() {
     }
 
     if (__DEV__) console.log("[AddItem] Insert succeeded — navigating to room", selectedRoomId);
-    markRecentItem(payload.id);
+    stageRecentItemBatch(selectedRoomId, [payload.id]);
     showToast(`Item added to ${destRoomName ?? "room"}`);
 
     queryClient.invalidateQueries({ queryKey: ["items", selectedRoomId] });
@@ -775,6 +775,7 @@ export default function AddItemScreen() {
                   uri={photoUri}
                   style={[styles.photoPreview, { borderRadius: colors.radius }]}
                   contentFit="cover"
+                  viewerTitle={name.trim() || "Item photo"}
                 />
                 <Pressable
                   onPress={() => setPhotoUri(null)}

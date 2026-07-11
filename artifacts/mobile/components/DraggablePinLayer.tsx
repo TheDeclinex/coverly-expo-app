@@ -29,6 +29,7 @@ interface DraggablePinLayerProps {
   onTap?: () => void;
   pinColor?: string;
   markerSize?: "sm" | "lg";
+  activationDelayMs?: number;
 }
 
 /**
@@ -45,6 +46,7 @@ export function DraggablePinLayer({
   onTap,
   pinColor = "#1D9E75",
   markerSize = "sm",
+  activationDelayMs = LONG_PRESS_DELAY_MS,
 }: DraggablePinLayerProps) {
   const { w: pinW, h: pinH } = PIN_MARKER_SIZE[markerSize];
 
@@ -104,7 +106,7 @@ export function DraggablePinLayer({
             bounciness: 6,
           }).start();
           Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-        }, LONG_PRESS_DELAY_MS);
+        }, activationDelayMs);
       },
 
       onPanResponderMove: (_, gestureState) => {

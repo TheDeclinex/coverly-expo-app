@@ -84,6 +84,7 @@ export type ScanStatus =
   | "idle"
   | "picking"
   | "scanning"
+  | "auto_saving"
   | "reviewing"
   | "saving"
   | "done"

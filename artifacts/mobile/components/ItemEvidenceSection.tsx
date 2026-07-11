@@ -18,6 +18,7 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+import { ImageViewerModal } from "@/components/ImageViewerModal";
 import { useColors } from "@/hooks/useColors";
 import {
   addItemEvidence,
@@ -33,6 +34,10 @@ import {
 } from "@/types/evidence";
 
 const EVIDENCE_TYPES = Object.keys(EVIDENCE_TYPE_LABEL) as EvidenceType[];
+
+function isImageEvidence(filename: string): boolean {
+  return /\.(?:avif|gif|heic|heif|jpe?g|png|webp)$/i.test(filename);
+}
 
 const TYPE_ICON: Record<EvidenceType, keyof typeof Feather.glyphMap> = {
   photo: "image",
@@ -89,6 +94,7 @@ export function ItemEvidenceSection({
   const [caption, setCaption] = useState("");
   const [saving, setSaving] = useState(false);
   const [evidenceSavedTick, setEvidenceSavedTick] = useState(false);
+  const [evidenceViewer, setEvidenceViewer] = useState<{ uri: string; title: string } | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const didAutoOpenRef = React.useRef(false);
@@ -203,7 +209,11 @@ export function ItemEvidenceSection({
     setActionError(null);
     try {
       const signedUrl = await getEvidenceSignedUrl(item.file_url);
-      await WebBrowser.openBrowserAsync(signedUrl);
+      if (isImageEvidence(item.filename)) {
+        setEvidenceViewer({ uri: signedUrl, title: item.caption?.trim() || EVIDENCE_DISPLAY_LABEL[item.evidence_type] });
+      } else {
+        await WebBrowser.openBrowserAsync(signedUrl);
+      }
     } catch (openError) {
       setActionError(openError instanceof Error ? openError.message : "Could not open evidence.");
     }
@@ -401,6 +411,12 @@ export function ItemEvidenceSection({
           </Pressable>
         </Pressable>
       </Modal>
+      <ImageViewerModal
+        uris={evidenceViewer ? [evidenceViewer.uri] : []}
+        visible={!!evidenceViewer}
+        title={evidenceViewer?.title ?? "Evidence image"}
+        onClose={() => setEvidenceViewer(null)}
+      />
     </>
   );
 }
