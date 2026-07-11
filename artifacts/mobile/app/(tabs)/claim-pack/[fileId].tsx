@@ -54,6 +54,7 @@ import {
   type ClaimPackSelection,
 } from "@/lib/claim-pack-selection-model";
 import {
+  approvableClaimPackWarningIds,
   buildClaimPackReview,
   claimPackReviewPanelState,
   type ClaimPackReviewIssue,
@@ -1030,6 +1031,19 @@ function DraftReview({
       ? "Resolve or approve required review items before generating the PDF."
       : null;
   const canGeneratePdf = exportBlockReason === null && !isGeneratingPdf;
+  const actionableWarningIds = approvableClaimPackWarningIds(unresolvedReviewIssues);
+  const approveAllWarnings = () => {
+    const approve = () => actionableWarningIds.forEach(onApproveReviewIssue);
+    if (actionableWarningIds.length > 5) {
+      Alert.alert(
+        "Approve all warnings?",
+        `This will approve ${actionableWarningIds.length} review warnings. Blocking issues will remain.`,
+        [{ text: "Cancel", style: "cancel" }, { text: "Approve warnings", onPress: approve }],
+      );
+      return;
+    }
+    approve();
+  };
 
   const openItemEditor = (itemId: string) => {
     router.push({
@@ -1117,6 +1131,7 @@ function DraftReview({
           expanded={isReviewExpanded}
           onToggleExpanded={() => setIsReviewExpanded((current) => !current)}
           onApproveIssue={onApproveReviewIssue}
+          onApproveAllWarnings={approveAllWarnings}
           onFixItem={openItemEditor}
           onRunPriceSearch={openPriceSearch}
           onExcludeItem={excludeReviewItem}
@@ -1358,6 +1373,7 @@ function ClaimPackReviewCard({
   expanded,
   onToggleExpanded,
   onApproveIssue,
+  onApproveAllWarnings,
   onFixItem,
   onRunPriceSearch,
   onExcludeItem,
@@ -1370,6 +1386,7 @@ function ClaimPackReviewCard({
   expanded: boolean;
   onToggleExpanded: () => void;
   onApproveIssue: (issueId: string) => void;
+  onApproveAllWarnings: () => void;
   onFixItem: (itemId: string) => void;
   onRunPriceSearch: (itemId: string) => void;
   onExcludeItem: (itemId: string) => void;
@@ -1424,6 +1441,12 @@ function ClaimPackReviewCard({
         </Text>
       ) : panelState.shouldShowFullIssueList ? (
         <View style={styles.reviewIssueList}>
+          {issues.some((issue) => issue.severity !== "high") ? (
+            <Pressable accessibilityRole="button" onPress={onApproveAllWarnings} style={styles.approveAllWarnings}>
+              <Feather name="check-circle" size={15} color={colors.primary} />
+              <Text style={[styles.secondaryButtonText, { color: colors.primary }]}>Approve all warnings</Text>
+            </Pressable>
+          ) : null}
           {issues.map((issue) => (
             <ClaimPackReviewIssueRow
               key={issue.id}
@@ -2051,6 +2074,7 @@ const styles = StyleSheet.create({
   reviewSummaryText: { flex: 1, fontSize: 12, lineHeight: 17, fontFamily: "Inter_600SemiBold" },
   reviewToggleButton: { borderWidth: 1, minHeight: 38, paddingHorizontal: 12, paddingVertical: 8, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6 },
   reviewIssueList: { gap: 0 },
+  approveAllWarnings: { alignSelf: "flex-end", minHeight: 36, flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 4 },
   reviewIssueRow: { borderTopWidth: StyleSheet.hairlineWidth, paddingTop: 11, paddingBottom: 10, gap: 9 },
   reviewIssueTop: { flexDirection: "row", alignItems: "flex-start", gap: 10 },
   reviewIssueCopy: { flex: 1, gap: 3 },

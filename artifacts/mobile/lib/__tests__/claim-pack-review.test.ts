@@ -2,12 +2,22 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  approvableClaimPackWarningIds,
   buildClaimPackReview,
   claimPackReviewPanelState,
   type ClaimPackReviewItemLike,
   type ClaimPackReviewPropertyLike,
   type ClaimPackReviewRoomLike,
 } from "../claim-pack-review.ts";
+
+test("approve all includes warnings but preserves high-severity blockers", () => {
+  const issues = [
+    { id: "medium", severity: "medium" },
+    { id: "low", severity: "low" },
+    { id: "blocker", severity: "high" },
+  ] as Parameters<typeof approvableClaimPackWarningIds>[0];
+  assert.deepEqual(approvableClaimPackWarningIds(issues), ["medium", "low"]);
+});
 import type { ClaimPackSelection } from "../claim-pack-selection-model.ts";
 
 const property: ClaimPackReviewPropertyLike = {

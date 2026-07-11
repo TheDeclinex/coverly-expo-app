@@ -55,6 +55,12 @@ export interface ClaimPackReviewIssue {
   roomId?: string;
 }
 
+export function approvableClaimPackWarningIds(
+  issues: readonly Pick<ClaimPackReviewIssue, "id" | "severity">[],
+): string[] {
+  return issues.filter((issue) => issue.severity !== "high").map((issue) => issue.id);
+}
+
 export interface ClaimPackReviewSummary {
   totalIssues: number;
   unresolvedIssues: number;

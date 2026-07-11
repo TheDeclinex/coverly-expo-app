@@ -7,14 +7,16 @@
  *
  * Set secret:
  *   supabase secrets set OPENAI_API_KEY=sk-...
+ *   supabase secrets set OPENAI_SCAN_MODEL=gpt-5.6-luna # optional; this is the default
  */
 
 import { serve } from 'https://deno.land/std@0.177.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.3';
+import { scanModelForMode, type ScanMode } from './scan-model.ts';
 
 // Version marker — bump this whenever the edge function is redeployed so the
 // client can confirm it is running the expected version via diagnostics.
-const EDGE_FUNCTION_VERSION = 'v24.3.0-storage-image-refs';
+const EDGE_FUNCTION_VERSION = 'v24.4.0-distinct-multi-photo-items';
 
 const CORS_HEADERS = {
   'Access-Control-Allow-Origin': '*',
@@ -23,9 +25,9 @@ const CORS_HEADERS = {
 };
 
 const OPENAI_URL = 'https://api.openai.com/v1/chat/completions';
-const DEFAULT_MODEL = 'gpt-4o';
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL') ?? '';
 const SUPABASE_ANON_KEY = Deno.env.get('SUPABASE_ANON_KEY') ?? '';
+const CONFIGURED_SCAN_MODEL = Deno.env.get('OPENAI_SCAN_MODEL');
 const INVENTORY_PHOTOS_BUCKET = 'inventory-photos';
 const SCAN_SIGNED_URL_TTL_SECONDS = 600;
 const OPENAI_TIMEOUT_MS = 45_000;
@@ -96,10 +98,9 @@ interface ScanImage {
 }
 
 interface ScanRequest {
-  mode: 'single_photo' | 'multi_photo' | 'video_frames' | 'single_item';
+  mode: ScanMode;
   images: ScanImage[];
   context?: { propertyId?: string; fileId?: string; roomId?: string; roomName?: string };
-  model?: string;
   usageIdempotencyKey?: string;
 }
 
@@ -458,6 +459,9 @@ QUANTITY RULE FOR MULTI-PHOTO:
 Count physical items, NOT appearances.
 If 6 dining chairs appear in photo 1 and the same chairs appear in photo 2, quantity = 6 (not 12).
 Only increase quantity if ADDITIONAL distinct physical items are visible.
+Use quantity only for genuinely identical or matching multiples. Never combine different visible objects into a generic "assorted decor items", "assorted electronics", or broad-category record.
+Create separate records for distinct objects a homeowner would reasonably list separately for insurance, including visible books, controllers, consoles, lamps, vases, shelf units, chairs, and tables.
+Do not merge nearby objects merely because they share a shelf, surface, or category. De-duplicate across photos only when the visual attributes and room position indicate the same physical item.
 
 For each item in the final list:
 - sourceImageId = photo ID where item is most clearly visible (e.g. "photo_2")
@@ -576,7 +580,7 @@ async function prepareOpenAiImageContent(
 
 // ── Build OpenAI request body ─────────────────────────────────────────────────
 function buildOpenAiBody(req: ScanRequest, imageContent: OpenAiImageContent[]): object {
-  const model = req.model ?? DEFAULT_MODEL;
+  const model = scanModelForMode(req.mode, CONFIGURED_SCAN_MODEL);
 
   const userPrompt = buildUserPrompt(req.mode, req.images.length);
 
@@ -802,7 +806,7 @@ serve(async (req: Request) => {
 
   const diagnostics: Record<string, unknown> = {
     edgeFunctionVersion: EDGE_FUNCTION_VERSION,
-    model: scanReq.model ?? DEFAULT_MODEL,
+    model: scanModelForMode(scanReq.mode, CONFIGURED_SCAN_MODEL),
     mode: scanReq.mode ?? 'single_photo',
     imageCount: scanReq.images.length,
     usage: usageDiagnostics(usageReservation),
@@ -818,7 +822,7 @@ serve(async (req: Request) => {
   try {
     const openAiBody = buildOpenAiBody(scanReq, openAiImageContent);
     scanLog('openai_call_started', {
-      model: scanReq.model ?? DEFAULT_MODEL,
+      model: scanModelForMode(scanReq.mode, CONFIGURED_SCAN_MODEL),
       imageCount: scanReq.images.length,
       timeoutMs: OPENAI_TIMEOUT_MS,
     });

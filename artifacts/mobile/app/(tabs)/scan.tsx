@@ -53,6 +53,7 @@ import {
   type UploadFailure,
 } from "@/lib/photo-upload";
 import { markRecentItem, markRecentItems } from "@/lib/recent-items";
+import { pinMarkerPosition } from "@/lib/pin-position";
 import {
   DUPLICATE_ROOM_NAME_MESSAGE,
   formatRoomCreationError,
@@ -1885,6 +1886,7 @@ export default function ScanScreen() {
     const REVIEW_THUMB_H = 110;
     const REVIEW_THUMB_PIN_R = 7;
     const sourceUri = images[activeSourcePhotoIdx]?.uri ?? null;
+    const activeSourceImage = images[activeSourcePhotoIdx];
     const visiblePins = detectedItems
       .map((item, idx) => ({ item, idx }))
       .filter(({ item }) => item.pin != null && (item.sourcePhotoIndex ?? 0) === activeSourcePhotoIdx);
@@ -1954,7 +1956,15 @@ export default function ScanScreen() {
                     }}>
                       <ExpandableImage uri={sourceUri} style={{ width: PHOTO_W, height: PHOTO_H }} contentFit="cover" />
                       {/* Numbered pin markers */}
-                      {visiblePins.map(({ item, idx }) => (
+                      {visiblePins.map(({ item, idx }) => {
+                        const position = pinMarkerPosition({
+                          pin: { x: item.pin!.x / 100, y: item.pin!.y / 100 },
+                          container: { w: PHOTO_W, h: PHOTO_H },
+                          image: { w: activeSourceImage?.width ?? PHOTO_W, h: activeSourceImage?.height ?? PHOTO_H },
+                          fit: "cover",
+                          marker: { w: PIN_R * 2, h: PIN_R * 2 },
+                        });
+                        return (
                         <Pressable
                           key={idx}
                           onPress={() => {
@@ -1966,8 +1976,8 @@ export default function ScanScreen() {
                           style={[
                             pinStyles.pin,
                             {
-                              left: (item.pin!.x / 100) * PHOTO_W - PIN_R,
-                              top: (item.pin!.y / 100) * PHOTO_H - PIN_R,
+                              left: position?.left ?? 0,
+                              top: position?.top ?? 0,
                               width: PIN_R * 2, height: PIN_R * 2, borderRadius: PIN_R,
                               backgroundColor: activePinIndex === idx ? "#1D9E75" : "#334155",
                               transform: [{ scale: activePinIndex === idx ? 1.2 : 1 }],
@@ -1976,7 +1986,8 @@ export default function ScanScreen() {
                         >
                           <Text style={pinStyles.pinLabel}>{idx + 1}</Text>
                         </Pressable>
-                      ))}
+                        );
+                      })}
                     </View>
 
                     {/* Summary below the photo */}
@@ -2028,24 +2039,16 @@ export default function ScanScreen() {
               const isSaving = savingIds.has(index);
               const badge = confidenceBadgeStyle(item.confidence);
               const isActive = activePinIndex === index;
-              const thumbPinLeft = item.pin
-                ? Math.max(
-                    3,
-                    Math.min(
-                      REVIEW_THUMB_W - REVIEW_THUMB_PIN_R * 2 - 3,
-                      (item.pin.x / 100) * REVIEW_THUMB_W - REVIEW_THUMB_PIN_R,
-                    ),
-                  )
-                : 0;
-              const thumbPinTop = item.pin
-                ? Math.max(
-                    3,
-                    Math.min(
-                      REVIEW_THUMB_H - REVIEW_THUMB_PIN_R * 2 - 3,
-                      (item.pin.y / 100) * REVIEW_THUMB_H - REVIEW_THUMB_PIN_R,
-                    ),
-                  )
-                : 0;
+              const sourceImage = images[item.sourcePhotoIndex ?? 0];
+              const thumbPinPosition = item.pin
+                ? pinMarkerPosition({
+                    pin: { x: item.pin.x / 100, y: item.pin.y / 100 },
+                    container: { w: REVIEW_THUMB_W, h: REVIEW_THUMB_H },
+                    image: { w: sourceImage?.width ?? REVIEW_THUMB_W, h: sourceImage?.height ?? REVIEW_THUMB_H },
+                    fit: "cover",
+                    marker: { w: REVIEW_THUMB_PIN_R * 2, h: REVIEW_THUMB_PIN_R * 2 },
+                  })
+                : null;
               return (
                 <View
                   style={[
@@ -2089,8 +2092,8 @@ export default function ScanScreen() {
                           style={[
                             pinStyles.cardPin,
                             {
-                              left: thumbPinLeft,
-                              top: thumbPinTop,
+                              left: thumbPinPosition?.left ?? 0,
+                              top: thumbPinPosition?.top ?? 0,
                               width: REVIEW_THUMB_PIN_R * 2,
                               height: REVIEW_THUMB_PIN_R * 2,
                               borderRadius: REVIEW_THUMB_PIN_R,

@@ -9,6 +9,7 @@ import { DraggablePinLayer } from "@/components/DraggablePinLayer";
 import { ImageViewerModal } from "@/components/ImageViewerModal";
 import { ItemPinMarker, PIN_MARKER_SIZE } from "@/components/ItemPinMarker";
 import { isDisplayableUri } from "@/lib/storage-helpers";
+import { pinMarkerPosition } from "@/lib/pin-position";
 
 const IMAGE_LOAD_RETRY_DELAYS_MS = [350, 900];
 
@@ -57,6 +58,7 @@ export function ExpandableImage({
 }: ExpandableImageProps) {
   const [lightboxVisible, setLightboxVisible] = useState(false);
   const [dims, setDims] = useState({ w: 0, h: 0 });
+  const [naturalDims, setNaturalDims] = useState({ w: 0, h: 0 });
   const [hasError, setHasError] = useState(false);
   const [loadAttempt, setLoadAttempt] = useState(0);
   const suppressNextPress = useRef(false);
@@ -74,6 +76,7 @@ export function ExpandableImage({
     clearRetryTimeout();
     setHasError(false);
     setLoadAttempt(0);
+    setNaturalDims({ w: 0, h: 0 });
     return clearRetryTimeout;
   }, [uri]);
 
@@ -82,7 +85,10 @@ export function ExpandableImage({
 
   const { w: pinW, h: pinH } = PIN_MARKER_SIZE.sm;
   const hasPin =
-    !!pin && isFinite(pin.x) && isFinite(pin.y) && dims.w > 0 && dims.h > 0;
+    !!pin && isFinite(pin.x) && isFinite(pin.y) && dims.w > 0 && dims.h > 0 && naturalDims.w > 0 && naturalDims.h > 0;
+  const markerPosition = hasPin
+    ? pinMarkerPosition({ pin: pin!, container: dims, image: naturalDims, fit: contentFit === "contain" ? "contain" : "cover", marker: { w: pinW, h: pinH } })
+    : null;
 
   // Guard: only render <Image> for URIs that expo-image can actually load.
   // Raw Supabase storage paths (e.g. "userId/scan-xxx.jpg") are NOT displayable
@@ -152,8 +158,10 @@ export function ExpandableImage({
           cachePolicy={loadAttempt > 0 ? "none" : "memory-disk"}
           style={{ width: "100%", height: "100%" }}
           contentFit={contentFit}
-          onLoad={() => {
+          onLoad={(event) => {
             clearRetryTimeout();
+            const { width, height } = event.source;
+            if (width > 0 && height > 0) setNaturalDims({ w: width, h: height });
             if (__DEV__) console.info("[ExpandableImage] loaded", { attempt: loadAttempt });
           }}
           onError={(e) => {
@@ -182,13 +190,13 @@ export function ExpandableImage({
             onTap={() => setLightboxVisible(true)}
             pinColor={pinColor}
           />
-        ) : hasPin ? (
+        ) : markerPosition ? (
           <View
             pointerEvents="none"
             style={{
               position: "absolute",
-              left: pin!.x * dims.w - pinW / 2,
-              top: pin!.y * dims.h - pinH,
+              left: markerPosition.left,
+              top: markerPosition.top,
             }}
           >
             <ItemPinMarker size="sm" color={pinColor} />

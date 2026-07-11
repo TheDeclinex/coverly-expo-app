@@ -17,6 +17,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { DraggablePinLayer } from "@/components/DraggablePinLayer";
 import { ItemPinMarker, PIN_MARKER_SIZE } from "@/components/ItemPinMarker";
 import { ReliableImage } from "@/components/ReliableImage";
+import { pinMarkerPosition } from "@/lib/pin-position";
 
 const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get("window");
 
@@ -78,12 +79,15 @@ function ImagePage({
   }, [pin, imgSize]);
 
   const pinPos = useMemo(() => {
-    if (!pin || !imageLayout) return null;
-    return {
-      left: imageLayout.ox + pin.x * imageLayout.rw - pinW / 2,
-      top: imageLayout.oy + pin.y * imageLayout.rh - pinH,
-    };
-  }, [pin, imageLayout, pinW, pinH]);
+    if (!pin || !imgSize) return null;
+    return pinMarkerPosition({
+      pin,
+      container: { w: SCREEN_W, h: SCREEN_H },
+      image: imgSize,
+      fit: "contain",
+      marker: { w: pinW, h: pinH },
+    });
+  }, [pin, imgSize, pinW, pinH]);
 
   return (
     <Pressable style={styles.page} onPress={onClose}>

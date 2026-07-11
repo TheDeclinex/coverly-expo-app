@@ -39,6 +39,7 @@ import { LoadingState } from "@/components/LoadingState";
 import { QuantityStepper } from "@/components/QuantityStepper";
 import { ReliableImage } from "@/components/ReliableImage";
 import { useToast } from "@/components/Toast";
+import { VoiceInputSheet } from "@/components/voice/VoiceInputSheet";
 import { getCategoryColor } from "@/constants/categoryColors";
 import { ENABLE_RECOMMENDED_ACTIONS } from "@/constants/recommendedActions";
 import { getRoomPlaceholderIcon } from "@/constants/roomVisuals";
@@ -55,7 +56,9 @@ import { isStoragePath } from "@/lib/storage-helpers";
 import { formatUploadFailure, uploadCoverPhoto } from "@/lib/photo-upload";
 import { isRecentItem } from "@/lib/recent-items";
 import { supabase } from "@/lib/supabase";
+import { subtractDeletedItems, withoutRoomItems } from "@/lib/room-deletion";
 import type { InventoryItem, InventoryRoom } from "@/types";
+import type { VoiceItemPatch } from "@/types/voice";
 
 const COVER_H = 200;
 const TEAL = "#1D9E75";
@@ -195,6 +198,7 @@ function ItemCard({
   const [unitPriceDraft, setUnitPriceDraft] = useState(String(getItemUnitPrice(item)));
   const [savingCard, setSavingCard] = useState(false);
   const [barcodeScanOpen, setBarcodeScanOpen] = useState(false);
+  const [voiceEditOpen, setVoiceEditOpen] = useState(false);
 
   useEffect(() => {
     if (!editingTarget) {
@@ -365,6 +369,17 @@ function ItemCard({
 
   const saveValuationEdit = saveItemEdit;
   const cancelInlineEdit = cancelEdit;
+
+  const applyVoicePatchToQuickEdit = (patch: VoiceItemPatch) => {
+    if (typeof patch.name === "string" && patch.name.trim()) setNameDraft(patch.name.trim());
+    if (typeof patch.quantity === "number" && Number.isFinite(patch.quantity)) {
+      setQuantityDraft(String(Math.max(1, Math.round(patch.quantity))));
+    }
+    const replacementPrice = patch.unit_estimated_price ?? patch.estimated_price;
+    if (typeof replacementPrice === "number" && Number.isFinite(replacementPrice) && replacementPrice >= 0) {
+      setUnitPriceDraft(String(Math.round(replacementPrice * 100) / 100));
+    }
+  };
 
   const goToDetail = async () => {
     await Haptics.selectionAsync();
@@ -808,7 +823,18 @@ function ItemCard({
               },
             ]}
           >
-            <Text style={[styles.nameModalTitle, { color: colors.foreground }]}>Edit item</Text>
+            <View style={styles.quickEditHeader}>
+              <Text style={[styles.nameModalTitle, { color: colors.foreground }]}>Edit item</Text>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Update quick-edit fields with voice"
+                onPress={() => setVoiceEditOpen(true)}
+                style={[styles.quickEditVoiceButton, { backgroundColor: colors.secondary }]}
+              >
+                <Feather name="mic" size={15} color={colors.primary} />
+                <Text style={[styles.quickEditVoiceText, { color: colors.primary }]}>Voice</Text>
+              </Pressable>
+            </View>
             <View style={styles.editFieldGroup}>
               <Text style={[styles.editFieldLabel, { color: colors.mutedForeground }]}>Name</Text>
               <TextInput
@@ -904,6 +930,19 @@ function ItemCard({
           </View>
         </Pressable>
       </Modal>
+      <VoiceInputSheet
+        visible={voiceEditOpen}
+        title="Update item with voice"
+        currentValues={{
+          name: nameDraft,
+          quantity: draftQuantity,
+          estimated_price: draftUnitPrice,
+          unit_estimated_price: draftUnitPrice,
+        }}
+        context={{ currentName: nameDraft }}
+        onClose={() => setVoiceEditOpen(false)}
+        onApply={applyVoicePatchToQuickEdit}
+      />
       <BarcodeScanFlow
         visible={barcodeScanOpen}
         item={item}
@@ -1576,6 +1615,35 @@ export default function ItemsScreen() {
         .eq("id", id);
       if (archiveError) throw archiveError;
 
+      const { data: deletedItems, error: deleteItemsError } = await supabase
+        .from("inventory_items")
+        .delete()
+        .eq("room_id", id)
+        .select("id, room_id");
+      if (deleteItemsError) {
+        // Keep the room visible if its child rows could not be removed. This
+        // avoids leaving an archived room whose values still affect summaries.
+        await supabase
+          .from("inventory_rooms")
+          .update({ archived_at: null })
+          .eq("id", id);
+        throw deleteItemsError;
+      }
+
+      const deletedItemCount = deletedItems?.length ?? 0;
+      queryClient.setQueryData<InventoryItem[]>(
+        ["property-items", resolvedFileId, session?.user.id],
+        (current) => withoutRoomItems(current, id),
+      );
+      queryClient.setQueryData<InventoryItem[]>(
+        ["all-items", "home-valuation", session?.user.id],
+        (current) => withoutRoomItems(current, id),
+      );
+      queryClient.setQueryData<number>(
+        ["all-items", "exact-count", session?.user.id],
+        (current) => subtractDeletedItems(current, deletedItemCount),
+      );
+
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["room", id] }),
         queryClient.invalidateQueries({ queryKey: ["items", id] }),
@@ -1584,8 +1652,12 @@ export default function ItemsScreen() {
         queryClient.invalidateQueries({ queryKey: ["property", resolvedFileId] }),
         queryClient.invalidateQueries({ queryKey: ["property-items", resolvedFileId] }),
         queryClient.invalidateQueries({ queryKey: ["all-items"] }),
+        queryClient.invalidateQueries({ queryKey: ["all-rooms-count", session?.user.id] }),
+        queryClient.invalidateQueries({ queryKey: ["item-scan-dates", resolvedFileId] }),
+        queryClient.invalidateQueries({ queryKey: ["claim-pack-items", resolvedFileId] }),
       ]);
-      showToast("Room removed from active rooms");
+      queryClient.removeQueries({ queryKey: ["items", id] });
+      showToast("Room and its items deleted");
       navigateToProperty();
     } catch (archiveFailure) {
       Alert.alert(
@@ -1601,7 +1673,7 @@ export default function ItemsScreen() {
     if (archivingRoom) return;
     Alert.alert(
       "Remove room?",
-      `${resolvedRoomName} will be removed from your active room list. Its items are not immediately deleted from inventory records, but there is not yet a visible restore option in the app.`,
+      `${resolvedRoomName} and all items in it will be permanently deleted. This cannot be undone.`,
       [
         { text: "Cancel", style: "cancel" },
         { text: "Remove room", style: "destructive", onPress: () => void archiveRoom() },
@@ -2814,6 +2886,9 @@ const styles = StyleSheet.create({
     elevation: 12,
   },
   nameModalTitle: { fontSize: 16, fontFamily: "Inter_600SemiBold" },
+  quickEditHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12 },
+  quickEditVoiceButton: { minHeight: 32, borderRadius: 16, paddingHorizontal: 10, flexDirection: "row", alignItems: "center", gap: 5 },
+  quickEditVoiceText: { fontSize: 12, fontFamily: "Inter_600SemiBold" },
   nameModalInput: {
     minHeight: 92,
     maxHeight: 150,
