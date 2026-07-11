@@ -2257,33 +2257,40 @@ export default function ItemsScreen() {
             />
           ),
           headerRight: () => (
-            <View style={{ flexDirection: "row", gap: 4, alignItems: "center" }}>
+            <View style={styles.headerActions}>
+              <View style={[styles.headerViewTools, { backgroundColor: colors.secondary, borderColor: colors.border }]}>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Search and filter items"
+                  onPress={() => setFilterModalVisible(true)}
+                  style={styles.headerIconButton}
+                  hitSlop={8}
+                >
+                  <Feather name="search" size={19} color={colors.primary} />
+                  {filtersActive ? <View style={[styles.headerActiveDot, { backgroundColor: colors.primary }]} /> : null}
+                </Pressable>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={viewMode === "compact" ? "Show detailed list" : "Show compact grid"}
+                  onPress={() => {
+                    const nextMode = viewMode === "compact" ? "detailed" : "compact";
+                    liveScrollOffsetRef.current = 0;
+                    updateRoomViewSession(id, { viewMode: nextMode, offset: 0, anchorItemId: null });
+                    restoredRoomScrollRef.current = true;
+                    setViewMode(nextMode);
+                  }}
+                  style={styles.headerIconButton}
+                  hitSlop={8}
+                >
+                  <Feather name={viewMode === "compact" ? "list" : "grid"} size={19} color={colors.primary} />
+                </Pressable>
+              </View>
               <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="Search and filter items"
-                onPress={() => setFilterModalVisible(true)}
-                style={styles.headerIconButton}
+                onPress={handleArchiveRoom}
+                disabled={archivingRoom}
+                style={[styles.headerDeleteButton, { backgroundColor: colors.secondary, borderColor: colors.border }]}
                 hitSlop={8}
               >
-                <Feather name="search" size={19} color={colors.primary} />
-                {filtersActive ? <View style={[styles.headerActiveDot, { backgroundColor: colors.primary }]} /> : null}
-              </Pressable>
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel={viewMode === "compact" ? "Show detailed list" : "Show compact grid"}
-                onPress={() => {
-                  const nextMode = viewMode === "compact" ? "detailed" : "compact";
-                  liveScrollOffsetRef.current = 0;
-                  updateRoomViewSession(id, { viewMode: nextMode, offset: 0, anchorItemId: null });
-                  restoredRoomScrollRef.current = true;
-                  setViewMode(nextMode);
-                }}
-                style={styles.headerIconButton}
-                hitSlop={8}
-              >
-                <Feather name={viewMode === "compact" ? "list" : "grid"} size={19} color={colors.primary} />
-              </Pressable>
-              <Pressable onPress={handleArchiveRoom} disabled={archivingRoom} style={{ padding: 4 }} hitSlop={8}>
                 {archivingRoom ? (
                   <ActivityIndicator size="small" color="#B91C1C" />
                 ) : (
@@ -2832,6 +2839,28 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     position: "relative",
+  },
+  headerActions: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 11,
+  },
+  headerViewTools: {
+    height: 32,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    paddingHorizontal: 2,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 16,
+  },
+  headerDeleteButton: {
+    width: 32,
+    height: 32,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 16,
   },
   headerActiveDot: {
     position: "absolute",
