@@ -8,9 +8,12 @@ const formSource = source("../../components/ItemMaintenanceForm.tsx");
 const detailSource = source("../../app/(tabs)/item/[id].tsx");
 const oldRouteSource = source("../../app/(tabs)/edit-item/[id].tsx");
 const claimPackSource = source("../../app/(tabs)/claim-pack/[fileId].tsx");
+const evidenceSource = source("../../components/ItemEvidenceSection.tsx");
+const photoSource = source("../../components/DraggablePhotoStrip.tsx");
 
 test("Item Detail mounts the single complete maintenance form", () => {
-  assert.ok(detailSource.includes("<ItemMaintenanceForm ref={maintenanceFormRef}"));
+  assert.ok(detailSource.includes("<ItemMaintenanceForm"));
+  assert.ok(detailSource.includes("ref={maintenanceFormRef}"));
   for (const label of ["Name", "Description", "Category", "Each price ($)", "Quantity", "Brand / Maker", "Model / Series", "Condition", "Purchased from", "Purchase year", "Original price ($)", "Notes", "ROOM", "PHOTOS"]) {
     assert.ok(formSource.includes(label), `Missing ${label}`);
   }
@@ -18,8 +21,14 @@ test("Item Detail mounts the single complete maintenance form", () => {
   assert.equal(formSource.includes('styles.save'), false);
 });
 
-test("product details are collapsed by default and voice updates the draft", () => {
-  assert.ok(formSource.includes("useState(false)"));
+test("Overview keeps both whole-form and field-level voice editing", () => {
+  assert.ok(formSource.includes(">OVERVIEW</Text>"));
+  assert.ok(formSource.includes("Fill or edit with voice"));
+  assert.ok(formSource.includes("<VoiceFieldButton"));
+});
+
+test("product details are expanded by default and voice updates the draft", () => {
+  assert.ok(formSource.includes("useState(true)"));
   assert.ok(formSource.includes("Brand, model, condition and purchase history"));
   assert.ok(formSource.includes("onApply={applyVoice}"));
 });
@@ -48,12 +57,37 @@ test("field voice actions and product placeholders are restored", () => {
   }
 });
 
-test("supporting sections finish with barcode, valuation, then delete", () => {
+test("Value is consolidated before product details, evidence, and delete", () => {
+  const valueIndex = formSource.indexOf(">VALUE</Text>");
+  const productIndex = formSource.indexOf("Product & purchase details");
   const evidenceIndex = detailSource.indexOf("<ItemEvidenceSection");
-  const barcodeIndex = detailSource.lastIndexOf('<Section title="PRODUCT INFO"');
-  const valuationIndex = detailSource.lastIndexOf('<Section title="VALUATION CONTEXT"');
   const deleteIndex = detailSource.lastIndexOf('<Section title="DELETE ITEM"');
-  assert.ok(evidenceIndex < barcodeIndex && barcodeIndex < valuationIndex && valuationIndex < deleteIndex);
+  assert.ok(valueIndex < productIndex);
+  assert.ok(evidenceIndex < deleteIndex);
+  for (const label of ["Each price ($)", "Quantity", "Recorded total", "Value source", "Review replacement price"]) {
+    assert.ok(formSource.includes(label), `Missing consolidated value label ${label}`);
+  }
+  assert.equal(detailSource.includes("VALUATION CONTEXT"), false);
+});
+
+test("barcode is supplied inside Product and Purchase Details without a standalone card", () => {
+  assert.ok(formSource.includes("{barcodeAction}"));
+  assert.ok(detailSource.includes("barcodeAction={("));
+  assert.equal(detailSource.includes('title="PRODUCT INFO"'), false);
+});
+
+test("evidence metadata is user-facing and never renders the stored filename", () => {
+  assert.ok(evidenceSource.includes("evidenceMetadata(item)"));
+  assert.ok(evidenceSource.includes("Added ${date}"));
+  assert.equal(evidenceSource.includes("${evidenceFileType(item.filename)} · ${item.filename}"), false);
+  assert.equal(evidenceSource.includes("Delete ${item.filename}"), false);
+});
+
+test("photo guidance and primary affordances only appear for multiple photos", () => {
+  assert.ok(photoSource.includes("photos.length > 1 ? <Text"));
+  assert.ok(photoSource.includes("total > 1 && index === 0"));
+  assert.ok(photoSource.includes(".enabled(total > 1)"));
+  assert.ok(photoSource.includes("Add photo caption"));
 });
 
 test("the combined form has one explicit inventory update", () => {
@@ -69,7 +103,7 @@ test("old Edit Item entry points redirect or link directly to Item Detail", () =
 });
 
 test("supporting Item Detail functions remain available", () => {
-  for (const feature of ["handleReplacementPricing", "ItemEvidenceSection", "BarcodeScanFlow", "handleDeleteItem", "VALUATION CONTEXT", "handleRepositionPin"]) {
+  for (const feature of ["handleReplacementPricing", "ItemEvidenceSection", "BarcodeScanFlow", "handleDeleteItem", "handleRepositionPin"]) {
     assert.ok(detailSource.includes(feature), `Missing ${feature}`);
   }
 });

@@ -22,6 +22,8 @@ import {
   StyleSheet,
   Text,
   TextInput,
+  type NativeScrollEvent,
+  type NativeSyntheticEvent,
   useWindowDimensions,
   View,
 } from "react-native";
@@ -56,6 +58,12 @@ import { useSignedImageRecovery, useSignedUrl, useSignedUrls } from "@/hooks/use
 import { isStoragePath } from "@/lib/storage-helpers";
 import { formatUploadFailure, uploadCoverPhoto } from "@/lib/photo-upload";
 import { itemWithCommittedPin, replaceItemWithCommittedPin } from "@/lib/item-pin-state";
+import {
+  filterItemsNeedingAttention,
+  itemMatchesAttention,
+  itemNeedsRoomReview,
+  type ItemAttentionFilter,
+} from "@/lib/item-attention";
 import { takeRecentItemBatch, withoutRecentItem } from "@/lib/recent-items";
 import { clearRoomViewSession, getRoomViewSession, resolveRoomRestoreIndex, updateRoomViewSession } from "@/lib/room-view-session";
 import { supabase } from "@/lib/supabase";
@@ -66,7 +74,6 @@ import type { VoiceItemPatch } from "@/types/voice";
 const COVER_H = 200;
 const TEAL = "#1D9E75";
 const STICKY_ACTION_CLEARANCE = 96;
-const HIGH_VALUE_EVIDENCE_THRESHOLD = 1000;
 
 /** Maps category key → Feather icon name */
 const CATEGORY_ICONS: Record<string, keyof typeof Feather.glyphMap> = {
@@ -106,28 +113,10 @@ function valuationLabel(item: InventoryItem): string | null {
   return null;
 }
 
-function isAiEstimate(item: InventoryItem): boolean {
-  const source = `${item.price_source_type ?? ""} ${item.valuation_basis ?? ""}`.toLowerCase();
-  return source.includes("ai") || source.includes("scan");
-}
-
-function hasUnclearDetails(item: InventoryItem): boolean {
-  const name = item.name.trim().toLowerCase();
-  return (
-    name.length < 3 ||
-    ["item", "unknown", "object", "misc", "miscellaneous"].includes(name)
-  );
-}
-
-function needsRoomReview(item: InventoryItem): boolean {
-  const lowConfidence = item.confidence != null && item.confidence < 0.7;
-  return !hasValue(item) || item.quantity == null || lowConfidence || hasUnclearDetails(item);
-}
-
 function itemReadinessChip(item: InventoryItem): string | null {
   if (!item.image_url && !item.photo_url) return "No photo";
   if (!hasValue(item)) return "No value";
-  if (needsRoomReview(item)) return "Check details";
+  if (itemNeedsRoomReview(item)) return "Check details";
   return null;
 }
 
@@ -145,10 +134,6 @@ type RoomViewMode = "detailed" | "compact";
 type RoomReadinessFilter = "all" | "needs_review" | "missing_photo" | "missing_value";
 type RoomSortOption = "recent" | "value_desc" | "value_asc" | "name_asc";
 
-function roomItemHasPhoto(item: InventoryItem): boolean {
-  return Boolean(item.image_url || item.photo_url);
-}
-
 function normalizedItemPin(item: InventoryItem): { x: number; y: number } | null {
   const raw = item.image_pin as Record<string, unknown> | null | undefined;
   return raw && typeof raw.x === "number" && typeof raw.y === "number"
@@ -158,9 +143,9 @@ function normalizedItemPin(item: InventoryItem): { x: number; y: number } | null
 
 function roomItemMatchesReadiness(item: InventoryItem, filter: RoomReadinessFilter): boolean {
   if (filter === "all") return true;
-  if (filter === "needs_review") return needsRoomReview(item);
-  if (filter === "missing_photo") return !roomItemHasPhoto(item);
-  if (filter === "missing_value") return !hasValue(item);
+  if (filter === "needs_review") return itemNeedsRoomReview(item);
+  if (filter === "missing_photo") return itemMatchesAttention(item, "missing_photo");
+  if (filter === "missing_value") return itemMatchesAttention(item, "missing_value");
   return true;
 }
 
@@ -1226,7 +1211,11 @@ export default function ItemsScreen() {
   const roomViewabilityConfig = useRef({ itemVisiblePercentThreshold: 20 }).current;
   const liveScrollOffsetRef = useRef(initialViewSession?.offset ?? 0);
 
-  const persistRoomScrollSnapshot = React.useCallback(() => {
+  const persistRoomScrollSnapshot = React.useCallback((event?: NativeSyntheticEvent<NativeScrollEvent>) => {
+    const settledOffset = event?.nativeEvent.contentOffset.y;
+    if (typeof settledOffset === "number") {
+      liveScrollOffsetRef.current = settledOffset;
+    }
     updateRoomViewSession(id, {
       offset: liveScrollOffsetRef.current,
       viewMode,
@@ -1694,21 +1683,17 @@ export default function ItemsScreen() {
   const roomRecommendedAction = React.useMemo(() => {
     if (!ENABLE_RECOMMENDED_ACTIONS || !items) return null;
 
-    const openItem = (item: InventoryItem, extraParams?: Record<string, string>) => {
-      clearNewItemOnOpen(item.id);
+    const openAttention = (filter: ItemAttentionFilter) => {
       router.push({
-        pathname: "/(tabs)/item/[id]",
+        pathname: "/(tabs)/items-needing-attention",
         params: {
-          id: item.id,
-          name: item.name,
           roomId: id,
           roomName: resolvedRoomName,
           fileId: resolvedFileId ?? "",
           fileName: resolvedPropertyName,
-          origin: "room",
-          ...extraParams,
+          filter,
         },
-      });
+      } as Href);
     };
 
     if (items.length === 0) {
@@ -1720,39 +1705,55 @@ export default function ItemsScreen() {
       };
     }
 
-    const reviewItems = items.filter(needsRoomReview);
-    if (reviewItems.length > 0) {
+    const missingPhotoItems = filterItemsNeedingAttention(items, "missing_photo");
+    if (missingPhotoItems.length > 0) {
       return {
-        body: `${reviewItems.length} item${reviewItems.length === 1 ? "" : "s"} need review`,
-        detail: "Review items that may be missing a value, quantity, or clear details.",
-        primaryLabel: "Show item",
-        onPrimaryPress: () => openItem(reviewItems[0]),
+        body: `${missingPhotoItems.length} item${missingPhotoItems.length === 1 ? " is" : "s are"} missing a photo`,
+        detail: "Add a primary photo to make these records easier to identify.",
+        primaryLabel: "View items",
+        onPrimaryPress: () => openAttention("missing_photo"),
+      };
+    }
+
+    const missingValueItems = filterItemsNeedingAttention(items, "missing_value");
+    if (missingValueItems.length > 0) {
+      return {
+        body: `${missingValueItems.length} item${missingValueItems.length === 1 ? " is" : "s are"} missing a value`,
+        detail: "Add or review values to improve this room's recorded total.",
+        primaryLabel: "View items",
+        onPrimaryPress: () => openAttention("missing_value"),
+      };
+    }
+
+    const detailReviewItems = filterItemsNeedingAttention(items, "needs_details");
+    if (detailReviewItems.length > 0) {
+      return {
+        body: `${detailReviewItems.length} item${detailReviewItems.length === 1 ? " needs" : "s need"} review`,
+        detail: "Review items with an unclear name, quantity, or confidence level.",
+        primaryLabel: "View items",
+        onPrimaryPress: () => openAttention("needs_details"),
       };
     }
 
     if (!evidenceCountsLoading) {
-      const highValueWithoutEvidence = items.filter(
-        (item) =>
-          getItemTotalValue(item) >= HIGH_VALUE_EVIDENCE_THRESHOLD &&
-          (evidenceCounts[item.id] ?? 0) === 0,
-      );
+      const highValueWithoutEvidence = filterItemsNeedingAttention(items, "missing_evidence", evidenceCounts);
       if (highValueWithoutEvidence.length > 0) {
         return {
           body: "Add evidence to high-value items",
           detail: "Receipts or photos can strengthen these records.",
-          primaryLabel: "Review",
-          onPrimaryPress: () => openItem(highValueWithoutEvidence[0], { evidence: "add" }),
+          primaryLabel: "View items",
+          onPrimaryPress: () => openAttention("missing_evidence"),
         };
       }
     }
 
-    const aiEstimateItems = items.filter(isAiEstimate);
+    const aiEstimateItems = filterItemsNeedingAttention(items, "ai_value");
     if (aiEstimateItems.length > 0) {
       return {
         body: "Check replacement values",
         detail: "Replace AI estimates with current replacement listings where useful.",
-        primaryLabel: "Review",
-        onPrimaryPress: () => openItem(aiEstimateItems[0]),
+        primaryLabel: "View items",
+        onPrimaryPress: () => openAttention("ai_value"),
       };
     }
 
@@ -2348,12 +2349,7 @@ export default function ItemsScreen() {
             ]}
             onScroll={Animated.event(
               [{ nativeEvent: { contentOffset: { y: scrollY } } }],
-              {
-                useNativeDriver: false,
-                listener: (event: { nativeEvent: { contentOffset: { y: number } } }) => {
-                  liveScrollOffsetRef.current = event.nativeEvent.contentOffset.y;
-                },
-              }
+              { useNativeDriver: true },
             )}
             onScrollEndDrag={persistRoomScrollSnapshot}
             onMomentumScrollEnd={persistRoomScrollSnapshot}

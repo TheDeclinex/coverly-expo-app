@@ -1080,42 +1080,10 @@ function RoomCard({
   const categoryTotal = categoryValues.reduce((sum, category) => sum + category.value, 0);
   const completionPct = itemCount > 0 ? Math.min(completedCount / itemCount, 1) : 0;
   const ringOffset = RING_CIRC * (1 - completionPct);
-  const ringProgress = useRef(new Animated.Value(0)).current;
-  const [renderedRingProgress, setRenderedRingProgress] = useState(0);
   const [categoryLegendVisible, setCategoryLegendVisible] = useState(false);
   const completePulse = useRef(new Animated.Value(0)).current;
   const completionLabel =
     completionPct >= 1 ? "Complete" : `${Math.round(completionPct * 100)}% complete`;
-  const renderedRingOffset = RING_CIRC * (1 - completionPct * renderedRingProgress);
-
-  useEffect(() => {
-    let cancelled = false;
-    let animation: Animated.CompositeAnimation | null = null;
-    const listenerId = ringProgress.addListener(({ value }) => {
-      setRenderedRingProgress(value);
-    });
-
-    void AccessibilityInfo.isReduceMotionEnabled().then((reduceMotion) => {
-      if (cancelled) return;
-      setRenderedRingProgress(reduceMotion ? 1 : 0);
-      ringProgress.setValue(reduceMotion ? 1 : 0);
-      if (!reduceMotion && completionPct > 0) {
-        animation = Animated.timing(ringProgress, {
-          toValue: 1,
-          duration: 750,
-          easing: Easing.out(Easing.cubic),
-          useNativeDriver: false,
-        });
-        animation.start();
-      }
-    });
-
-    return () => {
-      cancelled = true;
-      animation?.stop();
-      ringProgress.removeListener(listenerId);
-    };
-  }, [completionPct, ringProgress]);
 
   useEffect(() => {
     if (!completionPulse) return;
@@ -1199,7 +1167,7 @@ function RoomCard({
                 strokeWidth={completionPct >= 1 ? 3 : 2.5}
                 strokeLinecap="round"
                 strokeDasharray={`${RING_CIRC} ${RING_CIRC}`}
-                strokeDashoffset={renderedRingOffset}
+                strokeDashoffset={ringOffset}
               />
             )}
           </Svg>
@@ -1377,6 +1345,20 @@ function RoomCard({
 }
 
 // ─── Cover amount modal ───────────────────────────────────────────────────────
+
+const MemoizedRoomCard = React.memo(
+  RoomCard,
+  (previous, next) =>
+    previous.item === next.item
+    && previous.propertyName === next.propertyName
+    && previous.itemCount === next.itemCount
+    && previous.totalValue === next.totalValue
+    && previous.categoryValues === next.categoryValues
+    && previous.completedCount === next.completedCount
+    && previous.completionPulse === next.completionPulse
+    && previous.colors === next.colors
+    && previous.resolvedCoverUrl === next.resolvedCoverUrl,
+);
 
 function CoverAmountModal({
   visible,
@@ -2726,12 +2708,12 @@ export default function PropertyDetailScreen() {
           keyExtractor={(rs) => rs.room.id}
           onScroll={Animated.event(
             [{ nativeEvent: { contentOffset: { y: scrollY } } }],
-            { useNativeDriver: false },
+            { useNativeDriver: true },
           )}
           scrollEventThrottle={16}
           renderItem={({ item: rs }) => (
             <View style={{ paddingHorizontal: 16, marginBottom: 10 }}>
-              <RoomCard
+              <MemoizedRoomCard
                 item={rs.room}
                 propertyName={property?.name ?? name ?? "Property"}
                 itemCount={rs.itemCount}
