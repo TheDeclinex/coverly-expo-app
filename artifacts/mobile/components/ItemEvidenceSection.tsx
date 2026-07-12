@@ -72,6 +72,15 @@ function evidenceFileType(filename: string): string {
   return extension === "JPEG" ? "JPG" : extension;
 }
 
+function evidenceMetadata(item: ClaimEvidence): string {
+  const date = new Date(item.document_date ?? item.upload_date).toLocaleDateString("en-NZ", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  });
+  return `Added ${date} · ${evidenceFileType(item.filename)}`;
+}
+
 export function ItemEvidenceSection({
   itemId,
   fileId,
@@ -301,13 +310,12 @@ export function ItemEvidenceSection({
                     </Text>
                   </View>
                   <Text style={[styles.dateText, { color: colors.mutedForeground }]} numberOfLines={1}>
-                    {new Date(item.document_date ?? item.upload_date).toLocaleDateString("en-NZ")}
-                    {` · ${evidenceFileType(item.filename)} · ${item.filename}`}
+                    {evidenceMetadata(item)}
                   </Text>
                   {item.caption ? <Text style={[styles.caption, { color: colors.mutedForeground }]} numberOfLines={2}>{item.caption}</Text> : null}
                 </View>
                 <Pressable
-                  accessibilityLabel={`Delete ${item.filename}`}
+                  accessibilityLabel={`Delete ${EVIDENCE_DISPLAY_LABEL[item.evidence_type]}`}
                   onPress={(event) => {
                     event.stopPropagation();
                     confirmDelete(item);

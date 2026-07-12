@@ -44,6 +44,7 @@ function PhotoCard({
   onCaptionChange: (caption: string) => void;
   colors: ReturnType<typeof useColors>;
 }) {
+  const [captionEditing, setCaptionEditing] = React.useState(false);
   const translateX = useSharedValue(0);
   const scale = useSharedValue(1);
   const isDragging = useSharedValue(false);
@@ -57,6 +58,7 @@ function PhotoCard({
   }, []);
 
   const panGesture = Gesture.Pan()
+    .enabled(total > 1)
     .activateAfterLongPress(450)
     .onStart(() => {
       isDragging.value = true;
@@ -133,7 +135,7 @@ function PhotoCard({
             }
           />
 
-          {index === 0 && (
+          {total > 1 && index === 0 && (
             <View
               style={{
                 position: "absolute",
@@ -176,18 +178,14 @@ function PhotoCard({
             <Feather name="x" size={11} color="#fff" />
           </Pressable>
 
-          <View
-            style={{
-              position: "absolute",
-              bottom: 5,
-              right: 5,
-              opacity: 0.7,
-            }}
-          >
-            <Feather name="menu" size={13} color="#fff" />
-          </View>
+          {total > 1 ? (
+            <View style={{ position: "absolute", bottom: 5, right: 5, opacity: 0.7 }}>
+              <Feather name="menu" size={13} color="#fff" />
+            </View>
+          ) : null}
         </View>
 
+        {total > 1 || captionEditing || photo.caption.trim() ? (
         <TextInput
           value={photo.caption}
           onChangeText={onCaptionChange}
@@ -208,6 +206,11 @@ function PhotoCard({
           maxLength={60}
           returnKeyType="done"
         />
+        ) : (
+          <Pressable accessibilityRole="button" accessibilityLabel="Add photo caption" onPress={() => setCaptionEditing(true)}>
+            <Text style={{ fontSize: 11, fontFamily: "Inter_500Medium", color: colors.primary }}>Add caption</Text>
+          </Pressable>
+        )}
       </Animated.View>
     </GestureDetector>
   );
@@ -285,7 +288,7 @@ export function DraggablePhotoStrip({ photos, onChange, colors }: Props) {
 
   return (
     <View style={{ gap: 8 }}>
-      <Text
+      {photos.length > 1 ? <Text
         style={{
           fontSize: 11,
           fontFamily: "Inter_400Regular",
@@ -293,7 +296,7 @@ export function DraggablePhotoStrip({ photos, onChange, colors }: Props) {
         }}
       >
         Hold & drag a photo to reorder · First photo is the cover
-      </Text>
+      </Text> : null}
 
       <ScrollView
         horizontal
