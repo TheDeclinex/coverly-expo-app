@@ -14,6 +14,7 @@ import {
   FlatList,
   Keyboard,
   KeyboardAvoidingView,
+  Linking,
   Modal,
   Platform,
   Pressable,
@@ -68,12 +69,19 @@ import { takeRecentItemBatch, withoutRecentItem } from "@/lib/recent-items";
 import { clearRoomViewSession, getRoomViewSession, resolveRoomRestoreIndex, updateRoomViewSession } from "@/lib/room-view-session";
 import { supabase } from "@/lib/supabase";
 import { subtractDeletedItems, withoutRoomItems } from "@/lib/room-deletion";
+import { roomCoverActions, withRoomCoverPhoto, withRoomListCoverPhoto, type RoomCoverAction } from "@/lib/room-cover-photo";
 import type { InventoryItem, InventoryRoom } from "@/types";
 import type { VoiceItemPatch } from "@/types/voice";
 
 const COVER_H = 200;
 const TEAL = "#1D9E75";
 const STICKY_ACTION_CLEARANCE = 96;
+const ROOM_COVER_PICKER_OPTIONS: ImagePicker.ImagePickerOptions = {
+  mediaTypes: ["images"],
+  quality: 0.85,
+  allowsEditing: true,
+  aspect: [16, 9],
+};
 
 /** Maps category key → Feather icon name */
 const CATEGORY_ICONS: Record<string, keyof typeof Feather.glyphMap> = {
@@ -1188,6 +1196,7 @@ export default function ItemsScreen() {
   const [coverUploading, setCoverUploading] = useState(false);
   const [localCoverUrl, setLocalCoverUrl] = useState<string | null>(null);
   const [coverSavedTick, setCoverSavedTick] = useState(false);
+  const [coverActionSheetVisible, setCoverActionSheetVisible] = useState(false);
   const [archivingRoom, setArchivingRoom] = useState(false);
   const [newItemIds, setNewItemIds] = useState<Set<string>>(new Set());
   const [roomImageViewer, setRoomImageViewer] = useState<{ item?: InventoryItem; uri: string; title: string } | null>(null);
@@ -1859,42 +1868,51 @@ export default function ItemsScreen() {
     );
   }, [archiveRoom, archivingRoom, resolvedRoomName]);
 
-  const handlePickRoomCover = async () => {
-    if (coverUploading) return;
-    if (Platform.OS !== "web") {
-      const { status } = await ImagePicker.requestCameraPermissionsAsync();
-      if (status !== "granted") {
-        Alert.alert(
-          "Permission needed",
-          "Allow camera access to take a room cover photo."
-        );
-        return;
-      }
+  const refreshRoomCover = React.useCallback((coverPhotoUrl: string | null) => {
+    queryClient.setQueryData<InventoryRoom>(
+      ["room", id, session?.user.id],
+      (current) => withRoomCoverPhoto(current, coverPhotoUrl),
+    );
+    if (resolvedFileId) {
+      queryClient.setQueriesData<InventoryRoom[]>(
+        { queryKey: ["rooms", resolvedFileId] },
+        (current) => withRoomListCoverPhoto(current, id, coverPhotoUrl),
+      );
     }
-    const pickerOptions: ImagePicker.ImagePickerOptions = {
-      mediaTypes: ["images"],
-      quality: 0.85,
-      allowsEditing: true,
-      aspect: [16, 9],
-    };
-    const result = Platform.OS === "web"
-      ? await ImagePicker.launchImageLibraryAsync(pickerOptions)
-      : await ImagePicker.launchCameraAsync(pickerOptions);
-    if (result.canceled || !result.assets[0]) return;
+  }, [id, queryClient, resolvedFileId, session?.user.id]);
+
+  const showPermissionHelp = React.useCallback((source: "camera" | "photo library") => {
+    Alert.alert(
+      `${source === "camera" ? "Camera" : "Photo library"} access needed`,
+      `Coverly needs ${source} access to ${source === "camera" ? "take" : "choose"} a room cover photo. You can enable access in your device settings.`,
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Open settings",
+          onPress: () => void Linking.openSettings().catch(() => {
+            Alert.alert("Settings unavailable", "Please open your device settings and allow photo access for Coverly.");
+          }),
+        },
+      ],
+    );
+  }, []);
+
+  const saveRoomCover = React.useCallback(async (selectedUri: string) => {
+    if (coverUploading) return;
     if (!session?.user.id) return;
-    const selectedUri = result.assets[0].uri;
+    const previousLocalCoverUrl = localCoverUrl;
     setCoverUploading(true);
     setLocalCoverUrl(selectedUri);
     try {
       const uploaded = await uploadCoverPhoto(
         selectedUri,
         session.user.id,
-        { source: "room_cover", fileId: fileId ?? undefined }
+        { source: "room_cover", fileId: resolvedFileId ?? undefined }
       );
       if (!uploaded.ok) {
         const diagnostic = formatUploadFailure(uploaded);
         if (__DEV__) console.warn("[roomCover] Upload diagnostic\n" + diagnostic);
-        setLocalCoverUrl(null);
+        setLocalCoverUrl(previousLocalCoverUrl);
         Alert.alert("Room cover upload failed", diagnostic);
         return;
       }
@@ -1907,31 +1925,100 @@ export default function ItemsScreen() {
         .select("id");
       if (updateError) {
         if (__DEV__) console.error("[roomCover] DB update error:", updateError);
-        setLocalCoverUrl(null);
+        setLocalCoverUrl(previousLocalCoverUrl);
         Alert.alert("Save failed", updateError.message);
         return;
       }
       if (!updatedRows || updatedRows.length === 0) {
         if (__DEV__) console.error("[roomCover] DB update matched 0 rows — possible missing UPDATE RLS policy. Run supabase/migrations/add_update_policies.sql.");
-        setLocalCoverUrl(null);
+        setLocalCoverUrl(previousLocalCoverUrl);
         Alert.alert("Save failed", "Cover photo could not be saved. Please check your connection and try again.");
         return;
       }
       // Invalidate the room query and the signed URL cache for the new path so
       // useSignedUrl immediately re-fetches and the new cover appears right away.
+      refreshRoomCover(uploaded.path);
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["room", id] }),
         queryClient.invalidateQueries({ queryKey: ["signed-url", uploaded.path] }),
-        queryClient.invalidateQueries({ queryKey: ["rooms", fileId] }),
-        queryClient.invalidateQueries({ queryKey: ["rooms", fileId, session.user.id] }),
+        queryClient.invalidateQueries({ queryKey: ["rooms", resolvedFileId] }),
+        queryClient.invalidateQueries({ queryKey: ["rooms", resolvedFileId, session.user.id] }),
       ]);
       showToast("Room photo saved");
       setCoverSavedTick(true);
       setTimeout(() => setCoverSavedTick(false), 1800);
+    } catch (error) {
+      setLocalCoverUrl(previousLocalCoverUrl);
+      Alert.alert(
+        "Couldn't update room photo",
+        error instanceof Error ? error.message : "The photo could not be processed or uploaded. Please try again.",
+      );
     } finally {
       setCoverUploading(false);
     }
-  };
+  }, [coverUploading, id, localCoverUrl, queryClient, refreshRoomCover, resolvedFileId, session?.user.id, showToast]);
+
+  const pickRoomCover = React.useCallback(async (source: "camera" | "library") => {
+    if (coverUploading) return;
+    try {
+      if (Platform.OS !== "web") {
+        const permission = source === "camera"
+          ? await ImagePicker.requestCameraPermissionsAsync()
+          : await ImagePicker.requestMediaLibraryPermissionsAsync();
+        if (permission.status !== "granted") {
+          showPermissionHelp(source === "camera" ? "camera" : "photo library");
+          return;
+        }
+      }
+      const result = source === "camera" && Platform.OS !== "web"
+        ? await ImagePicker.launchCameraAsync(ROOM_COVER_PICKER_OPTIONS)
+        : await ImagePicker.launchImageLibraryAsync(ROOM_COVER_PICKER_OPTIONS);
+      if (result.canceled || !result.assets[0]) return;
+      await saveRoomCover(result.assets[0].uri);
+    } catch (error) {
+      Alert.alert(
+        "Couldn't open photos",
+        error instanceof Error ? error.message : "Please try again.",
+      );
+    }
+  }, [coverUploading, saveRoomCover, showPermissionHelp]);
+
+  const removeRoomCover = React.useCallback(async () => {
+    if (coverUploading) return;
+    setCoverUploading(true);
+    try {
+      const { data: updatedRows, error } = await supabase
+        .from("inventory_rooms")
+        .update({ cover_photo_url: null })
+        .eq("id", id)
+        .select("id");
+      if (error) throw error;
+      if (!updatedRows?.length) throw new Error("Cover photo could not be removed. Please check your connection and try again.");
+      setLocalCoverUrl(null);
+      refreshRoomCover(null);
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["room", id] }),
+        queryClient.invalidateQueries({ queryKey: ["rooms", resolvedFileId] }),
+      ]);
+      showToast("Room cover removed");
+    } catch (error) {
+      Alert.alert("Couldn't remove room cover", error instanceof Error ? error.message : "Please try again.");
+    } finally {
+      setCoverUploading(false);
+    }
+  }, [coverUploading, id, queryClient, refreshRoomCover, resolvedFileId, showToast]);
+
+  const handleRoomCoverAction = React.useCallback((action: RoomCoverAction) => {
+    setCoverActionSheetVisible(false);
+    if (action === "camera" || action === "library") {
+      void pickRoomCover(action);
+    } else if (action === "remove") {
+      Alert.alert("Remove room cover?", "The current room cover photo will be removed.", [
+        { text: "Cancel", style: "cancel" },
+        { text: "Remove cover", style: "destructive", onPress: () => void removeRoomCover() },
+      ]);
+    }
+  }, [pickRoomCover, removeRoomCover]);
 
   const renderRoomCover = () => (
     <>
@@ -2044,7 +2131,7 @@ export default function ItemsScreen() {
         </View>
       )}
       <Pressable
-        onPress={handlePickRoomCover}
+        onPress={() => setCoverActionSheetVisible(true)}
         disabled={coverUploading}
         style={[styles.cameraBtn, { backgroundColor: "rgba(0,0,0,0.45)" }]}
         hitSlop={8}
@@ -2058,6 +2145,28 @@ export default function ItemsScreen() {
         )}
       </Pressable>
     </View>
+    <Modal
+      visible={coverActionSheetVisible}
+      transparent
+      animationType="fade"
+      onRequestClose={() => setCoverActionSheetVisible(false)}
+    >
+      <Pressable style={styles.coverActionBackdrop} onPress={() => setCoverActionSheetVisible(false)}>
+        <Pressable style={[styles.coverActionSheet, { backgroundColor: colors.card }]} onPress={(event) => event.stopPropagation()}>
+          <Text style={[styles.coverActionTitle, { color: colors.foreground }]}>Room cover photo</Text>
+          {roomCoverActions(Boolean(localCoverUrl ?? room?.cover_photo_url)).map((action) => (
+            <Pressable
+              key={action}
+              accessibilityRole="button"
+              onPress={() => handleRoomCoverAction(action)}
+              style={({ pressed }) => [styles.coverActionButton, { borderColor: colors.border, opacity: pressed ? 0.65 : 1 }]}
+            >
+              <Text style={[styles.coverActionText, { color: action === "remove" ? colors.destructive : colors.foreground }]}>{action === "camera" ? "Take photo" : action === "library" ? "Choose from library" : action === "remove" ? "Remove cover" : "Cancel"}</Text>
+            </Pressable>
+          ))}
+        </Pressable>
+      </Pressable>
+    </Modal>
     {scanSuccessMessage ? (
       <View style={[styles.scanSuccessBanner, { backgroundColor: "#E8F8F2", borderColor: "rgba(29,158,117,0.22)" }]}>
         <Feather name="check-circle" size={15} color={TEAL} />
@@ -3353,4 +3462,36 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   moveRoomName: { flex: 1, fontSize: 14, fontFamily: "Inter_600SemiBold" },
+  coverActionBackdrop: {
+    flex: 1,
+    justifyContent: "flex-end",
+    backgroundColor: "rgba(15, 23, 42, 0.46)",
+    padding: 12,
+  },
+  coverActionSheet: {
+    width: "100%",
+    borderRadius: 16,
+    padding: 14,
+    gap: 8,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: -6 },
+    shadowOpacity: 0.16,
+    shadowRadius: 16,
+    elevation: 12,
+  },
+  coverActionTitle: {
+    fontSize: 16,
+    fontFamily: "Inter_700Bold",
+    paddingHorizontal: 4,
+    paddingVertical: 6,
+  },
+  coverActionButton: {
+    minHeight: 48,
+    borderWidth: 1,
+    borderRadius: 11,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 12,
+  },
+  coverActionText: { fontSize: 14, fontFamily: "Inter_600SemiBold" },
 });
