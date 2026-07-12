@@ -50,6 +50,28 @@ test("prefers maker/artist/brand for brand maker", () => {
   assert.deepEqual(change.patch, { brand_maker: "Fisher & Paykel" });
 });
 
+test("field-targeted brand uses a plain transcript instead of an item-context guess", () => {
+  const [change] = mapVoiceItemExtraction({
+    transcript: "Bed Bath & Beyond.",
+    targetField: "brand_maker",
+    currentValues: { brand_maker: null },
+    extraction: extraction({ maker_artist_brand: "Dark", uncertain_fields: ["maker_artist_brand"] }),
+  });
+
+  assert.deepEqual(change.patch, { brand_maker: "Bed Bath & Beyond" });
+  assert.equal(change.selectedByDefault, true);
+});
+
+test("field-targeted brand accepts a plain transcript when extraction is empty", () => {
+  const [change] = mapVoiceItemExtraction({
+    transcript: "Bed Bath & Beyond.",
+    targetField: "brand_maker",
+    extraction: extraction(),
+  });
+
+  assert.deepEqual(change.patch, { brand_maker: "Bed Bath & Beyond" });
+});
+
 test("maps model title", () => {
   const [change] = mapVoiceItemExtraction({ transcript: "Model QN90B", extraction: extraction({ model_title: "QN90B" }) });
   assert.deepEqual(change.patch, { model_series: "QN90B" });

@@ -16,13 +16,25 @@ export function CoverlyAuthBackground({ children, style }: { children?: React.Re
   return (
     <ImageBackground
       source={AUTH_BACKGROUND}
-      resizeMode="contain"
+      resizeMode="cover"
       style={[styles.background, style]}
       imageStyle={styles.backgroundImage}
     >
       <LinearGradient
         pointerEvents="none"
-        colors={["rgba(255,255,255,0.08)", "rgba(255,255,255,0.22)", "rgba(255,255,255,0.05)"]}
+        colors={["rgba(248,250,252,0.70)", "rgba(248,250,252,0.10)", "rgba(248,250,252,0)"]}
+        locations={[0, 0.58, 1]}
+        style={styles.topFade}
+      />
+      <LinearGradient
+        pointerEvents="none"
+        colors={["rgba(248,250,252,0)", "rgba(248,250,252,0.12)", "rgba(248,250,252,0.76)"]}
+        locations={[0, 0.48, 1]}
+        style={styles.bottomFade}
+      />
+      <LinearGradient
+        pointerEvents="none"
+        colors={["rgba(255,255,255,0.03)", "rgba(255,255,255,0.18)", "rgba(255,255,255,0.04)"]}
         locations={[0, 0.52, 1]}
         style={StyleSheet.absoluteFill}
       />
@@ -49,6 +61,20 @@ const styles = StyleSheet.create({
   },
   backgroundImage: {
     opacity: 1,
+  },
+  topFade: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    height: "28%",
+  },
+  bottomFade: {
+    position: "absolute",
+    bottom: 0,
+    left: 0,
+    right: 0,
+    height: "34%",
   },
   mark: {
     width: 84,

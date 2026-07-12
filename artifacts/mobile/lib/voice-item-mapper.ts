@@ -27,6 +27,25 @@ function cleanText(value: string | null | undefined): string | null {
   return cleaned ? cleaned : null;
 }
 
+function plainTargetValue(transcript: string, preserveTerminalPunctuation = false): string | null {
+  const cleaned = transcript.trim();
+  if (!cleaned) return null;
+
+  // Command-style speech still benefits from structured extraction. A plain value
+  // spoken from a field's mic should not be replaced with a guess from item context.
+  if (
+    /^(?:set|add|update|change|rename|fill|make|describe|description|brand|maker|model|category|note|notes|bought|purchased|paid)\b/i.test(
+      cleaned,
+    )
+  ) {
+    return null;
+  }
+
+  return preserveTerminalPunctuation
+    ? cleaned
+    : cleaned.replace(/[.!?]+$/g, "").trim() || null;
+}
+
 function cleanNameCandidate(value: string | null | undefined): string | null {
   const cleaned = value
     ?.replace(/(?:\$\s*\d+(?:,\d{3})*(?:\.\d{1,2})?|\b\d+(?:,\d{3})*(?:\.\d{1,2})?\s*(?:dollars?|nzd|nz dollars?))/gi, "")
@@ -168,8 +187,9 @@ export function mapVoiceItemExtraction({
   };
 
   if (accepts("name")) {
-    const next = fallbackName(transcript, extraction);
-    add(makeChange("name", currentValues.name ?? null, next, { name: next }, isUncertain(extraction, "display_name", "name")));
+    const direct = targetField === "name" ? plainTargetValue(transcript) : null;
+    const next = direct ?? fallbackName(transcript, extraction);
+    add(makeChange("name", currentValues.name ?? null, next, { name: next }, direct ? false : isUncertain(extraction, "display_name", "name")));
   }
 
   if (accepts("category")) {
@@ -182,22 +202,30 @@ export function mapVoiceItemExtraction({
   }
 
   if (accepts("brand_maker")) {
+    const direct = targetField === "brand_maker" ? plainTargetValue(transcript) : null;
     const next =
+      direct ??
       cleanText(extraction.maker_artist_brand) ??
       cleanText(extraction.brand) ??
       cleanText(extraction.make) ??
       inferBrandFromName(fallbackName(transcript, extraction));
-    add(makeChange("brand_maker", currentValues.brand_maker ?? null, next, { brand_maker: next }, isUncertain(extraction, "maker_artist_brand", "brand", "make")));
+    add(makeChange("brand_maker", currentValues.brand_maker ?? null, next, { brand_maker: next }, direct ? false : isUncertain(extraction, "maker_artist_brand", "brand", "make")));
   }
 
   if (accepts("model_series")) {
-    const next = cleanText(extraction.model_title) ?? cleanText(extraction.model);
-    add(makeChange("model_series", currentValues.model_series ?? null, next, { model_series: next }, isUncertain(extraction, "model_title", "model")));
+    const direct = targetField === "model_series" ? plainTargetValue(transcript) : null;
+    const next =
+      direct ??
+      cleanText(extraction.model_title) ?? cleanText(extraction.model);
+    add(makeChange("model_series", currentValues.model_series ?? null, next, { model_series: next }, direct ? false : isUncertain(extraction, "model_title", "model")));
   }
 
   if (accepts("purchase_source")) {
-    const next = cleanText(extraction.retailer_store_purchased_from) ?? cleanText(extraction.seller);
-    add(makeChange("purchase_source", currentValues.purchase_source ?? null, next, { purchase_source: next }, isUncertain(extraction, "retailer_store_purchased_from", "seller")));
+    const direct = targetField === "purchase_source" ? plainTargetValue(transcript) : null;
+    const next =
+      direct ??
+      cleanText(extraction.retailer_store_purchased_from) ?? cleanText(extraction.seller);
+    add(makeChange("purchase_source", currentValues.purchase_source ?? null, next, { purchase_source: next }, direct ? false : isUncertain(extraction, "retailer_store_purchased_from", "seller")));
   }
 
   if (accepts("purchase_year_approx")) {
@@ -256,13 +284,19 @@ export function mapVoiceItemExtraction({
   }
 
   if (accepts("description")) {
-    const next = cleanText(extraction.description);
-    add(makeChange("description", currentValues.description ?? null, next, { description: next }, isUncertain(extraction, "description")));
+    const direct = targetField === "description" ? plainTargetValue(transcript, true) : null;
+    const next =
+      direct ??
+      cleanText(extraction.description);
+    add(makeChange("description", currentValues.description ?? null, next, { description: next }, direct ? false : isUncertain(extraction, "description")));
   }
 
   if (accepts("notes")) {
-    const next = cleanText(extraction.notes);
-    add(makeChange("notes", currentValues.notes ?? null, next, { notes: next }, isUncertain(extraction, "notes", "raw_summary")));
+    const direct = targetField === "notes" ? plainTargetValue(transcript, true) : null;
+    const next =
+      direct ??
+      cleanText(extraction.notes);
+    add(makeChange("notes", currentValues.notes ?? null, next, { notes: next }, direct ? false : isUncertain(extraction, "notes", "raw_summary")));
   }
 
   return changes;

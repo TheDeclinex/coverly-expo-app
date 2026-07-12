@@ -10,13 +10,18 @@
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "splash": {
-      "image": "./assets/brand/coverly-splash-logo.png",
-      "resizeMode": "contain",
-      "backgroundColor": "#F6FBFA"
+      "image": "./assets/brand/coverly-native-splash.png",
+      "resizeMode": "cover",
+      "backgroundColor": "#F8FAFC"
     },
     "ios": {
       "supportsTablet": false,
       "icon": "./assets/brand/coverly-app-icon-1024.png",
+      "splash": {
+        "image": "./assets/brand/coverly-native-splash.png",
+        "resizeMode": "cover",
+        "backgroundColor": "#F8FAFC"
+      },
       "bundleIdentifier": "nz.coverly.app",
       "buildNumber": "1",
       "infoPlist": {
@@ -28,6 +33,11 @@
       "package": "nz.coverly.app",
       "versionCode": 1,
       "icon": "./assets/brand/coverly-android-icon-safe.png",
+      "splash": {
+        "image": "./assets/brand/coverly-native-splash.png",
+        "resizeMode": "cover",
+        "backgroundColor": "#F8FAFC"
+      },
       "adaptiveIcon": {
         "foregroundImage": "./assets/brand/coverly-android-adaptive-foreground-safe.png",
         "backgroundColor": "#F6FBFA"
@@ -45,6 +55,28 @@
       "expo-router",
       "expo-font",
       "expo-web-browser",
+      [
+        "expo-splash-screen",
+        {
+          "backgroundColor": "#F8FAFC",
+          "image": "./assets/brand/coverly-native-splash.png",
+          "imageWidth": 430,
+          "resizeMode": "cover",
+          "enableFullScreenImage_legacy": true,
+          "ios": {
+            "backgroundColor": "#F8FAFC",
+            "image": "./assets/brand/coverly-native-splash.png",
+            "imageWidth": 430,
+            "resizeMode": "cover"
+          },
+          "android": {
+            "backgroundColor": "#F8FAFC",
+            "image": "./assets/brand/coverly-native-splash.png",
+            "imageWidth": 430,
+            "resizeMode": "cover"
+          }
+        }
+      ],
       [
         "expo-image-picker",
         {

@@ -2,6 +2,7 @@ import { Feather } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { LinearGradient } from "expo-linear-gradient";
 import { Redirect } from "expo-router";
+import { StatusBar } from "expo-status-bar";
 import React, { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
@@ -353,6 +354,7 @@ export default function LoginScreen() {
 
   return (
     <View style={styles.root}>
+      <StatusBar style="dark" translucent backgroundColor="transparent" />
       <CoverlyAuthBackground style={StyleSheet.absoluteFill}>
         <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : "height"}>
         <ScrollView

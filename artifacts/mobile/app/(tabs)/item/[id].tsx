@@ -22,7 +22,7 @@ import { ErrorState } from "@/components/ErrorState";
 import { ContextBackButton } from "@/components/ContextBackButton";
 import { ExpandableImage } from "@/components/ExpandableImage";
 import { ItemEvidenceSection } from "@/components/ItemEvidenceSection";
-import { ItemMaintenanceForm } from "@/components/ItemMaintenanceForm";
+import { ItemMaintenanceForm, type ItemMaintenanceFormHandle, type ItemMaintenanceSaveState } from "@/components/ItemMaintenanceForm";
 import { LoadingState } from "@/components/LoadingState";
 import { QuantityStepper } from "@/components/QuantityStepper";
 import { VoiceFieldButton } from "@/components/voice/VoiceFieldButton";
@@ -519,6 +519,8 @@ export default function ItemDetailScreen() {
   const [productDetailsDraft, setProductDetailsDraft] = React.useState<ProductPurchaseDraft>(emptyProductPurchaseDraft);
   const [savingProductDetails, setSavingProductDetails] = React.useState(false);
   const [maintenanceDirty, setMaintenanceDirty] = React.useState(false);
+  const [maintenanceSaveState, setMaintenanceSaveState] = React.useState<ItemMaintenanceSaveState>("idle");
+  const maintenanceFormRef = React.useRef<ItemMaintenanceFormHandle>(null);
 
   const {
     data: item,
@@ -990,6 +992,30 @@ export default function ItemDetailScreen() {
         />
       ) : item ? (
         <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
+        <View style={[styles.stickySaveBar, { backgroundColor: colors.card, borderBottomColor: colors.border }]}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={maintenanceSaveState === "dirty" ? "Save item changes" : maintenanceSaveState === "saved" ? "Item changes saved" : "No item changes to save"}
+            disabled={maintenanceSaveState !== "dirty"}
+            onPress={() => maintenanceFormRef.current?.save()}
+            style={[
+              styles.stickySaveButton,
+              {
+                backgroundColor: maintenanceSaveState === "dirty" || maintenanceSaveState === "saving" ? colors.primary : colors.secondary,
+                borderColor: maintenanceSaveState === "dirty" || maintenanceSaveState === "saving" ? colors.primary : colors.border,
+              },
+            ]}
+          >
+            {maintenanceSaveState === "saving" ? (
+              <ActivityIndicator size="small" color={colors.primaryForeground} />
+            ) : (
+              <Feather name={maintenanceSaveState === "saved" ? "check-circle" : "save"} size={16} color={maintenanceSaveState === "dirty" ? colors.primaryForeground : colors.mutedForeground} />
+            )}
+            <Text style={[styles.stickySaveText, { color: maintenanceSaveState === "dirty" || maintenanceSaveState === "saving" ? colors.primaryForeground : maintenanceSaveState === "saved" ? colors.primary : colors.mutedForeground }]}>
+              {maintenanceSaveState === "saving" ? "Saving…" : maintenanceSaveState === "saved" ? "Saved" : maintenanceSaveState === "dirty" ? "Save Changes" : "No unsaved changes"}
+            </Text>
+          </Pressable>
+        </View>
         <ScrollView
           contentContainerStyle={[
             styles.scrollContent,
@@ -1018,7 +1044,7 @@ export default function ItemDetailScreen() {
             onPermanentError={() => recoverItemImageUrl(rawPrimaryUri)}
           />
           <View style={styles.content}>
-            <ItemMaintenanceForm item={item} rooms={rooms ?? []} onDirtyChange={setMaintenanceDirty} />
+            <ItemMaintenanceForm ref={maintenanceFormRef} item={item} rooms={rooms ?? []} onDirtyChange={setMaintenanceDirty} onSaveStateChange={setMaintenanceSaveState} />
 
             <Section title="ACTIONS" colors={colors}>
               <Pressable
@@ -1034,22 +1060,6 @@ export default function ItemDetailScreen() {
                   <Text style={[styles.nextActionHint, { color: colors.primaryForeground }]}>Find or update the current replacement value</Text>
                 </View>
                 <Feather name="chevron-right" size={16} color={colors.primaryForeground} />
-              </Pressable>
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="Delete item"
-                onPress={handleDeleteItem}
-                disabled={deletingItem}
-                style={({ pressed }) => [
-                  styles.destructiveAction,
-                  { borderTopColor: colors.border, opacity: deletingItem || pressed ? 0.65 : 1 },
-                ]}
-              >
-                {deletingItem ? <ActivityIndicator size="small" color="#B91C1C" /> : <Feather name="trash-2" size={15} color="#B91C1C" />}
-                <View style={styles.nextActionCopy}>
-                  <Text style={styles.destructiveTitle}>Delete item</Text>
-                  <Text style={[styles.advancedEditHint, { color: colors.mutedForeground }]}>Remove this item from the inventory</Text>
-                </View>
               </Pressable>
             </Section>
 
@@ -1273,31 +1283,6 @@ export default function ItemDetailScreen() {
               </>
             ))}
 
-            <Section title="VALUATION CONTEXT" colors={colors}>
-              {item.unit_estimated_price != null || item.estimated_price != null ? (
-                <DetailRow
-                  label="Recorded total"
-                  value={formatCurrencyFull(getItemUnitPrice(item) * (item.quantity ?? 1))}
-                  colors={colors}
-                />
-              ) : null}
-              <DetailRow
-                label="Quantity estimate"
-                value={item.quantity_estimate}
-                colors={colors}
-              />
-              <DetailRow
-                label="Value source"
-                value={valuationSourceLabel(item)}
-                colors={colors}
-                onPress={
-                  item.price_source_type === "web_listing" && isWebUrl(item.web_listing_url)
-                    ? handleOpenReplacementListing
-                    : undefined
-                }
-              />
-            </Section>
-
             {session?.user.id ? (
               <ItemEvidenceSection
                 itemId={item.id}
@@ -1335,6 +1320,42 @@ export default function ItemDetailScreen() {
                 <Text style={[styles.barcodeActionText, { color: colors.primary }]}>
                   {item.barcode || item.barcode_verified ? "Update barcode" : "Scan barcode"}
                 </Text>
+              </Pressable>
+            </Section>
+
+            <Section title="VALUATION CONTEXT" colors={colors}>
+              {item.unit_estimated_price != null || item.estimated_price != null ? (
+                <DetailRow
+                  label="Recorded total"
+                  value={formatCurrencyFull(getItemUnitPrice(item) * (item.quantity ?? 1))}
+                  colors={colors}
+                />
+              ) : null}
+              <DetailRow label="Quantity estimate" value={item.quantity_estimate} colors={colors} />
+              <DetailRow
+                label="Value source"
+                value={valuationSourceLabel(item)}
+                colors={colors}
+                onPress={item.price_source_type === "web_listing" && isWebUrl(item.web_listing_url) ? handleOpenReplacementListing : undefined}
+              />
+            </Section>
+
+            <Section title="DELETE ITEM" colors={colors}>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Delete item"
+                onPress={handleDeleteItem}
+                disabled={deletingItem}
+                style={({ pressed }) => [
+                  styles.destructiveAction,
+                  { borderTopColor: colors.border, opacity: deletingItem || pressed ? 0.65 : 1 },
+                ]}
+              >
+                {deletingItem ? <ActivityIndicator size="small" color="#B91C1C" /> : <Feather name="trash-2" size={15} color="#B91C1C" />}
+                <View style={styles.nextActionCopy}>
+                  <Text style={styles.destructiveTitle}>Delete item</Text>
+                  <Text style={[styles.advancedEditHint, { color: colors.mutedForeground }]}>Remove this item from the inventory</Text>
+                </View>
               </Pressable>
             </Section>
           </View>
@@ -1385,6 +1406,22 @@ export default function ItemDetailScreen() {
 
 const styles = StyleSheet.create({
   scrollContent: { flexGrow: 1 },
+  stickySaveBar: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    zIndex: 2,
+  },
+  stickySaveButton: {
+    minHeight: 40,
+    borderWidth: 1,
+    borderRadius: 10,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+  },
+  stickySaveText: { fontSize: 13, fontFamily: "Inter_600SemiBold" },
   heroImage: { width: "100%", height: 280 },
   heroPlaceholder: {
     width: "100%",

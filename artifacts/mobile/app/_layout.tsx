@@ -9,6 +9,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Stack } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
 import React, { useEffect } from "react";
+import { Image } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { KeyboardProvider } from "react-native-keyboard-controller";
 import { SafeAreaProvider } from "react-native-safe-area-context";
@@ -19,6 +20,7 @@ import { AuthProvider, useAuth } from "@/context/AuthContext";
 import { EntitlementsProvider } from "@/context/EntitlementsContext";
 
 SplashScreen.preventAutoHideAsync();
+SplashScreen.setOptions({ duration: 250, fade: true });
 
 const queryClient = new QueryClient();
 
@@ -30,18 +32,33 @@ function RootLayoutNav() {
     Inter_600SemiBold,
     Inter_700Bold,
   });
+  const [authAssetsReady, setAuthAssetsReady] = React.useState(false);
+
+  useEffect(() => {
+    let active = true;
+    const authAssets = [
+      require("../assets/brand/coverly-login-background.png"),
+      require("../assets/brand/coverly-login-mark-tight.png"),
+    ];
+    void Promise.all(authAssets.map((asset) => Image.prefetch(Image.resolveAssetSource(asset).uri))).finally(() => {
+      if (active) setAuthAssetsReady(true);
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   // Auth is settled when not loading AND (no session, OR the onboarding flag has resolved).
   // Waiting for hasSeenOnboarding prevents a flash of the wrong screen for authed users.
   const authSettled = !loading && (session === null || hasSeenOnboarding !== null);
 
   useEffect(() => {
-    if ((fontsLoaded || fontError) && authSettled) {
+    if ((fontsLoaded || fontError) && authSettled && authAssetsReady) {
       SplashScreen.hideAsync();
     }
-  }, [fontsLoaded, fontError, loading, session, hasSeenOnboarding]);
+  }, [fontsLoaded, fontError, authSettled, authAssetsReady]);
 
-  if ((!fontsLoaded && !fontError) || !authSettled) return null;
+  if ((!fontsLoaded && !fontError) || !authSettled || !authAssetsReady) return null;
 
   return (
     <Stack screenOptions={{ headerShown: false }}>
