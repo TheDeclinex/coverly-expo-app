@@ -26,6 +26,8 @@ function candidate(
     priceRaw: "",
     link: "https://example.com/page",
     position: 1,
+    providerType: "organic",
+    priceSource: "none",
     ...overrides,
   };
 }
@@ -58,6 +60,8 @@ test("product pages rank above and replace homepages and collection pages", () =
         priceRaw: "$449",
         link: "https://www.jbhifi.co.nz/products/sony-ht-s400",
         position: 4,
+        providerType: "shopping",
+        priceSource: "structured",
       }),
     ],
     context,

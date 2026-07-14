@@ -1,6 +1,6 @@
 /**
  * Supabase Edge Function: replacement-price-search
- * v26.5.0 — enforce optional refinement price bounds on returned listings
+ * v26.8.0 — preserve provider prices and reject non-product fallback pages
  *
  * Searches Google Shopping via Serper.dev for NZ replacement listings.
  * API key stays server-side in SERPER_API_KEY secret.
@@ -31,11 +31,14 @@ import {
 import {
   rankAndFilterReplacementResults,
   type QualifiedReplacementResult,
-  type ReplacementResultCandidate,
   type ReplacementResultQualityContext,
 } from './result-quality.ts';
+import {
+  normalizeOrganicResults,
+  normalizeShoppingResults,
+} from './provider-normalization.ts';
 
-const EDGE_VERSION = 'v26.7.0-result-quality';
+const EDGE_VERSION = 'v26.8.0-provider-normalization';
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL') ?? '';
 const SUPABASE_ANON_KEY = Deno.env.get('SUPABASE_ANON_KEY') ?? '';
 const SERPER_TIMEOUT_MS = 15_000;
@@ -179,48 +182,12 @@ async function fetchWithTimeout(
   }
 }
 
-function parsePrice(raw: string | undefined): number | null {
-  if (!raw) return null;
-  const m = raw.replace(/,/g, '').match(/[\d]+(?:\.\d+)?/);
-  if (!m) return null;
-  const n = parseFloat(m[0]);
-  return isNaN(n) ? null : n;
-}
-
 function priceStats(prices: number[]): { low: number; median: number; high: number } | null {
   const valid = prices.filter(p => p > 0).sort((a, b) => a - b);
   if (!valid.length) return null;
   const mid = Math.floor(valid.length / 2);
   const median = valid.length % 2 === 0 ? (valid[mid - 1] + valid[mid]) / 2 : valid[mid];
   return { low: valid[0], median: Math.round(median * 100) / 100, high: valid[valid.length - 1] };
-}
-
-function mapShoppingResults(data: unknown, num: number): ReplacementResultCandidate[] {
-  const shopping = (data as any)?.shopping ?? [];
-  return (shopping as any[]).slice(0, num).map((r: any, idx: number) => ({
-    title: r.title ?? 'Unknown product',
-    source: r.source ?? 'Unknown retailer',
-    price: parsePrice(r.price),
-    priceRaw: r.price ?? '',
-    link: r.link ?? '',
-    snippet: r.snippet,
-    thumbnail: r.imageUrl || r.thumbnail,
-    position: r.position ?? idx + 1,
-  }));
-}
-
-function mapOrganicResults(data: unknown, num: number): ReplacementResultCandidate[] {
-  const organic = (data as any)?.organic ?? [];
-  return (organic as any[]).slice(0, num).map((r: any, idx: number) => ({
-    title: r.title ?? 'Unknown',
-    source: r.displayLink ?? r.link ?? 'Unknown',
-    price: null,
-    priceRaw: '',
-    link: r.link ?? '',
-    snippet: r.snippet,
-    thumbnail: undefined,
-    position: idx + 1,
-  }));
 }
 
 // ── Main handler ──────────────────────────────────────────────────────────────
@@ -427,7 +394,7 @@ serve(async (req: Request) => {
         diagnostics,
       }, 502, origin);
     }
-    const shoppingCandidates = mapShoppingResults(shopData, num);
+    const shoppingCandidates = normalizeShoppingResults(shopData, num);
     let results = rankAndFilterReplacementResults(
       shoppingCandidates,
       qualityContext,
@@ -458,7 +425,7 @@ serve(async (req: Request) => {
             diagnostics,
           }, 502, origin);
         }
-        const organicCandidates = mapOrganicResults(orgData, num);
+        const organicCandidates = normalizeOrganicResults(orgData, num);
         results = rankAndFilterReplacementResults(
           [...shoppingCandidates, ...organicCandidates],
           qualityContext,

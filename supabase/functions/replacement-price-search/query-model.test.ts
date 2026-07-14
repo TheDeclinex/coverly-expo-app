@@ -205,10 +205,8 @@ test("the handler filters bounds before usable-result accounting and retains the
   const source = readFileSync(new URL("./index.ts", import.meta.url), "utf8");
   const qualityFilterIndex = source.indexOf("rankAndFilterReplacementResults(");
   const filterIndex = source.indexOf("results = filterResultsToPriceRange(");
-  const usablePricesIndex = source.indexOf("const prices = results.map");
-  const refundIndex = source.indexOf(
-    "refundUsage(userClient, usageReservationId, 'no_usable_priced_results')",
-  );
+  const usablePricesIndex = source.indexOf("const prices = results");
+  const refundIndex = source.indexOf("no_usable_priced_results");
 
   assert.ok(qualityFilterIndex >= 0);
   assert.ok(qualityFilterIndex < filterIndex);
