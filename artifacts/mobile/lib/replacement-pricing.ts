@@ -1,32 +1,38 @@
 import { friendlyNetworkErrorMessage } from "@/lib/network-errors";
-import { fetchReplacementPriceFunction } from "@/lib/replacement-pricing-transport";
-import type {
-  ReplacementPriceSearchRequest,
-  ReplacementPriceResult,
-} from "@/lib/replacement-pricing-model";
 import { anonKey, debugSupabaseUrl, supabase } from "@/lib/supabase";
 import type { InventoryItem } from "@/types";
 export { replacementVoiceTranscriptToQuery } from "./replacement-pricing-query.ts";
-export {
-  areReplacementCriteriaEqual,
-  buildOriginalReplacementCriteria,
-  buildReplacementPriceSearchRequest,
-  buildReplacementRefinementDraft,
-  canStartReplacementSearch,
-  filterReplacementResults,
-  filterReplacementResultsToPriceRange,
-  replacementCriteriaDetails,
-  replacementPriceRangeDescription,
-  replacementSearchFailed,
-  replacementSearchSucceeded,
-  validateReplacementRefinement,
-  type ReplacementMatchType,
-  type ReplacementPriceFilter,
-  type ReplacementPriceResult,
-  type ReplacementPriceSearchRequest,
-  type ReplacementSearchCriteria,
-  type ReplacementSearchRefinementDraft,
-} from "./replacement-pricing-model.ts";
+
+export interface ReplacementPriceSearchRequest {
+  itemName: string;
+  description?: string;
+  category?: string;
+  brand?: string;
+  country?: string;
+  minPrice?: number;
+  maxPrice?: number;
+  searchQuery?: string;
+  num?: number;
+  itemId?: string;
+  usageIdempotencyKey?: string;
+}
+
+export type ReplacementMatchType =
+  | "best_match"
+  | "close_match"
+  | "similar_item";
+
+export interface ReplacementPriceResult {
+  title: string;
+  source: string;
+  price: number | null;
+  priceRaw: string;
+  link: string;
+  snippet?: string;
+  thumbnail?: string;
+  position: number;
+  matchType: ReplacementMatchType;
+}
 
 interface ReplacementPriceSearchSuccess {
   success: true;
@@ -68,6 +74,8 @@ export class ReplacementPriceSearchError extends Error {
   }
 }
 
+export type ReplacementPriceFilter = "all" | "lower" | "around" | "premium";
+
 export function getItemUnitEstimate(item: InventoryItem): number | null {
   const value = item.estimated_price ?? item.unit_estimated_price;
   return value != null && Number.isFinite(value) && value > 0 ? value : null;
@@ -80,12 +88,31 @@ export function buildReplacementSearchQuery(item: InventoryItem): string {
 
   const uniqueTerms = terms.filter(
     (term, index) =>
-      terms.findIndex(
-        (candidate) => candidate.toLowerCase() === term.toLowerCase(),
-      ) === index,
+      terms.findIndex((candidate) => candidate.toLowerCase() === term.toLowerCase()) ===
+      index,
   );
 
-  return uniqueTerms.join(" ").trim();
+  return `${uniqueTerms.join(" ")} NZ`.trim();
+}
+
+export function filterReplacementResults(
+  results: ReplacementPriceResult[],
+  filter: ReplacementPriceFilter,
+  estimate: number | null,
+): ReplacementPriceResult[] {
+  if (filter === "all" || estimate == null) return results;
+
+  const lowerBoundary = estimate * 0.75;
+  const upperBoundary = estimate * 1.25;
+
+  return results.filter((result) => {
+    if (result.price == null) return false;
+    if (filter === "lower") return result.price < lowerBoundary;
+    if (filter === "around") {
+      return result.price >= lowerBoundary && result.price <= upperBoundary;
+    }
+    return result.price > upperBoundary;
+  });
 }
 
 function createReplacementPricingUsageKey(): string {
@@ -100,9 +127,7 @@ function createReplacementPricingUsageKey(): string {
   return `replacement-pricing:${Date.now()}:${randomUuid}`;
 }
 
-function safeRequestLogBody(
-  body: ReplacementPriceSearchRequest,
-): Record<string, unknown> {
+function safeRequestLogBody(body: ReplacementPriceSearchRequest): Record<string, unknown> {
   return {
     functionName: REPLACEMENT_PRICE_FUNCTION_NAME,
     itemId: body.itemId,
@@ -110,12 +135,7 @@ function safeRequestLogBody(
     descriptionPresent: !!body.description,
     category: body.category,
     brand: body.brand,
-    model: body.model,
-    additionalDetailsPresent: !!body.additionalDetails,
-    preferredRetailerPresent: !!body.preferredRetailer,
     country: body.country,
-    minPrice: body.minPrice,
-    maxPrice: body.maxPrice,
     searchQuery: body.searchQuery,
     num: body.num,
     hasUsageIdempotencyKey: !!body.usageIdempotencyKey,
@@ -126,26 +146,15 @@ function messageForFailure(
   status: number,
   response: ReplacementPriceSearchFailure | null,
 ): string {
-  if (
-    status === 402 &&
-    response?.errorCode === "REPLACEMENT_PRICING_LIMIT_REACHED"
-  ) {
-    return (
-      response.error ||
-      "Your Free monthly replacement price lookups have been used. Upgrade to continue searching."
-    );
+  if (status === 402 && response?.errorCode === "REPLACEMENT_PRICING_LIMIT_REACHED") {
+    return response.error || "Your Free monthly replacement price lookups have been used. Upgrade to continue searching.";
   }
 
-  return (
-    response?.error ||
-    response?.errorCode ||
-    `Replacement price search failed (${status}).`
-  );
+  return response?.error || response?.errorCode || `Replacement price search failed (${status}).`;
 }
 
 export async function searchReplacementPrices(
   body: ReplacementPriceSearchRequest,
-  options?: { signal?: AbortSignal },
 ): Promise<ReplacementPriceSearchSuccess> {
   const requestBody: ReplacementPriceSearchRequest = {
     ...body,
@@ -154,51 +163,40 @@ export async function searchReplacementPrices(
   };
 
   if (__DEV__) {
-    if (__DEV__)
-      console.info(
-        "[replacement-pricing] function request",
-        safeRequestLogBody(requestBody),
-      );
+    if (__DEV__) console.info("[replacement-pricing] function request", safeRequestLogBody(requestBody));
   }
 
-  const { data: sessionData, error: sessionError } =
-    await supabase.auth.getSession();
+  const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
   const accessToken = sessionData.session?.access_token;
   if (sessionError || !accessToken) {
     if (__DEV__) {
-      if (__DEV__)
-        console.error("[replacement-pricing] missing auth session", {
-          hasSessionError: !!sessionError,
-          sessionErrorMessage: sessionError?.message,
-          hasAccessToken: !!accessToken,
-        });
+      if (__DEV__) console.error("[replacement-pricing] missing auth session", {
+        hasSessionError: !!sessionError,
+        sessionErrorMessage: sessionError?.message,
+        hasAccessToken: !!accessToken,
+      });
     }
-    throw new ReplacementPriceSearchError(
-      "You must be signed in to search replacement prices.",
-      {
-        errorCode: "UNAUTHORIZED",
-      },
-    );
+    throw new ReplacementPriceSearchError("You must be signed in to search replacement prices.", {
+      errorCode: "UNAUTHORIZED",
+    });
   }
 
   const functionUrl = `${debugSupabaseUrl.replace(/\/$/, "")}/functions/v1/${REPLACEMENT_PRICE_FUNCTION_NAME}`;
   let httpResponse: Response;
   try {
-    httpResponse = await fetchReplacementPriceFunction(functionUrl, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        apikey: anonKey,
-        Authorization: `Bearer ${accessToken}`,
-      },
-      body: JSON.stringify(requestBody),
-    }, { signal: options?.signal });
+    httpResponse = await fetch(functionUrl, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      apikey: anonKey,
+      Authorization: `Bearer ${accessToken}`,
+    },
+    body: JSON.stringify(requestBody),
+    });
   } catch (error) {
     const friendlyMessage = friendlyNetworkErrorMessage(error);
     if (friendlyMessage) {
-      throw new ReplacementPriceSearchError(friendlyMessage, {
-        errorCode: "NETWORK_UNAVAILABLE",
-      });
+      throw new ReplacementPriceSearchError(friendlyMessage, { errorCode: "NETWORK_UNAVAILABLE" });
     }
     throw error;
   }
@@ -206,17 +204,14 @@ export async function searchReplacementPrices(
   const responseText = await httpResponse.text();
   let data: ReplacementPriceSearchResponse | null = null;
   try {
-    data = responseText
-      ? (JSON.parse(responseText) as ReplacementPriceSearchResponse)
-      : null;
+    data = responseText ? (JSON.parse(responseText) as ReplacementPriceSearchResponse) : null;
   } catch {
     if (__DEV__) {
-      if (__DEV__)
-        console.error("[replacement-pricing] function invalid response", {
-          status: httpResponse.status,
-          ok: httpResponse.ok,
-          responseBody: responseText.slice(0, 1000),
-        });
+      if (__DEV__) console.error("[replacement-pricing] function invalid response", {
+        status: httpResponse.status,
+        ok: httpResponse.ok,
+        responseBody: responseText.slice(0, 1000),
+      });
     }
     throw new ReplacementPriceSearchError(
       `Replacement price search returned an invalid response (${httpResponse.status}).`,
@@ -225,13 +220,12 @@ export async function searchReplacementPrices(
   }
 
   if (__DEV__) {
-    if (__DEV__)
-      console.info("[replacement-pricing] function response", {
-        status: httpResponse.status,
-        ok: httpResponse.ok,
-        errorCode: data?.success === false ? data.errorCode : undefined,
-        responseBody: data,
-      });
+    if (__DEV__) console.info("[replacement-pricing] function response", {
+      status: httpResponse.status,
+      ok: httpResponse.ok,
+      errorCode: data?.success === false ? data.errorCode : undefined,
+      responseBody: data,
+    });
   }
 
   if (!httpResponse.ok) {
@@ -247,22 +241,16 @@ export async function searchReplacementPrices(
   }
 
   if (!data) {
-    throw new ReplacementPriceSearchError(
-      "Replacement price search returned no data",
-      {
-        status: httpResponse.status,
-      },
-    );
+    throw new ReplacementPriceSearchError("Replacement price search returned no data", {
+      status: httpResponse.status,
+    });
   }
   if (!data.success) {
-    throw new ReplacementPriceSearchError(
-      data.error || "Replacement price search failed",
-      {
-        status: httpResponse.status,
-        errorCode: data.errorCode,
-        responseBody: data,
-      },
-    );
+    throw new ReplacementPriceSearchError(data.error || "Replacement price search failed", {
+      status: httpResponse.status,
+      errorCode: data.errorCode,
+      responseBody: data,
+    });
   }
 
   return data;

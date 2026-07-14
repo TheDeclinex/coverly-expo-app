@@ -22,7 +22,6 @@ import { ContextBackButton } from "@/components/ContextBackButton";
 import { LimitReachedModal } from "@/components/LimitReachedModal";
 import { LoadingState } from "@/components/LoadingState";
 import { ReplacementListingCard } from "@/components/ReplacementListingCard";
-import { ReplacementSearchRefinementModal } from "@/components/ReplacementSearchRefinementModal";
 import { useToast } from "@/components/Toast";
 import { useAuth } from "@/context/AuthContext";
 import { useEntitlements } from "@/context/EntitlementsContext";
@@ -30,29 +29,14 @@ import { useColors } from "@/hooks/useColors";
 import { useVoiceRecording } from "@/hooks/useVoiceRecording";
 import { callVoiceDescribe } from "@/lib/voice-input";
 import {
-  mainReplacementVoiceDisabled,
-  shouldApplyMainReplacementVoiceResult,
-} from "@/lib/replacement-pricing-voice-state";
-import {
-  areReplacementCriteriaEqual,
-  buildOriginalReplacementCriteria,
-  buildReplacementPriceSearchRequest,
-  buildReplacementRefinementDraft,
   buildReplacementSearchQuery,
-  canStartReplacementSearch,
   filterReplacementResults,
-  filterReplacementResultsToPriceRange,
   getItemUnitEstimate,
-  replacementCriteriaDetails,
-  replacementPriceRangeDescription,
-  replacementSearchFailed,
-  replacementSearchSucceeded,
   replacementVoiceTranscriptToQuery,
   ReplacementPriceSearchError,
   searchReplacementPrices,
   type ReplacementPriceFilter,
   type ReplacementPriceResult,
-  type ReplacementSearchCriteria,
 } from "@/lib/replacement-pricing";
 import { normalizeLimitError, type NormalizedLimitError } from "@/lib/limit-errors";
 import { supabase } from "@/lib/supabase";
@@ -286,22 +270,12 @@ export default function ReplacementPricingScreen() {
   const [filter, setFilter] = useState<ReplacementPriceFilter>("all");
   const [searching, setSearching] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
-  const [searchNotice, setSearchNotice] = useState<string | null>(null);
   const [voiceProcessing, setVoiceProcessing] = useState(false);
   const [voiceError, setVoiceError] = useState<string | null>(null);
   const [voiceNotice, setVoiceNotice] = useState<string | null>(null);
   const [limitModal, setLimitModal] = useState<NormalizedLimitError | null>(null);
   const [selectingPosition, setSelectingPosition] = useState<number | null>(null);
-  const [originalCriteria, setOriginalCriteria] = useState<ReplacementSearchCriteria | null>(null);
-  const [currentCriteria, setCurrentCriteria] = useState<ReplacementSearchCriteria | null>(null);
-  const [refinementVisible, setRefinementVisible] = useState(false);
-  const [searchKind, setSearchKind] = useState<"initial" | "refined" | "original">("initial");
   const autoSearchedItemId = React.useRef<string | null>(null);
-  const searchInFlightRef = React.useRef(false);
-  const searchControllerRef = React.useRef<AbortController | null>(null);
-  const mountedRef = React.useRef(true);
-  const refinementVisibleRef = React.useRef(false);
-  const mainVoiceRequestIdRef = React.useRef(0);
 
   const {
     data: item,
@@ -328,84 +302,26 @@ export default function ReplacementPricingScreen() {
     [results, filter, estimate],
   );
 
-  const activeCriteriaDetails = useMemo(
-    () => (currentCriteria ? replacementCriteriaDetails(currentCriteria) : []),
-    [currentCriteria],
-  );
-  const currentSearchIsRefined = !areReplacementCriteriaEqual(currentCriteria, originalCriteria);
-  const currentPriceRangeDescription = currentCriteria
-    ? replacementPriceRangeDescription(currentCriteria)
-    : null;
-  const refinementItemContext = useMemo(
-    () => ({
-      itemName: item?.name ?? itemName ?? "Item",
-      description: item?.description,
-      category: item?.category,
-      brand: item?.brand_maker,
-      model: item?.model_series,
-      condition: item?.condition_label,
-    }),
-    [item, itemName],
-  );
-  const refinementDraft = useMemo(
-    () => buildReplacementRefinementDraft(
-      currentCriteria ?? originalCriteria ?? { searchTerm: searchQuery },
-      searchQuery,
-      !currentSearchIsRefined && item
-        ? {
-            brand: item.brand_maker ?? "",
-            model: item.model_series ?? "",
-            additionalDetails: item.description ?? "",
-          }
-        : undefined,
-    ),
-    [currentCriteria, currentSearchIsRefined, item, originalCriteria, searchQuery],
-  );
-
-  const runSearch = React.useCallback(async (
-    criteria: ReplacementSearchCriteria,
-    kind: "initial" | "refined" | "original",
-  ) => {
-    if (!item || !canStartReplacementSearch(searchInFlightRef.current, criteria.searchTerm)) return;
+  const runSearch = React.useCallback(async (query: string) => {
+    if (!item || !query.trim()) return;
     if (!enforce("replacement_pricing")) return;
-    searchInFlightRef.current = true;
-    const controller = new AbortController();
-    searchControllerRef.current = controller;
     setSearching(true);
-    setSearchKind(kind);
     setSearchError(null);
-    setSearchNotice(null);
     setLimitModal(null);
+    setFilter("all");
     try {
-      const response = await searchReplacementPrices(
-        buildReplacementPriceSearchRequest(item, criteria),
-        { signal: controller.signal },
-      );
-      if (!mountedRef.current) return;
-      const returnedResults = filterReplacementResultsToPriceRange(
-        response.results,
-        criteria.minPrice,
-        criteria.maxPrice,
-      );
-      const hasPriceRange = criteria.minPrice != null || criteria.maxPrice != null;
-      const nextState = replacementSearchSucceeded(returnedResults, {
-        currentResults: results,
-        currentFilter: filter,
-        preservePreviousWhenEmpty: kind === "refined" && hasPriceRange,
+      const response = await searchReplacementPrices({
+        itemName: item.name,
+        description: item.description ?? undefined,
+        category: item.category ?? undefined,
+        brand: item.brand_maker ?? undefined,
+        country: "NZ",
+        searchQuery: query.trim(),
+        num: 10,
+        itemId: item.id,
       });
-      if (nextState.preservedPrevious) {
-        const attemptedRange = replacementPriceRangeDescription(criteria);
-        setSearchNotice(
-          `No listings were found ${attemptedRange ?? "within this price range"}. Try widening the range.`,
-        );
-        return;
-      }
-      setResults(nextState.results);
-      setFilter(nextState.filter);
-      setCurrentCriteria(criteria);
-      setSearchQuery(criteria.searchTerm);
+      setResults(response.results);
     } catch (searchFailure) {
-      if (!mountedRef.current || controller.signal.aborted) return;
       const normalizedLimit = searchFailure instanceof ReplacementPriceSearchError
         ? normalizeLimitError({
             status: searchFailure.status,
@@ -414,80 +330,33 @@ export default function ReplacementPricingScreen() {
           })
         : null;
 
-      setResults((current) => replacementSearchFailed(current));
+      setResults(null);
       if (normalizedLimit) {
         setLimitModal(normalizedLimit);
       } else {
         const message = searchFailure instanceof Error ? searchFailure.message : "Replacement price search failed. Your item value is unchanged.";
         const expectedNetworkFailure = /offline|connection|network|timed out|try again/i.test(message);
         if (__DEV__ && !expectedNetworkFailure) console.error("[replacement-pricing] Search failed", searchFailure);
-        setSearchError(searchFailure instanceof ReplacementPriceSearchError ? message : "Replacement price search failed. Please try again.");
+        setSearchError(searchFailure instanceof ReplacementPriceSearchError ? message : "Replacement price search failed. Your item value is unchanged.");
       }
     } finally {
-      searchInFlightRef.current = false;
-      if (searchControllerRef.current === controller) searchControllerRef.current = null;
-      if (mountedRef.current) setSearching(false);
+      setSearching(false);
     }
-  }, [item, enforce, filter, results]);
-
-  const openRefinementModal = React.useCallback(() => {
-    mainVoiceRequestIdRef.current += 1;
-    refinementVisibleRef.current = true;
-    setRefinementVisible(true);
-    setVoiceProcessing(false);
-    setVoiceError(null);
-    setVoiceNotice(null);
-    void resetVoiceRecording();
-  }, [resetVoiceRecording]);
-
-  const closeRefinementModal = React.useCallback(() => {
-    refinementVisibleRef.current = false;
-    setRefinementVisible(false);
-  }, []);
-
-  const mainVoiceDisabled = mainReplacementVoiceDisabled({
-    searching,
-    processing: voiceProcessing,
-    requestingPermission: voiceIsRequestingPermission,
-    startingRecording: voiceIsStartingRecording,
-    refinementVisible,
-  });
+  }, [item, enforce]);
 
   const handleSearch = () => {
-    if (!item) return;
-    if (results !== null) {
-      openRefinementModal();
-      return;
-    }
-    const base = originalCriteria ?? buildOriginalReplacementCriteria(item, searchQuery);
-    void runSearch({ ...base, searchTerm: searchQuery.trim() }, "initial");
+    void runSearch(searchQuery);
   };
 
   const stopAndTranscribeSearch = React.useCallback(async () => {
-    const requestId = mainVoiceRequestIdRef.current;
-    if (refinementVisibleRef.current) {
-      await resetVoiceRecording();
-      return;
-    }
     setVoiceError(null);
     setVoiceNotice(null);
     const recording = await stopVoiceRecording();
-    const canApply = () =>
-      shouldApplyMainReplacementVoiceResult({
-        requestId,
-        activeRequestId: mainVoiceRequestIdRef.current,
-        refinementVisible: refinementVisibleRef.current,
-        mounted: mountedRef.current,
-      });
     if (!recording) {
-      if (canApply()) setVoiceError(VOICE_EDIT_FALLBACK_MESSAGE);
+      setVoiceError(VOICE_EDIT_FALLBACK_MESSAGE);
       return;
     }
 
-    if (!canApply()) {
-      await resetVoiceRecording();
-      return;
-    }
     setVoiceProcessing(true);
     try {
       const result = await callVoiceDescribe(recording, {
@@ -499,51 +368,31 @@ export default function ReplacementPricingScreen() {
       const transcript = result.response?.success
         ? replacementVoiceTranscriptToQuery(result.response.transcript)
         : "";
-      if (!canApply()) return;
       if (!transcript) {
         setVoiceError(VOICE_EDIT_FALLBACK_MESSAGE);
         return;
       }
       setSearchQuery(transcript);
     } catch {
-      if (canApply()) setVoiceError(VOICE_EDIT_FALLBACK_MESSAGE);
+      setVoiceError(VOICE_EDIT_FALLBACK_MESSAGE);
     } finally {
-      if (canApply()) setVoiceProcessing(false);
+      setVoiceProcessing(false);
       await resetVoiceRecording();
     }
   }, [item?.category, item?.name, resetVoiceRecording, searchQuery, stopVoiceRecording]);
 
   const handleVoiceSearchDescription = React.useCallback(async () => {
-    if (
-      mainReplacementVoiceDisabled({
-        searching,
-        processing: voiceProcessing,
-        requestingPermission: voiceIsRequestingPermission,
-        startingRecording: voiceIsStartingRecording,
-        refinementVisible: refinementVisibleRef.current,
-      })
-    )
-      return;
+    if (searching || voiceProcessing || voiceIsRequestingPermission || voiceIsStartingRecording) return;
     setVoiceError(null);
     setVoiceNotice(null);
     if (voiceIsRecording) {
       await stopAndTranscribeSearch();
       return;
     }
-    const requestId = mainVoiceRequestIdRef.current + 1;
-    mainVoiceRequestIdRef.current = requestId;
-    const canApply = () =>
-      shouldApplyMainReplacementVoiceResult({
-        requestId,
-        activeRequestId: mainVoiceRequestIdRef.current,
-        refinementVisible: refinementVisibleRef.current,
-        mounted: mountedRef.current,
-      });
     if (voicePermission !== "granted") {
       logVoiceDiagnostic("voice_permission_button_pressed");
       try {
         const granted = await requestVoicePermission();
-        if (!canApply()) return;
         if (granted) {
           setVoiceNotice("Microphone enabled. Tap the mic again to speak your search.");
         } else {
@@ -556,10 +405,6 @@ export default function ReplacementPricingScreen() {
     }
     try {
       const started = await startVoiceRecording();
-      if (!canApply()) {
-        await resetVoiceRecording();
-        return;
-      }
       if (!started) {
         setVoiceError(VOICE_EDIT_FALLBACK_MESSAGE);
       }
@@ -569,7 +414,6 @@ export default function ReplacementPricingScreen() {
   }, [
     logVoiceDiagnostic,
     requestVoicePermission,
-    resetVoiceRecording,
     searching,
     startVoiceRecording,
     stopAndTranscribeSearch,
@@ -581,24 +425,12 @@ export default function ReplacementPricingScreen() {
   ]);
 
   React.useEffect(() => {
-    if (voiceMaxDurationReached && !refinementVisible)
-      void stopAndTranscribeSearch();
-  }, [refinementVisible, stopAndTranscribeSearch, voiceMaxDurationReached]);
+    if (voiceMaxDurationReached) void stopAndTranscribeSearch();
+  }, [stopAndTranscribeSearch, voiceMaxDurationReached]);
 
   React.useEffect(() => () => {
     void resetVoiceRecording();
   }, [resetVoiceRecording]);
-
-  React.useEffect(() => {
-    mountedRef.current = true;
-    return () => {
-      mountedRef.current = false;
-      mainVoiceRequestIdRef.current += 1;
-      searchControllerRef.current?.abort();
-      searchControllerRef.current = null;
-      searchInFlightRef.current = false;
-    };
-  }, []);
 
   const returnRoomId = roomId ?? item?.room_id ?? "";
   const returnFileId = fileId ?? item?.file_id ?? "";
@@ -675,23 +507,10 @@ export default function ReplacementPricingScreen() {
   React.useEffect(() => {
     if (!item || autoSearchedItemId.current === item.id) return;
     const suggestedQuery = buildReplacementSearchQuery(item);
-    const criteria = buildOriginalReplacementCriteria(item, suggestedQuery);
     autoSearchedItemId.current = item.id;
-    setOriginalCriteria(criteria);
-    setSearchQuery(criteria.searchTerm);
-    void runSearch(criteria, "initial");
+    setSearchQuery(suggestedQuery);
+    void runSearch(suggestedQuery);
   }, [item, runSearch]);
-
-  const handleRefinedSearch = React.useCallback((criteria: ReplacementSearchCriteria) => {
-    closeRefinementModal();
-    void runSearch(criteria, "refined");
-  }, [closeRefinementModal, runSearch]);
-
-  const handleRerunOriginalSearch = React.useCallback(() => {
-    if (!originalCriteria) return;
-    setSearchQuery(originalCriteria.searchTerm);
-    void runSearch(originalCriteria, "original");
-  }, [originalCriteria, runSearch]);
 
   const handleOpen = async (result: ReplacementPriceResult) => {
     if (!/^https?:\/\//i.test(result.link)) return;
@@ -822,7 +641,6 @@ export default function ReplacementPricingScreen() {
             “Use this listing”.
           </Text>
 
-          <Text style={[styles.searchLabel, { color: colors.mutedForeground }]}>SEARCH TERM</Text>
           <View style={styles.searchRow}>
             <View
               style={[
@@ -837,7 +655,6 @@ export default function ReplacementPricingScreen() {
                 value={searchQuery}
                 onChangeText={(value) => {
                   setSearchQuery(value);
-                  setSearchNotice(null);
                   setVoiceError(null);
                   setVoiceNotice(null);
                 }}
@@ -856,13 +673,13 @@ export default function ReplacementPricingScreen() {
               <Pressable
                 accessibilityRole="button"
                 accessibilityLabel="Speak search description"
-                disabled={mainVoiceDisabled}
+                disabled={searching || voiceProcessing || voiceIsRequestingPermission || voiceIsStartingRecording}
                 onPress={() => void handleVoiceSearchDescription()}
                 style={({ pressed }) => [
                   styles.voiceButton,
                   {
                     backgroundColor: voiceIsRecording ? colors.primary : colors.secondary,
-                    opacity: mainVoiceDisabled ? 0.5 : pressed ? 0.72 : 1,
+                    opacity: searching || voiceProcessing || voiceIsRequestingPermission || voiceIsStartingRecording ? 0.5 : pressed ? 0.72 : 1,
                   },
                 ]}
               >
@@ -873,86 +690,29 @@ export default function ReplacementPricingScreen() {
                 )}
               </Pressable>
             </View>
-            {results === null ? (
-              <Pressable
-                onPress={handleSearch}
-                disabled={searching || !searchQuery.trim()}
-                style={({ pressed }) => [
-                  styles.searchButton,
-                  {
-                    backgroundColor: colors.primary,
-                    opacity: searching ? 0.82 : !searchQuery.trim() ? 0.45 : pressed ? 0.8 : 1,
-                  },
-                ]}
-              >
-                {searching ? (
-                  <ActivityIndicator size="small" color={colors.primaryForeground} />
-                ) : (
-                  <Feather name="search" size={18} color={colors.primaryForeground} />
-                )}
-              </Pressable>
-            ) : null}
+            <Pressable
+              onPress={handleSearch}
+              disabled={searching || !searchQuery.trim()}
+              style={({ pressed }) => [
+                styles.searchButton,
+                {
+                  backgroundColor: colors.primary,
+                  opacity: searching ? 0.82 : !searchQuery.trim() ? 0.45 : pressed ? 0.8 : 1,
+                },
+              ]}
+            >
+              {searching ? (
+                <ActivityIndicator size="small" color={colors.primaryForeground} />
+              ) : (
+                <Feather name="search" size={18} color={colors.primaryForeground} />
+              )}
+            </Pressable>
           </View>
 
           {voiceIsRecording || voiceProcessing || voiceError || voiceNotice ? (
             <Text style={[styles.voiceStatus, { color: voiceError ? colors.destructive : colors.mutedForeground }]}>
               {voiceError ?? voiceNotice ?? (voiceProcessing ? "Transcribing..." : "Listening... tap the mic to finish.")}
             </Text>
-          ) : null}
-
-          {results !== null && currentCriteria ? (
-            <View
-              style={[
-                styles.criteriaCard,
-                {
-                  backgroundColor: colors.card,
-                  borderColor: colors.border,
-                  borderRadius: colors.radius,
-                },
-              ]}
-            >
-              <View style={styles.criteriaHeader}>
-                <View style={styles.criteriaCopy}>
-                  <Text style={[styles.criteriaEyebrow, { color: colors.mutedForeground }]}>
-                    {currentSearchIsRefined ? "CURRENT REFINED SEARCH" : "CURRENT SEARCH"}
-                  </Text>
-                  <Text style={[styles.criteriaTerm, { color: colors.foreground }]}>
-                    {currentCriteria.searchTerm}
-                  </Text>
-                </View>
-                <Feather name="check-circle" size={19} color={colors.primary} />
-              </View>
-              {activeCriteriaDetails.length ? (
-                <Text style={[styles.criteriaDetails, { color: colors.mutedForeground }]} numberOfLines={3}>
-                  {activeCriteriaDetails.join("  ·  ")}
-                </Text>
-              ) : null}
-              <Pressable
-                accessibilityRole="button"
-                disabled={searching}
-                onPress={openRefinementModal}
-                style={({ pressed }) => [
-                  styles.refineButton,
-                  { backgroundColor: colors.primary, opacity: searching ? 0.5 : pressed ? 0.82 : 1 },
-                ]}
-              >
-                <Feather name="sliders" size={17} color={colors.primaryForeground} />
-                <Text style={[styles.refineButtonText, { color: colors.primaryForeground }]}>Refine search</Text>
-              </Pressable>
-              <Pressable
-                accessibilityRole="button"
-                disabled={searching || !originalCriteria}
-                onPress={handleRerunOriginalSearch}
-                style={({ pressed }) => [
-                  styles.originalButton,
-                  { borderColor: colors.border, opacity: searching || !originalCriteria ? 0.45 : pressed ? 0.7 : 1 },
-                ]}
-              >
-                <Feather name="rotate-ccw" size={15} color={colors.primary} />
-                <Text style={[styles.originalButtonText, { color: colors.primary }]}>Rerun original search</Text>
-              </Pressable>
-              <Text style={[styles.newSearchHelper, { color: colors.mutedForeground }]}>Refining or rerunning starts a new price search.</Text>
-            </View>
           ) : null}
 
           {!searching && searchError ? (
@@ -964,40 +724,10 @@ export default function ReplacementPricingScreen() {
             </View>
           ) : null}
 
-          {!searching && searchNotice ? (
-            <View style={[styles.noticeBox, { backgroundColor: colors.secondary, borderColor: colors.border }]}>
-              <Feather name="info" size={17} color={colors.primary} />
-              <Text style={[styles.noticeText, { color: colors.foreground }]}>{searchNotice}</Text>
-            </View>
-          ) : null}
-
-          {searching && results === null ? (
+          {searching ? (
             <ReplacementSearchLoadingPanel colors={colors} />
-          ) : results !== null ? (
+          ) : results ? (
             <>
-              {searching ? (
-                <View
-                  accessibilityRole="progressbar"
-                  style={[
-                    styles.refreshingBanner,
-                    { backgroundColor: colors.secondary, borderColor: colors.border },
-                  ]}
-                >
-                  <ActivityIndicator size="small" color={colors.primary} />
-                  <View style={styles.refreshingCopy}>
-                    <Text style={[styles.refreshingTitle, { color: colors.foreground }]}>Searching new listings</Text>
-                    <Text style={[styles.refreshingText, { color: colors.mutedForeground }]}>Your current results stay visible while the {searchKind === "refined" ? "refined" : "original"} search runs.</Text>
-                  </View>
-                </View>
-              ) : null}
-
-              <View style={styles.filterHeading}>
-                <Text style={[styles.filterEyebrow, { color: colors.mutedForeground }]}>FILTER THESE RESULTS</Text>
-                <Text style={[styles.filterHelper, { color: colors.mutedForeground }]}>Low, Similar, and High only filter the listings already returned.</Text>
-                {estimate == null ? (
-                  <Text style={[styles.filterHelper, { color: colors.mutedForeground }]}>Add an estimated replacement value to enable Low, Similar and High filters.</Text>
-                ) : null}
-              </View>
               <ScrollView
                 horizontal
                 showsHorizontalScrollIndicator={false}
@@ -1005,7 +735,7 @@ export default function ReplacementPricingScreen() {
               >
                 {FILTERS.map((option) => {
                   const active = option.id === filter;
-                  const disabled = searching || (option.id !== "all" && estimate == null);
+                  const disabled = option.id !== "all" && estimate == null;
                   return (
                     <Pressable
                       key={option.id}
@@ -1034,11 +764,7 @@ export default function ReplacementPricingScreen() {
               </ScrollView>
 
               <Text style={[styles.resultCount, { color: colors.mutedForeground }]}>
-                {currentPriceRangeDescription
-                  ? filter === "all"
-                    ? `${results.length} ${results.length === 1 ? "listing" : "listings"} found ${currentPriceRangeDescription}.`
-                    : `${filteredResults.length} of ${results.length} listings shown ${currentPriceRangeDescription}.`
-                  : `${filteredResults.length} of ${results.length} listings`}
+                {filteredResults.length} of {results.length} listings
               </Text>
 
               {filteredResults.length ? (
@@ -1048,7 +774,6 @@ export default function ReplacementPricingScreen() {
                       key={`${result.position}-${result.link}-${result.title}`}
                       result={result}
                       selecting={selectingPosition === result.position}
-                      disabled={searching}
                       onOpen={() => handleOpen(result)}
                       onUse={() => handleUse(result)}
                     />
@@ -1057,10 +782,10 @@ export default function ReplacementPricingScreen() {
               ) : (
                 <View style={[styles.empty, { backgroundColor: colors.card }]}>
                   <Text style={[styles.emptyTitle, { color: colors.foreground }]}>
-                    {results.length ? "No listings in this range" : "No listings found"}
+                    No listings in this range
                   </Text>
                   <Text style={[styles.emptyText, { color: colors.mutedForeground }]}>
-                    {results.length ? "Try another filter or refine the search terms." : "Adjust the search details and run another refined search."}
+                    Try another filter or refine the search terms.
                   </Text>
                 </View>
               )}
@@ -1088,14 +813,6 @@ export default function ReplacementPricingScreen() {
         onSecondary={goBackToItem}
         onDismiss={() => setLimitModal(null)}
       />
-      <ReplacementSearchRefinementModal
-        visible={refinementVisible}
-        initialDraft={refinementDraft}
-        itemContext={refinementItemContext}
-        submitting={searching}
-        onDismiss={closeRefinementModal}
-        onSubmit={handleRefinedSearch}
-      />
     </>
   );
 }
@@ -1107,7 +824,6 @@ const styles = StyleSheet.create({
   itemName: { fontSize: 20, lineHeight: 26, fontFamily: "Inter_700Bold" },
   estimate: { fontSize: 12, lineHeight: 18, fontFamily: "Inter_400Regular" },
   helper: { fontSize: 13, lineHeight: 20, fontFamily: "Inter_400Regular" },
-  searchLabel: { marginBottom: -8, fontSize: 10, letterSpacing: 0.8, fontFamily: "Inter_600SemiBold" },
   searchRow: { flexDirection: "row", gap: 8 },
   searchInputWrap: {
     flex: 1,
@@ -1156,33 +872,6 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   errorText: { flex: 1, fontSize: 12, lineHeight: 18, fontFamily: "Inter_400Regular" },
-  noticeBox: {
-    borderWidth: 1,
-    borderRadius: 10,
-    padding: 12,
-    flexDirection: "row",
-    alignItems: "flex-start",
-    gap: 8,
-  },
-  noticeText: { flex: 1, fontSize: 12, lineHeight: 18, fontFamily: "Inter_500Medium" },
-  criteriaCard: { borderWidth: 1, padding: 14, gap: 10 },
-  criteriaHeader: { flexDirection: "row", alignItems: "flex-start", gap: 10 },
-  criteriaCopy: { flex: 1, gap: 3 },
-  criteriaEyebrow: { fontSize: 10, letterSpacing: 0.7, fontFamily: "Inter_600SemiBold" },
-  criteriaTerm: { fontSize: 16, lineHeight: 22, fontFamily: "Inter_700Bold" },
-  criteriaDetails: { fontSize: 12, lineHeight: 18, fontFamily: "Inter_400Regular" },
-  refineButton: { minHeight: 46, borderRadius: 11, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, paddingHorizontal: 14 },
-  refineButtonText: { fontSize: 14, fontFamily: "Inter_700Bold" },
-  originalButton: { minHeight: 42, borderWidth: 1, borderRadius: 10, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 7, paddingHorizontal: 12 },
-  originalButtonText: { fontSize: 12, fontFamily: "Inter_600SemiBold" },
-  newSearchHelper: { fontSize: 11, lineHeight: 16, fontFamily: "Inter_400Regular", textAlign: "center" },
-  refreshingBanner: { borderWidth: 1, borderRadius: 11, padding: 12, flexDirection: "row", alignItems: "center", gap: 10 },
-  refreshingCopy: { flex: 1, gap: 2 },
-  refreshingTitle: { fontSize: 13, fontFamily: "Inter_600SemiBold" },
-  refreshingText: { fontSize: 11, lineHeight: 16, fontFamily: "Inter_400Regular" },
-  filterHeading: { gap: 2 },
-  filterEyebrow: { fontSize: 10, letterSpacing: 0.7, fontFamily: "Inter_600SemiBold" },
-  filterHelper: { fontSize: 11, lineHeight: 16, fontFamily: "Inter_400Regular" },
   filters: { gap: 8, paddingVertical: 2 },
   filterChip: {
     borderWidth: 1,

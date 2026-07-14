@@ -29,12 +29,8 @@ import type {
   VoiceMappedChange,
 } from "@/types/voice";
 
-type VoiceContext = Omit<
-  VoiceDescribeRequest,
-  "audioBase64" | "mimeType" | "ext" | "targetField" | "currentValues"
->;
-const VOICE_EDIT_FALLBACK_MESSAGE =
-  "Voice edit could not start. Please try again or type your changes manually.";
+type VoiceContext = Omit<VoiceDescribeRequest, "audioBase64" | "mimeType" | "ext" | "targetField" | "currentValues">;
+const VOICE_EDIT_FALLBACK_MESSAGE = "Voice edit could not start. Please try again or type your changes manually.";
 
 export function VoiceInputSheet({
   visible,
@@ -42,10 +38,6 @@ export function VoiceInputSheet({
   targetField,
   currentValues = {},
   context = {},
-  presentation = "modal",
-  onPresented,
-  onPresentationError,
-  onFailure,
   onClose,
   onApply,
 }: {
@@ -54,60 +46,23 @@ export function VoiceInputSheet({
   targetField?: VoiceItemField;
   currentValues?: Partial<VoiceItemValues>;
   context?: VoiceContext;
-  presentation?: "modal" | "embedded";
-  onPresented?: () => void;
-  onPresentationError?: () => void;
-  onFailure?: (message: string) => void;
   onClose: () => void;
-  onApply: (
-    patch: VoiceItemPatch,
-    transcript: string,
-    changes: VoiceMappedChange[],
-  ) => void | Promise<void>;
+  onApply: (patch: VoiceItemPatch, transcript: string, changes: VoiceMappedChange[]) => void | Promise<void>;
 }) {
   const colors = useColors();
   const insets = useSafeAreaInsets();
-  const voice = useVoiceRecording(
-    undefined,
-    targetField ? "inline_voice_field" : "edit_item_full_voice",
-  );
+  const voice = useVoiceRecording(undefined, targetField ? "inline_voice_field" : "edit_item_full_voice");
   const [phase, setPhase] = useState<VoiceInputPhase>("permission");
   const [transcript, setTranscript] = useState("");
   const [changes, setChanges] = useState<VoiceMappedChange[]>([]);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const processingRef = useRef(false);
-  const closingRef = useRef(false);
-  const presentedRef = useRef(false);
   const visibleRef = useRef(visible);
-  const wasVisibleRef = useRef(visible);
 
   useEffect(() => {
     visibleRef.current = visible;
-    if (visible) closingRef.current = false;
   }, [visible]);
-
-  useEffect(() => {
-    if (!visible) {
-      presentedRef.current = false;
-      if (wasVisibleRef.current && !closingRef.current) {
-        processingRef.current = false;
-        void voice.reset();
-      }
-    }
-    wasVisibleRef.current = visible;
-  }, [visible, voice.reset]);
-
-  const reportPresented = () => {
-    if (!visible) return;
-    if (presentedRef.current) return;
-    presentedRef.current = true;
-    try {
-      onPresented?.();
-    } catch {
-      onPresentationError?.();
-    }
-  };
 
   useEffect(() => {
     if (!visible) return;
@@ -117,47 +72,27 @@ export function VoiceInputSheet({
     setChanges([]);
     setSelectedIds(new Set());
     setErrorMessage(null);
-    void voice
-      .checkPermission()
+    void voice.checkPermission()
       .then((granted) => {
-        if (!cancelled && visibleRef.current)
-          setPhase(granted ? "ready" : "permission");
+        if (!cancelled && visibleRef.current) setPhase(granted ? "ready" : "permission");
       })
       .catch(() => {
-        if (!cancelled) reportFailure();
+        if (!cancelled && visibleRef.current) {
+          setPhase("error");
+          setErrorMessage(VOICE_EDIT_FALLBACK_MESSAGE);
+        }
       });
     return () => {
       cancelled = true;
     };
   }, [visible, voice.checkPermission]);
 
-  const closeAndClean = () => {
-    if (closingRef.current) return;
-    closingRef.current = true;
+  const closeAndClean = async () => {
     processingRef.current = false;
-    visibleRef.current = false;
-    onClose();
-    void voice.reset().finally(() => {
-      closingRef.current = false;
-    });
-  };
-
-  const reportFailure = (message = VOICE_EDIT_FALLBACK_MESSAGE) => {
-    if (!visibleRef.current) return;
-    if (!onFailure) {
-      setPhase("error");
-      setErrorMessage(message);
-      return;
-    }
-    processingRef.current = false;
-    closingRef.current = true;
-    visibleRef.current = false;
     try {
-      onFailure(message);
+      await voice.reset();
     } finally {
-      void voice.reset().finally(() => {
-        closingRef.current = false;
-      });
+      onClose();
     }
   };
 
@@ -169,9 +104,15 @@ export function VoiceInputSheet({
       const granted = await voice.requestPermission();
       if (!visibleRef.current) return;
       if (granted) setPhase("ready");
-      else reportFailure();
+      else {
+        setPhase("error");
+        setErrorMessage(VOICE_EDIT_FALLBACK_MESSAGE);
+      }
     } catch {
-      reportFailure();
+      if (visibleRef.current) {
+        setPhase("error");
+        setErrorMessage(VOICE_EDIT_FALLBACK_MESSAGE);
+      }
     }
   };
 
@@ -179,17 +120,23 @@ export function VoiceInputSheet({
     if (voice.isStartingRecording || voice.isRecording) return;
     setErrorMessage(null);
     if (voice.permission !== "granted") {
-      reportFailure();
+      setPhase("permission");
+      setErrorMessage(VOICE_EDIT_FALLBACK_MESSAGE);
       return;
     }
     try {
       if (await voice.startRecording()) {
         if (visibleRef.current) setPhase("recording");
-      } else {
-        reportFailure();
+      }
+      else {
+        setPhase("error");
+        setErrorMessage(VOICE_EDIT_FALLBACK_MESSAGE);
       }
     } catch {
-      reportFailure();
+      if (visibleRef.current) {
+        setPhase("error");
+        setErrorMessage(VOICE_EDIT_FALLBACK_MESSAGE);
+      }
     }
   };
 
@@ -202,7 +149,8 @@ export function VoiceInputSheet({
       const recording = await voice.stopRecording();
       if (!visibleRef.current) return;
       if (!recording) {
-        reportFailure();
+        setPhase("error");
+        setErrorMessage(VOICE_EDIT_FALLBACK_MESSAGE);
         return;
       }
 
@@ -215,19 +163,19 @@ export function VoiceInputSheet({
       if (!visibleRef.current) return;
 
       if (!result.response) {
-        reportFailure();
+        setPhase("error");
+        setErrorMessage(VOICE_EDIT_FALLBACK_MESSAGE);
         return;
       }
       if (!result.response.success) {
-        reportFailure();
+        setPhase("error");
+        setErrorMessage(VOICE_EDIT_FALLBACK_MESSAGE);
         return;
       }
       setTranscript(result.response.transcript);
       if (!result.response.extraction) {
-        reportFailure(
-          result.response.extractionError ??
-            "No supported item details were found.",
-        );
+        setPhase("error");
+        setErrorMessage(result.response.extractionError ?? "No supported item details were found.");
         return;
       }
 
@@ -238,30 +186,25 @@ export function VoiceInputSheet({
         targetField,
       });
       if (nextChanges.length === 0) {
-        reportFailure(
-          "No supported item changes were found. Try saying the field and value clearly.",
-        );
+        setPhase("error");
+        setErrorMessage("No supported item changes were found. Try saying the field and value clearly.");
         return;
       }
       setChanges(nextChanges);
-      setSelectedIds(
-        new Set(
-          nextChanges
-            .filter((change) => change.selectedByDefault)
-            .map((change) => change.id),
-        ),
-      );
+      setSelectedIds(new Set(nextChanges.filter((change) => change.selectedByDefault).map((change) => change.id)));
       setPhase("review");
     } catch {
-      reportFailure();
+      if (visibleRef.current) {
+        setPhase("error");
+        setErrorMessage(VOICE_EDIT_FALLBACK_MESSAGE);
+      }
     } finally {
       processingRef.current = false;
     }
   };
 
   useEffect(() => {
-    if (visible && phase === "recording" && voice.maxDurationReached)
-      void stopAndProcess();
+    if (visible && phase === "recording" && voice.maxDurationReached) void stopAndProcess();
   }, [visible, phase, voice.maxDurationReached]);
 
   const toggleChange = (id: string) => {
@@ -273,17 +216,8 @@ export function VoiceInputSheet({
     });
   };
 
-  const resolvePrice = (
-    id: string,
-    destination: "replacement_price" | "original_purchase_price",
-  ) => {
-    setChanges((current) =>
-      current.map((change) =>
-        change.id === id
-          ? resolveAmbiguousPrice(change, destination, currentValues)
-          : change,
-      ),
-    );
+  const resolvePrice = (id: string, destination: "replacement_price" | "original_purchase_price") => {
+    setChanges((current) => current.map((change) => change.id === id ? resolveAmbiguousPrice(change, destination, currentValues) : change));
     setSelectedIds((current) => {
       const next = new Set(current);
       next.delete(id);
@@ -296,305 +230,115 @@ export function VoiceInputSheet({
     const patch = buildSelectedVoicePatch(changes, selectedIds);
     if (Object.keys(patch).length === 0) return;
     try {
-      await onApply(
-        patch,
-        transcript,
-        changes.filter((change) => selectedIds.has(change.id)),
-      );
-      closeAndClean();
+      await onApply(patch, transcript, changes.filter((change) => selectedIds.has(change.id)));
+      await closeAndClean();
     } catch (applyError) {
       setPhase("error");
       setErrorMessage(VOICE_EDIT_FALLBACK_MESSAGE);
     }
   };
 
-  const sheetContent = (
-    <View
-      accessibilityViewIsModal
-      onLayout={presentation === "embedded" ? reportPresented : undefined}
-      style={[
-        styles.modalRoot,
-        presentation === "embedded" && styles.embeddedRoot,
-      ]}
-    >
-      <Pressable
-        accessibilityLabel="Close voice input"
-        style={styles.backdrop}
-        onPress={() => void closeAndClean()}
-      />
-      <View
-        style={[
-          styles.sheet,
-          { backgroundColor: colors.card, paddingBottom: insets.bottom + 16 },
-        ]}
-      >
-        <View style={[styles.handle, { backgroundColor: colors.border }]} />
-        <View style={styles.header}>
-          <View style={styles.headerCopy}>
-            <Text style={[styles.title, { color: colors.foreground }]}>
-              {title}
-            </Text>
-            <Text style={[styles.subtitle, { color: colors.mutedForeground }]}>
-              Nothing changes until you review and apply it.
-            </Text>
+  return (
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={() => void closeAndClean()}>
+      <View style={styles.modalRoot}>
+        <Pressable accessibilityLabel="Close voice input" style={styles.backdrop} onPress={() => void closeAndClean()} />
+        <View style={[styles.sheet, { backgroundColor: colors.card, paddingBottom: insets.bottom + 16 }]}>
+          <View style={[styles.handle, { backgroundColor: colors.border }]} />
+          <View style={styles.header}>
+            <View style={styles.headerCopy}>
+              <Text style={[styles.title, { color: colors.foreground }]}>{title}</Text>
+              <Text style={[styles.subtitle, { color: colors.mutedForeground }]}>Nothing changes until you review and apply it.</Text>
+            </View>
+            <Pressable accessibilityRole="button" accessibilityLabel="Close voice input" onPress={() => void closeAndClean()} hitSlop={10}>
+              <Feather name="x" size={20} color={colors.mutedForeground} />
+            </Pressable>
           </View>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Close voice input"
-            onPress={() => void closeAndClean()}
-            hitSlop={10}
-          >
-            <Feather name="x" size={20} color={colors.mutedForeground} />
-          </Pressable>
-        </View>
 
-        <ScrollView
-          style={styles.scroll}
-          contentContainerStyle={styles.scrollContent}
-        >
-          {phase === "permission" && (
-            <View style={styles.centerState}>
-              <Feather name="mic" size={30} color={colors.primary} />
-              <Text style={[styles.stateTitle, { color: colors.foreground }]}>
-                Microphone access
-              </Text>
-              <Text
-                style={[styles.stateText, { color: colors.mutedForeground }]}
-              >
-                Coverly needs microphone access only while you record voice
-                input.
-              </Text>
-              {errorMessage && (
-                <Text style={[styles.errorText, { color: colors.destructive }]}>
-                  {errorMessage}
-                </Text>
-              )}
-              <PrimaryButton
-                label={
-                  voice.isRequestingPermission
-                    ? "Checking access"
-                    : "Allow microphone"
-                }
-                disabled={voice.isRequestingPermission}
-                onPress={() => void requestPermission()}
-              />
-            </View>
-          )}
-
-          {phase === "ready" && (
-            <View style={styles.centerState}>
-              <Feather name="mic" size={34} color={colors.primary} />
-              <Text style={[styles.stateTitle, { color: colors.foreground }]}>
-                Microphone enabled
-              </Text>
-              <Text
-                style={[styles.stateText, { color: colors.mutedForeground }]}
-              >
-                Speak naturally. You will review the transcript and suggested
-                changes next.
-              </Text>
-              <View
-                style={[
-                  styles.exampleBox,
-                  {
-                    backgroundColor: colors.secondary,
-                    borderColor: colors.border,
-                    borderRadius: colors.radius,
-                  },
-                ]}
-              >
-                <Text
-                  style={[
-                    styles.exampleLabel,
-                    { color: colors.mutedForeground },
-                  ]}
-                >
-                  EXAMPLE
-                </Text>
-                <Text
-                  style={[styles.exampleText, { color: colors.foreground }]}
-                >
-                  Sony Bravia 3 65 inch bought from Noel Leeming for $1700
-                </Text>
+          <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent}>
+            {phase === "permission" && (
+              <View style={styles.centerState}>
+                <Feather name="mic" size={30} color={colors.primary} />
+                <Text style={[styles.stateTitle, { color: colors.foreground }]}>Microphone access</Text>
+                <Text style={[styles.stateText, { color: colors.mutedForeground }]}>Coverly needs microphone access only while you record voice input.</Text>
+                {errorMessage && <Text style={[styles.errorText, { color: colors.destructive }]}>{errorMessage}</Text>}
+                <PrimaryButton label={voice.isRequestingPermission ? "Checking access" : "Allow microphone"} disabled={voice.isRequestingPermission} onPress={() => void requestPermission()} />
               </View>
-              <PrimaryButton
-                label={
-                  voice.isStartingRecording ? "Starting" : "Start recording"
-                }
-                disabled={voice.isStartingRecording}
-                onPress={() => void startRecording()}
-              />
-            </View>
-          )}
+            )}
 
-          {phase === "recording" && (
-            <View style={styles.centerState}>
-              <View
-                style={[
-                  styles.recordingDot,
-                  { backgroundColor: colors.destructive },
-                ]}
-              />
-              <Text style={[styles.stateTitle, { color: colors.foreground }]}>
-                Listening…
-              </Text>
-              <Text style={[styles.timer, { color: colors.mutedForeground }]}>
-                {voice.durationSeconds}s / {voice.maxDurationSeconds}s
-              </Text>
-              <View
-                style={[
-                  styles.exampleBox,
-                  {
-                    backgroundColor: colors.secondary,
-                    borderColor: colors.border,
-                    borderRadius: colors.radius,
-                  },
-                ]}
-              >
-                <Text
-                  style={[
-                    styles.exampleLabel,
-                    { color: colors.mutedForeground },
-                  ]}
-                >
-                  TRY SAYING
-                </Text>
-                <Text
-                  style={[styles.exampleText, { color: colors.foreground }]}
-                >
-                  Sony Bravia 3 65 inch bought from Noel Leeming for $1700
-                </Text>
-              </View>
-              <PrimaryButton
-                label="Stop and review"
-                icon="square"
-                onPress={() => void stopAndProcess()}
-              />
-            </View>
-          )}
-
-          {phase === "processing" && (
-            <View style={styles.centerState}>
-              <ActivityIndicator size="large" color={colors.primary} />
-              <Text style={[styles.stateTitle, { color: colors.foreground }]}>
-                Processing voice input
-              </Text>
-              <Text
-                style={[styles.stateText, { color: colors.mutedForeground }]}
-              >
-                Transcribing and finding supported item details…
-              </Text>
-            </View>
-          )}
-
-          {phase === "error" && (
-            <View style={styles.centerState}>
-              <Feather
-                name="alert-circle"
-                size={30}
-                color={colors.destructive}
-              />
-              <Text style={[styles.stateTitle, { color: colors.foreground }]}>
-                Couldn’t process voice input
-              </Text>
-              <Text style={[styles.errorText, { color: colors.destructive }]}>
-                {errorMessage ?? voice.error ?? "Please try again."}
-              </Text>
-              {transcript ? (
-                <View
-                  style={[
-                    styles.errorTranscript,
-                    {
-                      backgroundColor: colors.secondary,
-                      borderRadius: colors.radius,
-                    },
-                  ]}
-                >
-                  <Text
-                    style={[
-                      styles.errorTranscriptLabel,
-                      { color: colors.mutedForeground },
-                    ]}
-                  >
-                    HEARD
-                  </Text>
-                  <Text
-                    style={[
-                      styles.errorTranscriptText,
-                      { color: colors.foreground },
-                    ]}
-                  >
-                    {transcript}
+            {phase === "ready" && (
+              <View style={styles.centerState}>
+                <Feather name="mic" size={34} color={colors.primary} />
+                <Text style={[styles.stateTitle, { color: colors.foreground }]}>Microphone enabled</Text>
+                <Text style={[styles.stateText, { color: colors.mutedForeground }]}>Speak naturally. You will review the transcript and suggested changes next.</Text>
+                <View style={[styles.exampleBox, { backgroundColor: colors.secondary, borderColor: colors.border, borderRadius: colors.radius }]}>
+                  <Text style={[styles.exampleLabel, { color: colors.mutedForeground }]}>EXAMPLE</Text>
+                  <Text style={[styles.exampleText, { color: colors.foreground }]}>
+                    Sony Bravia 3 65 inch bought from Noel Leeming for $1700
                   </Text>
                 </View>
-              ) : null}
-              <PrimaryButton
-                label="Try again"
-                onPress={() => {
-                  setPhase("ready");
-                  setErrorMessage(null);
-                }}
-              />
-            </View>
-          )}
+                <PrimaryButton label={voice.isStartingRecording ? "Starting" : "Start recording"} disabled={voice.isStartingRecording} onPress={() => void startRecording()} />
+              </View>
+            )}
+
+            {phase === "recording" && (
+              <View style={styles.centerState}>
+                <View style={[styles.recordingDot, { backgroundColor: colors.destructive }]} />
+                <Text style={[styles.stateTitle, { color: colors.foreground }]}>Listening…</Text>
+                <Text style={[styles.timer, { color: colors.mutedForeground }]}>{voice.durationSeconds}s / {voice.maxDurationSeconds}s</Text>
+                <View style={[styles.exampleBox, { backgroundColor: colors.secondary, borderColor: colors.border, borderRadius: colors.radius }]}>
+                  <Text style={[styles.exampleLabel, { color: colors.mutedForeground }]}>TRY SAYING</Text>
+                  <Text style={[styles.exampleText, { color: colors.foreground }]}>
+                    Sony Bravia 3 65 inch bought from Noel Leeming for $1700
+                  </Text>
+                </View>
+                <PrimaryButton label="Stop and review" icon="square" onPress={() => void stopAndProcess()} />
+              </View>
+            )}
+
+            {phase === "processing" && (
+              <View style={styles.centerState}>
+                <ActivityIndicator size="large" color={colors.primary} />
+                <Text style={[styles.stateTitle, { color: colors.foreground }]}>Processing voice input</Text>
+                <Text style={[styles.stateText, { color: colors.mutedForeground }]}>Transcribing and finding supported item details…</Text>
+              </View>
+            )}
+
+            {phase === "error" && (
+              <View style={styles.centerState}>
+                <Feather name="alert-circle" size={30} color={colors.destructive} />
+                <Text style={[styles.stateTitle, { color: colors.foreground }]}>Couldn’t process voice input</Text>
+                <Text style={[styles.errorText, { color: colors.destructive }]}>{errorMessage ?? voice.error ?? "Please try again."}</Text>
+                {transcript ? (
+                  <View style={[styles.errorTranscript, { backgroundColor: colors.secondary, borderRadius: colors.radius }]}>
+                    <Text style={[styles.errorTranscriptLabel, { color: colors.mutedForeground }]}>HEARD</Text>
+                    <Text style={[styles.errorTranscriptText, { color: colors.foreground }]}>{transcript}</Text>
+                  </View>
+                ) : null}
+                <PrimaryButton label="Try again" onPress={() => { setPhase("ready"); setErrorMessage(null); }} />
+              </View>
+            )}
+
+            {phase === "review" && (
+              <VoiceChangeReview transcript={transcript} changes={changes} selectedIds={selectedIds} onToggle={toggleChange} onResolvePrice={resolvePrice} />
+            )}
+          </ScrollView>
 
           {phase === "review" && (
-            <VoiceChangeReview
-              transcript={transcript}
-              changes={changes}
-              selectedIds={selectedIds}
-              onToggle={toggleChange}
-              onResolvePrice={resolvePrice}
-            />
+            <View style={[styles.footer, { borderTopColor: colors.border }]}>
+              <Pressable onPress={() => void closeAndClean()} style={[styles.secondaryButton, { borderColor: colors.border }]}>
+                <Text style={[styles.secondaryText, { color: colors.foreground }]}>Cancel</Text>
+              </Pressable>
+              <Pressable
+                disabled={selectedIds.size === 0}
+                onPress={() => void applyChanges()}
+                style={[styles.applyButton, { backgroundColor: colors.primary, opacity: selectedIds.size === 0 ? 0.45 : 1 }]}
+              >
+                <Text style={[styles.applyText, { color: colors.primaryForeground }]}>Apply changes</Text>
+              </Pressable>
+            </View>
           )}
-        </ScrollView>
-
-        {phase === "review" && (
-          <View style={[styles.footer, { borderTopColor: colors.border }]}>
-            <Pressable
-              onPress={() => void closeAndClean()}
-              style={[styles.secondaryButton, { borderColor: colors.border }]}
-            >
-              <Text
-                style={[styles.secondaryText, { color: colors.foreground }]}
-              >
-                Cancel
-              </Text>
-            </Pressable>
-            <Pressable
-              disabled={selectedIds.size === 0}
-              onPress={() => void applyChanges()}
-              style={[
-                styles.applyButton,
-                {
-                  backgroundColor: colors.primary,
-                  opacity: selectedIds.size === 0 ? 0.45 : 1,
-                },
-              ]}
-            >
-              <Text
-                style={[styles.applyText, { color: colors.primaryForeground }]}
-              >
-                Apply changes
-              </Text>
-            </Pressable>
-          </View>
-        )}
+        </View>
       </View>
-    </View>
-  );
-
-  if (presentation === "embedded") return visible ? sheetContent : null;
-
-  return (
-    <Modal
-      visible={visible}
-      transparent
-      animationType="slide"
-      onShow={reportPresented}
-      onRequestClose={closeAndClean}
-    >
-      {sheetContent}
     </Modal>
   );
 }
@@ -615,145 +359,42 @@ function PrimaryButton({
     <Pressable
       disabled={disabled}
       onPress={onPress}
-      style={({ pressed }) => [
-        styles.primaryButton,
-        {
-          backgroundColor: colors.primary,
-          opacity: disabled ? 0.5 : pressed ? 0.82 : 1,
-        },
-      ]}
+      style={({ pressed }) => [styles.primaryButton, { backgroundColor: colors.primary, opacity: disabled ? 0.5 : pressed ? 0.82 : 1 }]}
     >
       <Feather name={icon} size={16} color={colors.primaryForeground} />
-      <Text style={[styles.primaryText, { color: colors.primaryForeground }]}>
-        {label}
-      </Text>
+      <Text style={[styles.primaryText, { color: colors.primaryForeground }]}>{label}</Text>
     </Pressable>
   );
 }
 
 const styles = StyleSheet.create({
   modalRoot: { flex: 1, justifyContent: "flex-end" },
-  embeddedRoot: {
-    ...StyleSheet.absoluteFillObject,
-    zIndex: 100,
-    elevation: 100,
-  },
-  backdrop: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: "rgba(15,23,42,0.46)",
-  },
-  sheet: {
-    maxHeight: "88%",
-    borderTopLeftRadius: 22,
-    borderTopRightRadius: 22,
-    paddingTop: 8,
-  },
-  handle: {
-    width: 36,
-    height: 4,
-    borderRadius: 2,
-    alignSelf: "center",
-    marginBottom: 10,
-  },
-  header: {
-    flexDirection: "row",
-    alignItems: "flex-start",
-    paddingHorizontal: 18,
-    gap: 12,
-  },
+  backdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: "rgba(15,23,42,0.46)" },
+  sheet: { maxHeight: "88%", borderTopLeftRadius: 22, borderTopRightRadius: 22, paddingTop: 8 },
+  handle: { width: 36, height: 4, borderRadius: 2, alignSelf: "center", marginBottom: 10 },
+  header: { flexDirection: "row", alignItems: "flex-start", paddingHorizontal: 18, gap: 12 },
   headerCopy: { flex: 1, gap: 3 },
   title: { fontSize: 18, fontFamily: "Inter_700Bold" },
   subtitle: { fontSize: 11, lineHeight: 16, fontFamily: "Inter_400Regular" },
   scroll: { marginTop: 12 },
   scrollContent: { paddingHorizontal: 18, paddingBottom: 16 },
-  centerState: {
-    minHeight: 250,
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 10,
-    paddingHorizontal: 18,
-  },
-  stateTitle: {
-    fontSize: 16,
-    fontFamily: "Inter_600SemiBold",
-    textAlign: "center",
-  },
-  stateText: {
-    fontSize: 13,
-    lineHeight: 19,
-    fontFamily: "Inter_400Regular",
-    textAlign: "center",
-  },
-  exampleBox: {
-    width: "100%",
-    borderWidth: 1,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    gap: 3,
-  },
-  exampleLabel: {
-    fontSize: 10,
-    letterSpacing: 0.7,
-    fontFamily: "Inter_600SemiBold",
-    textAlign: "center",
-  },
-  exampleText: {
-    fontSize: 13,
-    lineHeight: 18,
-    fontFamily: "Inter_500Medium",
-    textAlign: "center",
-  },
-  errorText: {
-    fontSize: 12,
-    lineHeight: 18,
-    fontFamily: "Inter_400Regular",
-    textAlign: "center",
-  },
+  centerState: { minHeight: 250, alignItems: "center", justifyContent: "center", gap: 10, paddingHorizontal: 18 },
+  stateTitle: { fontSize: 16, fontFamily: "Inter_600SemiBold", textAlign: "center" },
+  stateText: { fontSize: 13, lineHeight: 19, fontFamily: "Inter_400Regular", textAlign: "center" },
+  exampleBox: { width: "100%", borderWidth: 1, paddingHorizontal: 12, paddingVertical: 10, gap: 3 },
+  exampleLabel: { fontSize: 10, letterSpacing: 0.7, fontFamily: "Inter_600SemiBold", textAlign: "center" },
+  exampleText: { fontSize: 13, lineHeight: 18, fontFamily: "Inter_500Medium", textAlign: "center" },
+  errorText: { fontSize: 12, lineHeight: 18, fontFamily: "Inter_400Regular", textAlign: "center" },
   errorTranscript: { width: "100%", padding: 10, gap: 3 },
-  errorTranscriptLabel: {
-    fontSize: 10,
-    letterSpacing: 0.7,
-    fontFamily: "Inter_600SemiBold",
-  },
-  errorTranscriptText: {
-    fontSize: 12,
-    lineHeight: 17,
-    fontFamily: "Inter_400Regular",
-  },
+  errorTranscriptLabel: { fontSize: 10, letterSpacing: 0.7, fontFamily: "Inter_600SemiBold" },
+  errorTranscriptText: { fontSize: 12, lineHeight: 17, fontFamily: "Inter_400Regular" },
   timer: { fontSize: 13, fontFamily: "Inter_500Medium" },
   recordingDot: { width: 18, height: 18, borderRadius: 9 },
-  primaryButton: {
-    minWidth: 170,
-    marginTop: 6,
-    paddingHorizontal: 18,
-    paddingVertical: 12,
-    borderRadius: 12,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 8,
-  },
+  primaryButton: { minWidth: 170, marginTop: 6, paddingHorizontal: 18, paddingVertical: 12, borderRadius: 12, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8 },
   primaryText: { fontSize: 14, fontFamily: "Inter_600SemiBold" },
-  footer: {
-    flexDirection: "row",
-    gap: 10,
-    borderTopWidth: 1,
-    paddingHorizontal: 18,
-    paddingTop: 12,
-  },
-  secondaryButton: {
-    flex: 1,
-    borderWidth: 1,
-    borderRadius: 12,
-    paddingVertical: 12,
-    alignItems: "center",
-  },
+  footer: { flexDirection: "row", gap: 10, borderTopWidth: 1, paddingHorizontal: 18, paddingTop: 12 },
+  secondaryButton: { flex: 1, borderWidth: 1, borderRadius: 12, paddingVertical: 12, alignItems: "center" },
   secondaryText: { fontSize: 14, fontFamily: "Inter_600SemiBold" },
-  applyButton: {
-    flex: 2,
-    borderRadius: 12,
-    paddingVertical: 12,
-    alignItems: "center",
-  },
+  applyButton: { flex: 2, borderRadius: 12, paddingVertical: 12, alignItems: "center" },
   applyText: { fontSize: 14, fontFamily: "Inter_600SemiBold" },
 });

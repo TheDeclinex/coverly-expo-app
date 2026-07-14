@@ -1197,10 +1197,6 @@ export default function ItemsScreen() {
   const [localCoverUrl, setLocalCoverUrl] = useState<string | null>(null);
   const [coverSavedTick, setCoverSavedTick] = useState(false);
   const [coverActionSheetVisible, setCoverActionSheetVisible] = useState(false);
-  const [pendingCoverAction, setPendingCoverAction] = useState<Exclude<RoomCoverAction, "cancel"> | null>(null);
-  const pendingCoverActionRef = useRef<Exclude<RoomCoverAction, "cancel"> | null>(null);
-  const pendingCoverDispatchScheduledRef = useRef(false);
-  const pickerLaunchInFlightRef = useRef(false);
   const [archivingRoom, setArchivingRoom] = useState(false);
   const [newItemIds, setNewItemIds] = useState<Set<string>>(new Set());
   const [roomImageViewer, setRoomImageViewer] = useState<{ item?: InventoryItem; uri: string; title: string } | null>(null);
@@ -1963,11 +1959,9 @@ export default function ItemsScreen() {
   }, [coverUploading, id, localCoverUrl, queryClient, refreshRoomCover, resolvedFileId, session?.user.id, showToast]);
 
   const pickRoomCover = React.useCallback(async (source: "camera" | "library") => {
-    if (coverUploading || pickerLaunchInFlightRef.current) return;
-    pickerLaunchInFlightRef.current = true;
+    if (coverUploading) return;
     try {
       if (Platform.OS !== "web") {
-        if (__DEV__) console.info("[roomCoverAction] requesting permission", { source });
         const permission = source === "camera"
           ? await ImagePicker.requestCameraPermissionsAsync()
           : await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -1976,7 +1970,6 @@ export default function ItemsScreen() {
           return;
         }
       }
-      if (__DEV__) console.info("[roomCoverAction] launching picker", { source });
       const result = source === "camera" && Platform.OS !== "web"
         ? await ImagePicker.launchCameraAsync(ROOM_COVER_PICKER_OPTIONS)
         : await ImagePicker.launchImageLibraryAsync(ROOM_COVER_PICKER_OPTIONS);
@@ -1987,8 +1980,6 @@ export default function ItemsScreen() {
         "Couldn't open photos",
         error instanceof Error ? error.message : "Please try again.",
       );
-    } finally {
-      pickerLaunchInFlightRef.current = false;
     }
   }, [coverUploading, saveRoomCover, showPermissionHelp]);
 
@@ -2017,8 +2008,8 @@ export default function ItemsScreen() {
     }
   }, [coverUploading, id, queryClient, refreshRoomCover, resolvedFileId, showToast]);
 
-  const runRoomCoverAction = React.useCallback((action: Exclude<RoomCoverAction, "cancel">) => {
-    if (__DEV__) console.info("[roomCoverAction] dispatch after modal dismissal", { action });
+  const handleRoomCoverAction = React.useCallback((action: RoomCoverAction) => {
+    setCoverActionSheetVisible(false);
     if (action === "camera" || action === "library") {
       void pickRoomCover(action);
     } else if (action === "remove") {
@@ -2028,68 +2019,6 @@ export default function ItemsScreen() {
       ]);
     }
   }, [pickRoomCover, removeRoomCover]);
-
-  const runPendingRoomCoverAction = React.useCallback(() => {
-    const action = pendingCoverActionRef.current;
-    if (!action) return;
-    pendingCoverActionRef.current = null;
-    setPendingCoverAction(null);
-    pendingCoverDispatchScheduledRef.current = false;
-    runRoomCoverAction(action);
-  }, [runRoomCoverAction]);
-
-  const schedulePendingRoomCoverAction = React.useCallback(() => {
-    if (!pendingCoverActionRef.current || pendingCoverDispatchScheduledRef.current) return;
-    pendingCoverDispatchScheduledRef.current = true;
-    requestAnimationFrame(() => {
-      requestAnimationFrame(runPendingRoomCoverAction);
-    });
-  }, [runPendingRoomCoverAction]);
-
-  useEffect(() => {
-    if (__DEV__) console.info("[roomCoverAction] modal visible", {
-      visible: coverActionSheetVisible,
-      pendingAction: pendingCoverAction,
-    });
-    if (!coverActionSheetVisible && pendingCoverAction) {
-      schedulePendingRoomCoverAction();
-    }
-  }, [coverActionSheetVisible, pendingCoverAction, schedulePendingRoomCoverAction]);
-
-  const handleRoomCoverActionPress = React.useCallback((action: RoomCoverAction) => {
-    if (action === "cancel") {
-      pendingCoverActionRef.current = null;
-      setPendingCoverAction(null);
-      pendingCoverDispatchScheduledRef.current = false;
-      if (__DEV__) console.info("[roomCoverAction] modal close requested", {
-        action,
-        visibleBefore: coverActionSheetVisible,
-      });
-      setCoverActionSheetVisible(false);
-      return;
-    }
-    if (__DEV__) console.info("[roomCoverAction] modal close requested", {
-      action,
-      visibleBefore: coverActionSheetVisible,
-      coverUploading,
-      pickerLaunchInFlight: pickerLaunchInFlightRef.current,
-      previousPendingAction: pendingCoverActionRef.current,
-    });
-    setCoverActionSheetVisible(false);
-    if (pickerLaunchInFlightRef.current || coverUploading) return;
-    // Replace any abandoned Fast Refresh queue entry. State/ref consumption is
-    // still single-shot, so two rapid presses can schedule only one launch.
-    pendingCoverActionRef.current = action;
-    setPendingCoverAction(action);
-  }, [coverActionSheetVisible, coverUploading]);
-
-  const openRoomCoverActionSheet = React.useCallback(() => {
-    if (coverUploading || pickerLaunchInFlightRef.current) return;
-    pendingCoverActionRef.current = null;
-    setPendingCoverAction(null);
-    pendingCoverDispatchScheduledRef.current = false;
-    setCoverActionSheetVisible(true);
-  }, [coverUploading]);
 
   const renderRoomCover = () => (
     <>
@@ -2202,7 +2131,7 @@ export default function ItemsScreen() {
         </View>
       )}
       <Pressable
-        onPress={openRoomCoverActionSheet}
+        onPress={() => setCoverActionSheetVisible(true)}
         disabled={coverUploading}
         style={[styles.cameraBtn, { backgroundColor: "rgba(0,0,0,0.45)" }]}
         hitSlop={8}
@@ -2219,40 +2148,24 @@ export default function ItemsScreen() {
     <Modal
       visible={coverActionSheetVisible}
       transparent
-      animationType="none"
-      onRequestClose={() => handleRoomCoverActionPress("cancel")}
-      onDismiss={() => {
-        if (__DEV__) console.info("[roomCoverAction] Modal.onDismiss", {
-          pendingAction: pendingCoverActionRef.current,
-        });
-        schedulePendingRoomCoverAction();
-      }}
+      animationType="fade"
+      onRequestClose={() => setCoverActionSheetVisible(false)}
     >
-      <View style={styles.coverActionRoot}>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Cancel room cover photo actions"
-          style={StyleSheet.absoluteFill}
-          onPress={() => handleRoomCoverActionPress("cancel")}
-        />
-        <View style={[styles.coverActionSheet, { backgroundColor: colors.card }]}>
+      <Pressable style={styles.coverActionBackdrop} onPress={() => setCoverActionSheetVisible(false)}>
+        <Pressable style={[styles.coverActionSheet, { backgroundColor: colors.card }]} onPress={(event) => event.stopPropagation()}>
           <Text style={[styles.coverActionTitle, { color: colors.foreground }]}>Room cover photo</Text>
           {roomCoverActions(Boolean(localCoverUrl ?? room?.cover_photo_url)).map((action) => (
             <Pressable
               key={action}
               accessibilityRole="button"
-              disabled={coverUploading || pickerLaunchInFlightRef.current}
-              onPress={() => {
-                if (__DEV__) console.info("[roomCoverAction] direct button press", { action });
-                handleRoomCoverActionPress(action);
-              }}
+              onPress={() => handleRoomCoverAction(action)}
               style={({ pressed }) => [styles.coverActionButton, { borderColor: colors.border, opacity: pressed ? 0.65 : 1 }]}
             >
               <Text style={[styles.coverActionText, { color: action === "remove" ? colors.destructive : colors.foreground }]}>{action === "camera" ? "Take photo" : action === "library" ? "Choose from library" : action === "remove" ? "Remove cover" : "Cancel"}</Text>
             </Pressable>
           ))}
-        </View>
-      </View>
+        </Pressable>
+      </Pressable>
     </Modal>
     {scanSuccessMessage ? (
       <View style={[styles.scanSuccessBanner, { backgroundColor: "#E8F8F2", borderColor: "rgba(29,158,117,0.22)" }]}>
@@ -3549,7 +3462,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   moveRoomName: { flex: 1, fontSize: 14, fontFamily: "Inter_600SemiBold" },
-  coverActionRoot: {
+  coverActionBackdrop: {
     flex: 1,
     justifyContent: "flex-end",
     backgroundColor: "rgba(15, 23, 42, 0.46)",

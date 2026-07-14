@@ -15,7 +15,6 @@ import type { ReplacementPriceResult } from "@/lib/replacement-pricing";
 interface ReplacementListingCardProps {
   result: ReplacementPriceResult;
   selecting: boolean;
-  disabled?: boolean;
   onOpen: () => void;
   onUse: () => void;
 }
@@ -40,7 +39,6 @@ function formatPrice(result: ReplacementPriceResult): string {
 export function ReplacementListingCard({
   result,
   selecting,
-  disabled = false,
   onOpen,
   onUse,
 }: ReplacementListingCardProps) {
@@ -99,13 +97,13 @@ export function ReplacementListingCard({
 
       <View style={styles.actions}>
         <Pressable
-          disabled={!canOpen || disabled}
+          disabled={!canOpen}
           onPress={onOpen}
           style={({ pressed }) => [
             styles.secondaryButton,
             {
               borderColor: colors.border,
-              opacity: !canOpen || disabled ? 0.45 : pressed ? 0.7 : 1,
+              opacity: !canOpen ? 0.45 : pressed ? 0.7 : 1,
             },
           ]}
         >
@@ -114,13 +112,13 @@ export function ReplacementListingCard({
         </Pressable>
 
         <Pressable
-          disabled={!canUse || selecting || disabled}
+          disabled={!canUse || selecting}
           onPress={onUse}
           style={({ pressed }) => [
             styles.primaryButton,
             {
               backgroundColor: colors.primary,
-              opacity: !canUse || selecting || disabled ? 0.5 : pressed ? 0.8 : 1,
+              opacity: !canUse || selecting ? 0.5 : pressed ? 0.8 : 1,
             },
           ]}
         >

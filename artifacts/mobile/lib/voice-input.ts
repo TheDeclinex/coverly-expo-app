@@ -14,13 +14,10 @@ export interface VoiceRecordingInput {
   extension: string;
 }
 
-export const VOICE_DESCRIBE_TIMEOUT_MS = 45_000;
-
 async function blobToBase64(blob: Blob): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
-    reader.onerror = () =>
-      reject(reader.error ?? new Error("Could not read audio recording."));
+    reader.onerror = () => reject(reader.error ?? new Error("Could not read audio recording."));
     reader.onload = () => {
       const result = reader.result;
       if (typeof result !== "string") {
@@ -33,13 +30,10 @@ async function blobToBase64(blob: Blob): Promise<string> {
   });
 }
 
-async function recordingToBase64(
-  recording: VoiceRecordingInput,
-): Promise<string> {
+async function recordingToBase64(recording: VoiceRecordingInput): Promise<string> {
   if (Platform.OS === "web") {
     const response = await fetch(recording.uri);
-    if (!response.ok)
-      throw new Error(`Could not read audio recording (${response.status}).`);
+    if (!response.ok) throw new Error(`Could not read audio recording (${response.status}).`);
     return blobToBase64(await response.blob());
   }
   return new File(recording.uri).base64();
@@ -68,11 +62,7 @@ export async function callVoiceDescribe(
       mimeType: recording.mimeType,
       ext: recording.extension,
     };
-    const { data, error } =
-      await supabase.functions.invoke<VoiceDescribeResponse>("voice-describe", {
-        body,
-        timeout: VOICE_DESCRIBE_TIMEOUT_MS,
-      });
+    const { data, error } = await supabase.functions.invoke<VoiceDescribeResponse>("voice-describe", { body });
     if (error) {
       const contextResponse = (error as { context?: Response }).context;
       return {
@@ -92,8 +82,7 @@ export async function callVoiceDescribe(
     return {
       response: null,
       httpStatus: null,
-      networkError:
-        error instanceof Error ? error.message : "Voice request failed.",
+      networkError: error instanceof Error ? error.message : "Voice request failed.",
       durationMs: Date.now() - startedAt,
     };
   }

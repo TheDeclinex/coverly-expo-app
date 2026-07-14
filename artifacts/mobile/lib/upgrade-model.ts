@@ -31,19 +31,6 @@ export type PlanComparisonRow = {
   paid: string;
 };
 
-export type PaidPlanComparisonRow = {
-  label: string;
-  plus: string;
-  family: string;
-};
-
-export type AllPlanComparisonRow = {
-  label: string;
-  free: string;
-  plus: string;
-  family: string;
-};
-
 function packageSearchText(pkg: UpgradePackageLike) {
   return [
     pkg.identifier,
@@ -123,96 +110,6 @@ export function isCurrentPackage(productIdentifier: string, activeSubscriptions:
 export function isCurrentPlan(plan: UpgradePlanGroup, effectivePlan: CoverlyBillingPlan) {
   return (plan === "plus" && effectivePlan === "coverly_plus")
     || (plan === "family" && effectivePlan === "coverly_family");
-}
-
-export function upgradeHeader(effectivePlan: CoverlyBillingPlan) {
-  if (effectivePlan === "free") {
-    return {
-      title: "Choose the cover that fits",
-      planLabel: "Coverly Free",
-      supportingText: "Add AI inventory tools, replacement pricing and claim-pack exports.",
-      paid: false,
-    };
-  }
-  return {
-    title: "Your subscription",
-    planLabel: effectivePlan === "coverly_family" ? "Coverly Family" : "Coverly Plus",
-    supportingText: "Manage your subscription below.",
-    paid: true,
-  };
-}
-
-export function selectedPlanPackage<T extends UpgradePackageLike>(
-  packages: UpgradeDisplayPackage<T>[],
-  selectedPeriod: UpgradeBillingPeriod,
-) {
-  return packages.find((entry) => entry.period === selectedPeriod)
-    ?? packages.find((entry) => entry.period === "annual")
-    ?? packages.find((entry) => entry.period === "monthly")
-    ?? packages[0]
-    ?? null;
-}
-
-export function exactPeriodPackage<T extends UpgradePackageLike>(
-  packages: UpgradeDisplayPackage<T>[],
-  period: UpgradeBillingPeriod,
-) {
-  return packages.find((entry) => entry.period === period) ?? null;
-}
-
-export function activePlanPeriod<T extends UpgradePackageLike>(
-  packages: UpgradeDisplayPackage<T>[],
-  activeSubscriptions: readonly string[] | null | undefined,
-): UpgradeBillingPeriod | null {
-  return packages.find((entry) => isCurrentPackage(entry.pkg.product.identifier, activeSubscriptions))?.period ?? null;
-}
-
-export function planActionLabel({
-  selectedPlan,
-  selectedPeriod,
-  effectivePlan,
-  exactCurrentPackage,
-}: {
-  selectedPlan: UpgradePlanGroup;
-  selectedPeriod: UpgradeBillingPeriod;
-  effectivePlan: CoverlyBillingPlan;
-  exactCurrentPackage: boolean;
-}) {
-  if (exactCurrentPackage) return "Current plan";
-  if (isCurrentPlan(selectedPlan, effectivePlan)) {
-    return `Change to ${selectedPeriod === "annual" ? "annual billing" : selectedPeriod === "monthly" ? "monthly billing" : "this billing cycle"}`;
-  }
-  if (effectivePlan === "coverly_plus" && selectedPlan === "family") return "Upgrade to Family";
-  if (effectivePlan === "coverly_family" && selectedPlan === "plus") return "Switch to Plus";
-  return `Upgrade to ${selectedPlan === "family" ? "Family" : "Plus"}`;
-}
-
-export function currentPlanCarouselIndex(effectivePlan: CoverlyBillingPlan) {
-  if (effectivePlan === "coverly_plus") return 1;
-  if (effectivePlan === "coverly_family") return 2;
-  return 0;
-}
-
-export function buildAllPlanComparison(allowances: UsageAllowance[]): AllPlanComparisonRow[] {
-  const free = buildPlanComparison(allowances);
-  const freeValue = (label: string) => free.find((row) => row.label === label)?.free ?? "—";
-  return [
-    { label: "Properties", free: freeValue("Properties"), plus: "Additional", family: "Additional" },
-    { label: "AI inventory scans", free: freeValue("AI inventory scans"), plus: "Fair use", family: "Fair use" },
-    { label: "Price searches", free: freeValue("Price searches"), plus: "Fair use", family: "Fair use" },
-    { label: "Claim-pack exports", free: "—", plus: "Included", family: "Included" },
-    { label: "Family access", free: "—", plus: "—", family: "Coming soon" },
-  ];
-}
-
-export function buildPaidPlanComparison(): PaidPlanComparisonRow[] {
-  return [
-    { label: "AI inventory tools", plus: "Included (fair use)", family: "Included (fair use)" },
-    { label: "Price searches", plus: "Included (fair use)", family: "Included (fair use)" },
-    { label: "Claim-pack exports", plus: "Included", family: "Included" },
-    { label: "Properties", plus: "Additional properties", family: "Additional properties" },
-    { label: "Family access", plus: "Individual account", family: "Planned" },
-  ];
 }
 
 function configuredLimit(allowances: UsageAllowance[], feature: UsageAllowance["feature"]) {
