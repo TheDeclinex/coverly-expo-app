@@ -12,11 +12,11 @@
 
 import { serve } from 'https://deno.land/std@0.177.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.3';
-import { scanModelForMode, type ScanMode } from './scan-model.ts';
+import { sanitizeScannedItem, scanModelForMode, type ScanMode } from './scan-model.ts';
 
 // Version marker — bump this whenever the edge function is redeployed so the
 // client can confirm it is running the expected version via diagnostics.
-const EDGE_FUNCTION_VERSION = 'v24.4.0-distinct-multi-photo-items';
+const EDGE_FUNCTION_VERSION = 'v24.5.0-intrinsic-item-descriptions';
 
 const CORS_HEADERS = {
   'Access-Control-Allow-Origin': '*',
@@ -359,8 +359,10 @@ Include brand in name ONLY when clearly printed or visible on that specific item
 DESCRIPTION RULES:
 Description is MANDATORY. Never leave blank. Exactly 2 sentences.
 Sentence 1: visible colour, material, form factor, and item type.
-Sentence 2: visible distinguishing features, condition, placement, or visible brand/model.
+Sentence 2: visible distinguishing product features, observable condition, or visible brand/model.
 No hedging language (do not use: appears to be, possibly, maybe, looks like). Describe only what is clearly visible.
+
+Describe only intrinsic and visually identifiable characteristics of the item. Do not mention its position, surrounding furniture, nearby objects, room location, photographic composition, or phrases such as sitting on, next to, on the left, on the floor, to the right of, behind, or in front of. Positional information may be used internally to distinguish objects and generate pins, but must not appear in the saved item description.
 
 QUANTITY RULES:
 For repeated identical or near-identical items, create ONE grouped item record with quantity instead of many separate cards.
@@ -898,9 +900,9 @@ serve(async (req: Request) => {
         const seenInPhotos = resolveSeenInPhotos(i, sourcePhotoIndex);
         const category = normaliseCategory(i.category);
 
-        return {
+        return sanitizeScannedItem({
           name: i.name!.trim(),
-          description: i.description?.trim() || '',
+          description: i.description,
           category,
           quantity,
           unitEstimatedPrice,
@@ -912,7 +914,7 @@ serve(async (req: Request) => {
           sourceImageId: i.sourceImageId,
           seenInPhotos,
           mergeConfidence: i.mergeConfidence,
-        };
+        });
       });
 
     diagnostics.validItemCount = validItems.length;

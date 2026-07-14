@@ -55,3 +55,19 @@ test("room screen keeps camera and library cancellation and failure recoverable"
   assert.match(source, /Linking\.openSettings\(\)/);
   assert.match(source, /Remove room cover\?/);
 });
+
+test("action buttons dispatch once after rendered modal visibility becomes false", () => {
+  const source = readFileSync(resolve(process.cwd(), "app/(tabs)/room/[id].tsx"), "utf8");
+  assert.match(source, /\[roomCoverAction\] direct button press/);
+  assert.match(source, /handleRoomCoverActionPress\(action\)/);
+  assert.match(source, /onDismiss=\{\(\) => \{/);
+  assert.match(source, /if \(!coverActionSheetVisible && pendingCoverAction\)/);
+  assert.match(source, /requestAnimationFrame\(\(\) => \{\s*requestAnimationFrame\(runPendingRoomCoverAction\)/);
+  assert.match(source, /animationType="none"/);
+  assert.match(source, /pendingCoverActionRef\.current = action/);
+  assert.match(source, /setPendingCoverAction\(action\)/);
+  assert.match(source, /onPress=\{openRoomCoverActionSheet\}/);
+  assert.match(source, /pickerLaunchInFlightRef\.current = true/);
+  assert.match(source, /pickerLaunchInFlightRef\.current = false/);
+  assert.match(source, /<View style=\{styles\.coverActionRoot\}>/);
+});

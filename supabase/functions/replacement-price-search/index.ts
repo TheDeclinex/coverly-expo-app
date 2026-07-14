@@ -1,6 +1,6 @@
 /**
  * Supabase Edge Function: replacement-price-search
- * v26.2.1 — added auth diagnostics
+ * v26.5.0 — enforce optional refinement price bounds on returned listings
  *
  * Searches Google Shopping via Serper.dev for NZ replacement listings.
  * API key stays server-side in SERPER_API_KEY secret.
@@ -22,8 +22,20 @@
 
 import { serve } from 'https://deno.land/std@0.177.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.3';
+import {
+  buildReplacementExternalQuery,
+  filterResultsToPriceRange,
+  validatePriceSearchRequest,
+  type PriceSearchRequest,
+} from './query-model.ts';
+import {
+  rankAndFilterReplacementResults,
+  type QualifiedReplacementResult,
+  type ReplacementResultCandidate,
+  type ReplacementResultQualityContext,
+} from './result-quality.ts';
 
-const EDGE_VERSION = 'v26.3.0';
+const EDGE_VERSION = 'v26.7.0-result-quality';
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL') ?? '';
 const SUPABASE_ANON_KEY = Deno.env.get('SUPABASE_ANON_KEY') ?? '';
 const SERPER_TIMEOUT_MS = 15_000;
@@ -46,35 +58,7 @@ const SERPER_SHOPPING_URL = 'https://google.serper.dev/shopping';
 const SERPER_ORGANIC_URL = 'https://google.serper.dev/search';
 
 // ── Input validation ──────────────────────────────────────────────────────────
-const MAX_QUERY_LEN = 300;
-const MAX_ITEM_NAME_LEN = 200;
-
-interface PriceSearchRequest {
-  itemName: string;
-  description?: string;
-  category?: string;
-  brand?: string;
-  barcode?: string;
-  country?: string;
-  minPrice?: number;
-  maxPrice?: number;
-  searchQuery?: string;
-  num?: number;
-  itemId?: string;
-  usageIdempotencyKey?: string;
-}
-
-interface PriceSearchResult {
-  title: string;
-  source: string;
-  price: number | null;
-  priceRaw: string;
-  link: string;
-  snippet?: string;
-  thumbnail?: string;
-  position: number;
-  matchType: 'best_match' | 'close_match' | 'similar_item';
-}
+type PriceSearchResult = QualifiedReplacementResult;
 
 interface UsageReservationResult {
   reservation_id?: string;
@@ -195,38 +179,12 @@ async function fetchWithTimeout(
   }
 }
 
-function buildQuery(req: PriceSearchRequest): string {
-  if (req.searchQuery?.trim()) return req.searchQuery.trim().slice(0, MAX_QUERY_LEN);
-  const parts: string[] = [];
-  if (req.brand) parts.push(req.brand);
-  parts.push(req.itemName);
-  if (req.category && req.category !== 'General') parts.push(req.category);
-  const country = (req.country ?? 'NZ').toUpperCase();
-  return `${parts.join(' ')} ${country}`.slice(0, MAX_QUERY_LEN);
-}
-
-function buildRangedQuery(base: string, min?: number, max?: number): string {
-  if (min != null && max != null) return `${base} $${min}-$${max}`;
-  if (min != null) return `${base} over $${min}`;
-  if (max != null) return `${base} under $${max}`;
-  return base;
-}
-
 function parsePrice(raw: string | undefined): number | null {
   if (!raw) return null;
   const m = raw.replace(/,/g, '').match(/[\d]+(?:\.\d+)?/);
   if (!m) return null;
   const n = parseFloat(m[0]);
   return isNaN(n) ? null : n;
-}
-
-function assignMatchType(title: string, itemName: string, position: number): PriceSearchResult['matchType'] {
-  const t = title.toLowerCase();
-  const words = itemName.toLowerCase().split(/\s+/).filter(w => w.length > 3);
-  const hits = words.filter(w => t.includes(w)).length;
-  if (hits >= Math.max(2, Math.ceil(words.length * 0.6))) return 'best_match';
-  if (hits >= 1 || position <= 2) return 'close_match';
-  return 'similar_item';
 }
 
 function priceStats(prices: number[]): { low: number; median: number; high: number } | null {
@@ -237,7 +195,7 @@ function priceStats(prices: number[]): { low: number; median: number; high: numb
   return { low: valid[0], median: Math.round(median * 100) / 100, high: valid[valid.length - 1] };
 }
 
-function mapShoppingResults(data: unknown, itemName: string, num: number): PriceSearchResult[] {
+function mapShoppingResults(data: unknown, num: number): ReplacementResultCandidate[] {
   const shopping = (data as any)?.shopping ?? [];
   return (shopping as any[]).slice(0, num).map((r: any, idx: number) => ({
     title: r.title ?? 'Unknown product',
@@ -248,11 +206,10 @@ function mapShoppingResults(data: unknown, itemName: string, num: number): Price
     snippet: r.snippet,
     thumbnail: r.imageUrl || r.thumbnail,
     position: r.position ?? idx + 1,
-    matchType: assignMatchType(r.title ?? '', itemName, r.position ?? idx + 1),
   }));
 }
 
-function mapOrganicResults(data: unknown, itemName: string, num: number): PriceSearchResult[] {
+function mapOrganicResults(data: unknown, num: number): ReplacementResultCandidate[] {
   const organic = (data as any)?.organic ?? [];
   return (organic as any[]).slice(0, num).map((r: any, idx: number) => ({
     title: r.title ?? 'Unknown',
@@ -263,7 +220,6 @@ function mapOrganicResults(data: unknown, itemName: string, num: number): PriceS
     snippet: r.snippet,
     thumbnail: undefined,
     position: idx + 1,
-    matchType: assignMatchType(r.title ?? '', itemName, idx + 1),
   }));
 }
 
@@ -342,34 +298,39 @@ serve(async (req: Request) => {
     return jsonResponse({ success: false, errorCode: 'MISSING_API_KEY', error: 'SERPER_API_KEY secret not configured' }, 500, origin);
   }
 
-  let body: PriceSearchRequest;
+  let rawBody: unknown;
   try {
-    body = await req.json() as PriceSearchRequest;
+    rawBody = await req.json();
   } catch {
     return jsonResponse({ success: false, errorCode: 'BAD_REQUEST', error: 'Invalid JSON body' }, 400, origin);
   }
 
   // ── Input validation with fallback ──────────────────────────────────────────
   // Resolve itemName defensively: try itemName, searchQuery, category, fallback to 'item'
-  const rawItemName = (body.itemName ?? '').trim().slice(0, MAX_ITEM_NAME_LEN);
-  const searchQueryFallback = (body.searchQuery ?? '').trim();
-  const categoryFallback = body.category ? `${(body.category ?? '').trim()} item` : '';
-
-  let itemName = rawItemName;
-  let itemNameFallbackUsed = false;
-  if (!itemName) {
-    itemNameFallbackUsed = true;
-    itemName = searchQueryFallback || categoryFallback || 'item';
+  const validation = validatePriceSearchRequest(rawBody);
+  if (!validation.ok) {
+    return jsonResponse({
+      success: false,
+      errorCode: 'INVALID_SEARCH_INPUT',
+      error: validation.error,
+    }, 400, origin);
   }
-  // Ensure we never have empty itemName for downstream buildQuery
-  itemName = itemName.slice(0, MAX_ITEM_NAME_LEN);
 
-  const num = Math.min(Math.max(1, body.num ?? 5), 10);
-  const minPrice = typeof body.minPrice === 'number' && body.minPrice >= 0 ? body.minPrice : undefined;
-  const maxPrice = typeof body.maxPrice === 'number' && body.maxPrice > 0 ? body.maxPrice : undefined;
-
-  const baseQuery = buildQuery({ ...body, itemName });
-  const queryUsed = buildRangedQuery(baseQuery, minPrice, maxPrice);
+  const body: PriceSearchRequest = validation.value;
+  const itemName = body.itemName;
+  const num = body.num;
+  const searchQueryFallback = body.searchQuery ?? '';
+  const queryUsed = buildReplacementExternalQuery(body);
+  const qualityContext: ReplacementResultQualityContext = {
+    itemName,
+    ...(body.searchQuery ? { searchTerm: body.searchQuery } : {}),
+    ...(body.brand ? { brand: body.brand } : {}),
+    ...(body.model ? { model: body.model } : {}),
+    ...(body.category ? { category: body.category } : {}),
+    ...(body.preferredRetailer
+      ? { preferredRetailer: body.preferredRetailer }
+      : {}),
+  };
 
   const usageIdempotencyKey = normaliseUsageIdempotencyKey(body.usageIdempotencyKey);
   if (!usageIdempotencyKey) {
@@ -384,8 +345,8 @@ serve(async (req: Request) => {
     edgeVersion: EDGE_VERSION,
     queryUsed,
     itemName,
-    itemNameFallbackUsed,
-    originalItemNamePresent: !!rawItemName,
+    itemNameFallbackUsed: validation.itemNameFallbackUsed,
+    originalItemNamePresent: validation.originalItemNamePresent,
     resolvedItemName: itemName,
     searchQueryPresent: !!searchQueryFallback,
     categoryPresent: !!body.category,
@@ -400,10 +361,14 @@ serve(async (req: Request) => {
   try {
     usageReservation = await reserveUsage(userClient!, usageIdempotencyKey, {
       itemId: body.itemId ?? null,
-      country: (body.country ?? 'NZ').toUpperCase(),
+      country: body.country,
       num,
       hasSearchQuery: !!searchQueryFallback,
       hasBrand: !!body.brand,
+      hasModel: !!body.model,
+      hasAdditionalDetails: !!body.additionalDetails,
+      hasPreferredRetailer: !!body.preferredRetailer,
+      hasPriceRange: body.minPrice != null || body.maxPrice != null,
       hasBarcode: !!body.barcode,
       edgeVersion: EDGE_VERSION,
     });
@@ -462,7 +427,13 @@ serve(async (req: Request) => {
         diagnostics,
       }, 502, origin);
     }
-    let results = mapShoppingResults(shopData, itemName, num);
+    const shoppingCandidates = mapShoppingResults(shopData, num);
+    let results = rankAndFilterReplacementResults(
+      shoppingCandidates,
+      qualityContext,
+      num,
+    );
+    diagnostics.shoppingCandidateCount = shoppingCandidates.length;
     diagnostics.shoppingResultCount = results.length;
 
     // Organic fallback if no priced results
@@ -487,9 +458,14 @@ serve(async (req: Request) => {
             diagnostics,
           }, 502, origin);
         }
-        const organicResults = mapOrganicResults(orgData, itemName, num);
-        results = [...results, ...organicResults].slice(0, num);
-        diagnostics.organicResultCount = organicResults.length;
+        const organicCandidates = mapOrganicResults(orgData, num);
+        results = rankAndFilterReplacementResults(
+          [...shoppingCandidates, ...organicCandidates],
+          qualityContext,
+          num,
+        );
+        diagnostics.organicCandidateCount = organicCandidates.length;
+        diagnostics.organicResultCount = results.length;
       } else {
         diagnostics.organicError = (await orgRes.text()).slice(0, 200);
         await refundUsage(userClient, usageReservationId, 'serper_organic_provider_failure');
@@ -500,6 +476,16 @@ serve(async (req: Request) => {
           diagnostics,
         }, 502, origin);
       }
+    }
+
+    const resultCountBeforePriceRange = results.length;
+    results = filterResultsToPriceRange(results, body.minPrice, body.maxPrice);
+    if (body.minPrice != null || body.maxPrice != null) {
+      diagnostics.priceRangeApplied = true;
+      diagnostics.minPrice = body.minPrice;
+      diagnostics.maxPrice = body.maxPrice;
+      diagnostics.resultCountBeforePriceRange = resultCountBeforePriceRange;
+      diagnostics.resultCountAfterPriceRange = results.length;
     }
 
     const prices = results.map(r => r.price).filter((p): p is number => p != null && p > 0);
