@@ -5,8 +5,14 @@ import {
 import { buildReplacementExternalQuery } from "./query-model.ts";
 import { replacementRegressionFixtures } from "./regression-fixtures.ts";
 import {
+  evaluateExactModelShoppingCoverage,
+  planReplacementProviders,
+} from "./retrieval-policy.ts";
+import { finalizeReplacementResults } from "./finalize-results.ts";
+import {
   evaluateReplacementResult,
   rankAndFilterReplacementResults,
+  summarizeReplacementCandidates,
   type ReplacementResultCandidate,
 } from "./result-quality.ts";
 
@@ -46,55 +52,77 @@ function diagnostic(
     parsedPrice: candidate.price,
     parsedPriceSource: candidate.priceSource,
     pageClassification: evaluation.classification,
+    queryProductType: evaluation.queryProductType,
+    candidateProductTypes: evaluation.candidateProductTypes,
+    eligibilitySignals: evaluation.eligibilitySignals,
     relevanceScore: evaluation.relevanceScore,
     matchLabel: evaluation.matchType,
     rejectionReason: evaluation.rejectionReason,
   };
 }
 
-const report = replacementRegressionFixtures.map((fixture, fixtureIndex) => {
+const report = replacementRegressionFixtures.map((fixture) => {
   const shopping = normalizeShoppingResults({ shopping: fixture.shopping }, 10);
   const acceptedShopping = rankAndFilterReplacementResults(
     shopping,
     fixture.context,
-    10,
+    shopping.length,
   );
-  const organicFallbackUsed = !acceptedShopping.some(
-    (result) => result.price != null && result.price > 0,
-  );
+  const providerPlan = planReplacementProviders(fixture.context);
+  const exactCoverage = fixture.context.model
+    ? evaluateExactModelShoppingCoverage(acceptedShopping, fixture.context)
+    : null;
+  const organicRequested =
+    providerPlan.requestOrganicInParallel || exactCoverage?.adequate === false;
   const organic = normalizeOrganicResults({ organic: fixture.organic }, 10);
-  const candidates = organicFallbackUsed ? [...shopping, ...organic] : shopping;
-  const ranked = rankAndFilterReplacementResults(
+  const candidates = organicRequested ? [...shopping, ...organic] : shopping;
+  const finalized = finalizeReplacementResults(
     candidates,
     fixture.context,
     10,
   );
+  const ranked = finalized.results;
   const request = {
     itemName: fixture.context.itemName,
     country: "NZ",
     num: 10,
-    ...(fixture.context.searchTerm
-      ? { searchQuery: fixture.context.searchTerm }
-      : {}),
+    searchQuery: fixture.context.searchTerm ?? fixture.context.itemName,
     ...(fixture.context.brand ? { brand: fixture.context.brand } : {}),
     ...(fixture.context.model ? { model: fixture.context.model } : {}),
     ...(fixture.context.category ? { category: fixture.context.category } : {}),
   };
+  const finalProviderQuery = buildReplacementExternalQuery(request);
 
   return {
     search: fixture.name,
-    finalProviderQuery: buildReplacementExternalQuery(request),
-    providerStrategy: organicFallbackUsed
-      ? "shopping_then_organic_fallback"
-      : "shopping_only",
-    organicFallbackUsed,
+    finalProviderQuery,
+    queryAudit: {
+      savedItemFields: fixture.context,
+      sanitisedRequestFields: request,
+      shoppingRequest: { q: finalProviderQuery, gl: "nz", hl: "en", num: 10 },
+      organicRequest: { q: finalProviderQuery, gl: "nz", hl: "en", num: 10 },
+      negativeTerms: [],
+      priceBounds: null,
+      conditionConstraint: null,
+    },
+    providerStrategy: providerPlan.strategy,
+    organicRequested,
+    exactModelCoverage: exactCoverage,
+    candidateCounts: {
+      shopping: summarizeReplacementCandidates(shopping, fixture.context),
+      organic: summarizeReplacementCandidates(organic, fixture.context),
+      merged: candidates.length,
+      rankedBeforeConstraints: finalized.rankedCount,
+      afterHardConstraints: finalized.constrainedCount,
+      final: ranked.length,
+    },
     diagnostics: [
       ...fixture.shopping.map((raw, index) =>
         diagnostic(raw, shopping[index], fixture.context),
       ),
       ...fixture.organic.map((raw, index) => ({
         ...diagnostic(raw, organic[index], fixture.context),
-        usedBySimulatedProviderStrategy: organicFallbackUsed,
+        usedBySimulatedProviderStrategy: organicRequested,
       })),
     ],
     ranked: ranked.map((result, index) => ({
@@ -104,8 +132,23 @@ const report = replacementRegressionFixtures.map((fixture, fixtureIndex) => {
       matchLabel: result.matchType,
       url: result.link,
     })),
-    fixtureIndex,
   };
 });
 
-console.log(JSON.stringify(report, null, 2));
+const output = process.argv.includes("--summary")
+  ? report.map((entry) => ({
+      search: entry.search,
+      providerStrategy: entry.providerStrategy,
+      organicRequested: entry.organicRequested,
+      candidateCounts: entry.candidateCounts,
+      hardRejections: entry.diagnostics
+        .filter((candidate) => candidate.rejectionReason)
+        .map((candidate) => ({
+          title: candidate.rawTitle,
+          reason: candidate.rejectionReason,
+        })),
+      ranked: entry.ranked,
+    }))
+  : report;
+
+console.log(JSON.stringify(output, null, 2));

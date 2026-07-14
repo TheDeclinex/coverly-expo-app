@@ -2,9 +2,17 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  countRawProviderResults,
   normalizeOrganicResults,
   normalizeShoppingResults,
 } from "./provider-normalization.ts";
+
+test("raw provider counts are measured before normalization and limits", () => {
+  const payload = { shopping: [{ title: "One" }, null, { title: "Two" }] };
+  assert.equal(countRawProviderResults(payload, "shopping"), 3);
+  assert.equal(normalizeShoppingResults(payload, 2).length, 1);
+  assert.equal(countRawProviderResults(payload, "organic"), 0);
+});
 
 test("structured Shopping prices survive normalization", () => {
   const [result] = normalizeShoppingResults(

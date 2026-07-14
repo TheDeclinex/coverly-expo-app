@@ -91,6 +91,7 @@ test("voice and AI disable only conflicting actions, never the close route", () 
   );
   assert.equal(
     refinedSearchSubmitDisabled({
+      searchTerm: "television",
       submitting: false,
       aiLoading: false,
       voiceStatus: "open",
@@ -99,6 +100,47 @@ test("voice and AI disable only conflicting actions, never the close route", () 
   );
   assert.equal(refinementCloseDisabled(false), false);
   assert.equal(refinementCloseDisabled(true), true);
+});
+
+test("refined submission requires a trimmed term and an otherwise idle state", () => {
+  const idle = {
+    submitting: false,
+    aiLoading: false,
+    voiceStatus: "idle" as const,
+  };
+  assert.equal(refinedSearchSubmitDisabled({ ...idle, searchTerm: "" }), true);
+  assert.equal(
+    refinedSearchSubmitDisabled({ ...idle, searchTerm: "   " }),
+    true,
+  );
+  assert.equal(
+    refinedSearchSubmitDisabled({ ...idle, searchTerm: " television " }),
+    false,
+  );
+  assert.equal(
+    refinedSearchSubmitDisabled({
+      ...idle,
+      searchTerm: "television",
+      aiLoading: true,
+    }),
+    true,
+  );
+  assert.equal(
+    refinedSearchSubmitDisabled({
+      ...idle,
+      searchTerm: "television",
+      voiceStatus: "open",
+    }),
+    true,
+  );
+  assert.equal(
+    refinedSearchSubmitDisabled({
+      ...idle,
+      searchTerm: "television",
+      submitting: true,
+    }),
+    true,
+  );
 });
 
 test("refinement embeds the shared voice sheet and keeps listing search behind submit", () => {
@@ -113,6 +155,24 @@ test("refinement embeds the shared voice sheet and keeps listing search behind s
   assert.doesNotMatch(source, /disabled=\{submitting \|\| voiceActive\}/);
   assert.equal(source.includes("searchReplacementPrices"), false);
   assert.equal(source.includes("Run refined search"), true);
+  assert.match(source, /previousVisibleRef/);
+  assert.match(source, /shouldInitialiseRefinementModal/);
+  assert.match(
+    source,
+    /counterMaximum=\{REPLACEMENT_SEARCH_LIMITS\.searchTerm\}/,
+  );
+  assert.match(
+    source,
+    /counterMaximum=\{REPLACEMENT_SEARCH_LIMITS\.additionalDetails\}/,
+  );
+  assert.match(source, /maxLength=\{REPLACEMENT_SEARCH_LIMITS\.searchTerm\}/);
+  assert.match(
+    source,
+    /maxLength=\{REPLACEMENT_SEARCH_LIMITS\.additionalDetails\}/,
+  );
+  assert.match(source, /if \(!visibleRef\.current \|\| !voiceTarget\) return/);
+  assert.match(source, /shouldApplyReplacementAssistResult/);
+  assert.match(source, /clearChangedFields\(\)/);
 });
 
 test("voice sheet confirms layout, cleans hidden recordings, and bounds transcription time", () => {

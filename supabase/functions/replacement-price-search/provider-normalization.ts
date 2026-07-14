@@ -5,6 +5,15 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+export function countRawProviderResults(
+  data: unknown,
+  providerType: "shopping" | "organic",
+): number {
+  if (!isRecord(data)) return 0;
+  const value = data[providerType];
+  return Array.isArray(value) ? value.length : 0;
+}
+
 function text(value: unknown): string | undefined {
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }

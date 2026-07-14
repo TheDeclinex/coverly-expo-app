@@ -34,6 +34,12 @@ import {
   type ReplacementSearchRefinementDraft,
 } from "@/lib/replacement-pricing-model";
 import {
+  changedRefinementDisplayedFields,
+  clearChangedRefinementField,
+  shouldInitialiseRefinementModal,
+  type ReplacementRefinementDisplayedField,
+} from "@/lib/replacement-refinement-ui-state";
+import {
   INITIAL_REFINEMENT_VOICE_STATE,
   refinementCloseDisabled,
   refinedSearchSubmitDisabled,
@@ -63,6 +69,8 @@ type FieldProps = {
   error?: string;
   required?: boolean;
   maxLength?: number;
+  counterMaximum?: number;
+  updated?: boolean;
   multiline?: boolean;
   keyboardType?: "default" | "decimal-pad";
 };
@@ -95,6 +103,8 @@ function RefinementField({
   error,
   required,
   maxLength,
+  counterMaximum,
+  updated,
   multiline,
   keyboardType = "default",
 }: FieldProps) {
@@ -102,10 +112,20 @@ function RefinementField({
   return (
     <View style={styles.fieldGroup}>
       <View style={styles.fieldLabelRow}>
-        <Text style={[styles.label, { color: colors.foreground }]}>
-          {label}
-          {required ? " *" : ""}
-        </Text>
+        <View style={styles.fieldLabelCopy}>
+          <Text style={[styles.label, { color: colors.foreground }]}>
+            {label}
+            {required ? " *" : ""}
+          </Text>
+          {updated ? (
+            <Text
+              accessibilityLabel={`${label} updated`}
+              style={[styles.updatedLabel, { color: colors.primary }]}
+            >
+              Updated
+            </Text>
+          ) : null}
+        </View>
         {onVoice ? (
           <Pressable
             accessibilityRole="button"
@@ -139,15 +159,35 @@ function RefinementField({
           {
             color: colors.foreground,
             backgroundColor: colors.background,
-            borderColor: error ? colors.destructive : colors.input,
+            borderColor: error
+              ? colors.destructive
+              : updated
+                ? colors.primary
+                : colors.input,
             opacity: disabled ? 0.68 : 1,
           },
         ]}
       />
-      {error ? (
-        <Text style={[styles.fieldError, { color: colors.destructive }]}>
-          {error}
-        </Text>
+      {error || counterMaximum != null ? (
+        <View style={styles.fieldMetaRow}>
+          {error ? (
+            <Text
+              style={[styles.fieldError, { color: colors.destructive }]}
+            >
+              {error}
+            </Text>
+          ) : (
+            <View style={styles.fieldMetaSpacer} />
+          )}
+          {counterMaximum != null ? (
+            <Text
+              accessibilityLabel={`${label} character count ${value.length} of ${counterMaximum}`}
+              style={[styles.characterCounter, { color: colors.mutedForeground }]}
+            >
+              {value.length} / {counterMaximum}
+            </Text>
+          ) : null}
+        </View>
       ) : null}
     </View>
   );
@@ -164,6 +204,9 @@ export function ReplacementSearchRefinementModal({
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const [draft, setDraft] = React.useState(initialDraft);
+  const [changedFields, setChangedFields] = React.useState<
+    ReplacementRefinementDisplayedField[]
+  >([]);
   const [errors, setErrors] = React.useState<ReplacementRefinementErrors>({});
   const [voicePresentation, dispatchVoice] = React.useReducer(
     refinementVoicePresentationReducer,
@@ -174,22 +217,60 @@ export function ReplacementSearchRefinementModal({
   const [aiError, setAiError] = React.useState<string | null>(null);
   const [aiRationale, setAiRationale] = React.useState<string | null>(null);
   const visibleRef = React.useRef(visible);
+  const previousVisibleRef = React.useRef(false);
+  const draftRef = React.useRef(initialDraft);
+  const changedFieldsTimeoutRef = React.useRef<ReturnType<
+    typeof setTimeout
+  > | null>(null);
   const aiAbortRef = React.useRef<AbortController | null>(null);
   const aiInFlightRef = React.useRef(false);
   const aiRequestIdRef = React.useRef(0);
   const draftRevisionRef = React.useRef(0);
 
+  const clearChangedFields = React.useCallback(() => {
+    if (changedFieldsTimeoutRef.current) {
+      clearTimeout(changedFieldsTimeoutRef.current);
+      changedFieldsTimeoutRef.current = null;
+    }
+    setChangedFields([]);
+  }, []);
+
+  const markChangedFields = React.useCallback(
+    (
+      before: ReplacementSearchRefinementDraft,
+      after: ReplacementSearchRefinementDraft,
+    ) => {
+      const fields = changedRefinementDisplayedFields(before, after);
+      if (changedFieldsTimeoutRef.current)
+        clearTimeout(changedFieldsTimeoutRef.current);
+      setChangedFields(fields);
+      changedFieldsTimeoutRef.current = fields.length
+        ? setTimeout(() => {
+            changedFieldsTimeoutRef.current = null;
+            setChangedFields([]);
+          }, 4_000)
+        : null;
+    },
+    [],
+  );
+
   React.useEffect(() => {
+    const wasVisible = previousVisibleRef.current;
+    previousVisibleRef.current = visible;
     visibleRef.current = visible;
     if (!visible) {
+      if (!wasVisible) return;
       aiRequestIdRef.current += 1;
       aiAbortRef.current?.abort();
       aiAbortRef.current = null;
       aiInFlightRef.current = false;
       setAiLoading(false);
       dispatchVoice({ type: "close" });
+      clearChangedFields();
       return;
     }
+    if (!shouldInitialiseRefinementModal(wasVisible, visible)) return;
+    draftRef.current = initialDraft;
     setDraft(initialDraft);
     draftRevisionRef.current += 1;
     setErrors({});
@@ -197,13 +278,16 @@ export function ReplacementSearchRefinementModal({
     setLastVoiceTranscript("");
     setAiError(null);
     setAiRationale(null);
-  }, [initialDraft, visible]);
+    clearChangedFields();
+  }, [clearChangedFields, initialDraft, visible]);
 
   React.useEffect(
     () => () => {
       visibleRef.current = false;
       aiRequestIdRef.current += 1;
       aiAbortRef.current?.abort();
+      if (changedFieldsTimeoutRef.current)
+        clearTimeout(changedFieldsTimeoutRef.current);
     },
     [],
   );
@@ -227,6 +311,7 @@ export function ReplacementSearchRefinementModal({
   const aiDisabled =
     submitting || aiLoading || voicePresentation.status !== "idle";
   const submitDisabled = refinedSearchSubmitDisabled({
+    searchTerm: draft.searchTerm,
     submitting,
     aiLoading,
     voiceStatus: voicePresentation.status,
@@ -237,22 +322,27 @@ export function ReplacementSearchRefinementModal({
   );
 
   const update = (
-    field: keyof ReplacementSearchRefinementDraft,
+    field: ReplacementRefinementDisplayedField,
     value: string,
   ) => {
     draftRevisionRef.current += 1;
-    setDraft((current) => ({ ...current, [field]: value }));
+    const next = { ...draftRef.current, [field]: value };
+    draftRef.current = next;
+    setDraft(next);
+    setChangedFields((current) => clearChangedRefinementField(current, field));
     setErrors((current) => ({ ...current, [field]: undefined }));
     setAiError(null);
   };
 
   const closeModal = () => {
     if (refinementCloseDisabled(submitting)) return;
+    visibleRef.current = false;
     aiRequestIdRef.current += 1;
     aiAbortRef.current?.abort();
     aiAbortRef.current = null;
     aiInFlightRef.current = false;
     dispatchVoice({ type: "close" });
+    clearChangedFields();
     onDismiss();
   };
 
@@ -274,10 +364,12 @@ export function ReplacementSearchRefinementModal({
 
   const applyVoice = (patch: VoiceItemPatch, transcript: string) => {
     if (!visibleRef.current || !voiceTarget) return;
+    const before = draftRef.current;
+    const next = applyVoiceRefinement(before, voiceTarget, patch, transcript);
     draftRevisionRef.current += 1;
-    setDraft((current) =>
-      applyVoiceRefinement(current, voiceTarget, patch, transcript),
-    );
+    draftRef.current = next;
+    setDraft(next);
+    markChangedFields(before, next);
     setLastVoiceTranscript(transcript.slice(0, 1_500));
     setErrors({});
     setAiError(null);
@@ -344,7 +436,10 @@ export function ReplacementSearchRefinementModal({
         );
         return;
       }
+      const before = draftRef.current;
+      draftRef.current = validated.draft;
       setDraft(validated.draft);
+      markChangedFields(before, validated.draft);
       draftRevisionRef.current += 1;
       setAiRationale(validated.rationale);
       setErrors({});
@@ -376,9 +471,13 @@ export function ReplacementSearchRefinementModal({
   ) => {
     if (submitting) return;
     draftRevisionRef.current += 1;
-    setDraft((current) =>
-      applyReplacementRefinementChip(current, itemContext, chip),
+    const next = applyReplacementRefinementChip(
+      draftRef.current,
+      itemContext,
+      chip,
     );
+    draftRef.current = next;
+    setDraft(next);
     setErrors({});
     setAiError(null);
     setAiRationale(null);
@@ -629,6 +728,8 @@ export function ReplacementSearchRefinementModal({
               placeholder="Item, brand, or model"
               error={errors.searchTerm}
               maxLength={REPLACEMENT_SEARCH_LIMITS.searchTerm}
+              counterMaximum={REPLACEMENT_SEARCH_LIMITS.searchTerm}
+              updated={changedFields.includes("searchTerm")}
             />
             <View style={styles.twoColumns}>
               <View style={styles.column}>
@@ -642,6 +743,7 @@ export function ReplacementSearchRefinementModal({
                   placeholder="e.g. Samsung"
                   error={errors.brand}
                   maxLength={REPLACEMENT_SEARCH_LIMITS.brand}
+                  updated={changedFields.includes("brand")}
                 />
               </View>
               <View style={styles.column}>
@@ -655,6 +757,7 @@ export function ReplacementSearchRefinementModal({
                   placeholder="e.g. QN90C"
                   error={errors.model}
                   maxLength={REPLACEMENT_SEARCH_LIMITS.model}
+                  updated={changedFields.includes("model")}
                 />
               </View>
             </View>
@@ -668,6 +771,8 @@ export function ReplacementSearchRefinementModal({
               placeholder="Size, colour, material, or other identifiers"
               error={errors.additionalDetails}
               maxLength={REPLACEMENT_SEARCH_LIMITS.additionalDetails}
+              counterMaximum={REPLACEMENT_SEARCH_LIMITS.additionalDetails}
+              updated={changedFields.includes("additionalDetails")}
               multiline
             />
             <View style={styles.twoColumns}>
@@ -679,6 +784,7 @@ export function ReplacementSearchRefinementModal({
                   disabled={submitting}
                   placeholder="$0"
                   error={errors.minPrice}
+                  updated={changedFields.includes("minPrice")}
                   keyboardType="decimal-pad"
                 />
               </View>
@@ -690,6 +796,7 @@ export function ReplacementSearchRefinementModal({
                   disabled={submitting}
                   placeholder="$2,000"
                   error={errors.maxPrice}
+                  updated={changedFields.includes("maxPrice")}
                   keyboardType="decimal-pad"
                 />
               </View>
@@ -846,7 +953,19 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     gap: 8,
   },
+  fieldLabelCopy: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    flexWrap: "wrap",
+    gap: 7,
+  },
   label: { fontSize: 12, fontFamily: "Inter_600SemiBold" },
+  updatedLabel: {
+    fontSize: 10,
+    lineHeight: 15,
+    fontFamily: "Inter_600SemiBold",
+  },
   fieldVoiceButton: {
     width: 28,
     height: 28,
@@ -864,7 +983,28 @@ const styles = StyleSheet.create({
     fontFamily: "Inter_400Regular",
   },
   multilineInput: { minHeight: 80, textAlignVertical: "top" },
-  fieldError: { fontSize: 11, lineHeight: 15, fontFamily: "Inter_400Regular" },
+  fieldMetaRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
+    flexWrap: "wrap",
+    gap: 6,
+  },
+  fieldMetaSpacer: { flex: 1 },
+  fieldError: {
+    flex: 1,
+    minWidth: 160,
+    fontSize: 11,
+    lineHeight: 15,
+    fontFamily: "Inter_400Regular",
+  },
+  characterCounter: {
+    flexShrink: 0,
+    fontSize: 10,
+    lineHeight: 15,
+    fontFamily: "Inter_400Regular",
+    textAlign: "right",
+  },
   twoColumns: { flexDirection: "row", gap: 10 },
   column: { flex: 1 },
   footer: { borderTopWidth: 1, paddingHorizontal: 18, paddingTop: 12, gap: 9 },

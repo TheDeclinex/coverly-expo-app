@@ -18,9 +18,30 @@ test("does not treat savings or category starting prices as exact product prices
   assert.equal(parseListingPriceText("SAVE $800"), null);
   assert.equal(parseListingPriceText("Starting from $4,544.00"), null);
   assert.equal(parseListingPriceText("Base model from $1,899.80"), null);
+  assert.equal(parseListingPriceText("Or $12.50 per week"), null);
+  assert.equal(parseListingPriceText("4 payments of $25.00"), null);
   assert.equal(
     parseListingPriceText("RRP $499. NOW $329. SAVE $170")?.value,
     329,
+  );
+});
+
+test("structured text rejects finance and non-current reference prices", () => {
+  assert.equal(resolveProviderPrice({ price: "RRP $499" }, "RRP $499"), null);
+  assert.equal(
+    resolveProviderPrice({ price: "$12.50 per week" }, "$12.50 per week"),
+    null,
+  );
+  assert.deepEqual(
+    resolveProviderPrice(
+      { price: "RRP $499. NOW $329. SAVE $170" },
+      "RRP $499. NOW $329. SAVE $170",
+    ),
+    {
+      value: 329,
+      raw: "RRP $499. NOW $329. SAVE $170",
+      source: "structured",
+    },
   );
 });
 

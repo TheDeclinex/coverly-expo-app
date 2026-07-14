@@ -1,4 +1,5 @@
 import { friendlyNetworkErrorMessage } from "@/lib/network-errors";
+import { fetchReplacementPriceFunction } from "@/lib/replacement-pricing-transport";
 import type {
   ReplacementPriceSearchRequest,
   ReplacementPriceResult,
@@ -183,7 +184,7 @@ export async function searchReplacementPrices(
   const functionUrl = `${debugSupabaseUrl.replace(/\/$/, "")}/functions/v1/${REPLACEMENT_PRICE_FUNCTION_NAME}`;
   let httpResponse: Response;
   try {
-    httpResponse = await fetch(functionUrl, {
+    httpResponse = await fetchReplacementPriceFunction(functionUrl, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -191,8 +192,7 @@ export async function searchReplacementPrices(
         Authorization: `Bearer ${accessToken}`,
       },
       body: JSON.stringify(requestBody),
-      signal: options?.signal,
-    });
+    }, { signal: options?.signal });
   } catch (error) {
     const friendlyMessage = friendlyNetworkErrorMessage(error);
     if (friendlyMessage) {

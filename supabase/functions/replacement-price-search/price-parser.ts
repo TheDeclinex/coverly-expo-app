@@ -20,13 +20,38 @@ function parsePriceValue(value: unknown): ParsedListingPrice | null {
       : { value: parsed, raw: String(value), source: "structured" };
   }
   if (typeof value === "string") {
-    const match = value
+    const text = value.trim();
+    if (
+      /\b(?:payments?|instalments?|installments?)\s+of\b/i.test(text) ||
+      /\$\s*\d[\d,]*(?:\.\d{1,2})?\s*(?:\/|per\s+|a\s+)(?:week|fortnight|month)\b/i.test(
+        text,
+      )
+    )
+      return null;
+    const preferred = text
+      .replace(/,/g, "")
+      .match(
+        /\b(?:now|our price|sale price|current price)\s*:?-?\s*(?:NZ\s*)?\$\s*(\d+(?:\.\d{1,2})?)/i,
+      );
+    if (preferred?.[1]) {
+      const parsed = validPrice(Number(preferred[1]));
+      if (parsed != null) {
+        return { value: parsed, raw: text, source: "structured" };
+      }
+    }
+    if (
+      /\b(?:save|saving|was|rrp|starting\s+from|base\s+model\s+from|prices?\s+from|from)\b/i.test(
+        text,
+      )
+    )
+      return null;
+    const match = text
       .replace(/,/g, "")
       .match(/(?:NZ\s*)?\$?\s*(\d+(?:\.\d{1,2})?)/i);
     const parsed = match?.[1] ? validPrice(Number(match[1])) : null;
     return parsed == null
       ? null
-      : { value: parsed, raw: value.trim(), source: "structured" };
+      : { value: parsed, raw: text, source: "structured" };
   }
   if (value && typeof value === "object" && !Array.isArray(value)) {
     const record = value as Record<string, unknown>;
@@ -90,6 +115,14 @@ export function parseListingPriceText(
     )
     .replace(
       /\b(?:starting\s+from|base\s+model\s+from|prices?\s+from|from)\s*:?-?\s*(?:NZ\s*)?\$\s*\d[\d,]*(?:\.\d{1,2})?/gi,
+      "",
+    )
+    .replace(
+      /\b(?:or\s+)?(?:\d+\s+)?(?:payments?|instalments?|installments?)\s+of\s+(?:NZ\s*)?\$\s*\d[\d,]*(?:\.\d{1,2})?/gi,
+      "",
+    )
+    .replace(
+      /(?:NZ\s*)?\$\s*\d[\d,]*(?:\.\d{1,2})?\s*(?:\/|per\s+|a\s+)(?:week|fortnight|month)\b/gi,
       "",
     );
   return textPrice(

@@ -30,6 +30,10 @@ import { useColors } from "@/hooks/useColors";
 import { useVoiceRecording } from "@/hooks/useVoiceRecording";
 import { callVoiceDescribe } from "@/lib/voice-input";
 import {
+  mainReplacementVoiceDisabled,
+  shouldApplyMainReplacementVoiceResult,
+} from "@/lib/replacement-pricing-voice-state";
+import {
   areReplacementCriteriaEqual,
   buildOriginalReplacementCriteria,
   buildReplacementPriceSearchRequest,
@@ -296,6 +300,8 @@ export default function ReplacementPricingScreen() {
   const searchInFlightRef = React.useRef(false);
   const searchControllerRef = React.useRef<AbortController | null>(null);
   const mountedRef = React.useRef(true);
+  const refinementVisibleRef = React.useRef(false);
+  const mainVoiceRequestIdRef = React.useRef(0);
 
   const {
     data: item,
@@ -424,10 +430,33 @@ export default function ReplacementPricingScreen() {
     }
   }, [item, enforce, filter, results]);
 
+  const openRefinementModal = React.useCallback(() => {
+    mainVoiceRequestIdRef.current += 1;
+    refinementVisibleRef.current = true;
+    setRefinementVisible(true);
+    setVoiceProcessing(false);
+    setVoiceError(null);
+    setVoiceNotice(null);
+    void resetVoiceRecording();
+  }, [resetVoiceRecording]);
+
+  const closeRefinementModal = React.useCallback(() => {
+    refinementVisibleRef.current = false;
+    setRefinementVisible(false);
+  }, []);
+
+  const mainVoiceDisabled = mainReplacementVoiceDisabled({
+    searching,
+    processing: voiceProcessing,
+    requestingPermission: voiceIsRequestingPermission,
+    startingRecording: voiceIsStartingRecording,
+    refinementVisible,
+  });
+
   const handleSearch = () => {
     if (!item) return;
     if (results !== null) {
-      setRefinementVisible(true);
+      openRefinementModal();
       return;
     }
     const base = originalCriteria ?? buildOriginalReplacementCriteria(item, searchQuery);
@@ -435,14 +464,30 @@ export default function ReplacementPricingScreen() {
   };
 
   const stopAndTranscribeSearch = React.useCallback(async () => {
+    const requestId = mainVoiceRequestIdRef.current;
+    if (refinementVisibleRef.current) {
+      await resetVoiceRecording();
+      return;
+    }
     setVoiceError(null);
     setVoiceNotice(null);
     const recording = await stopVoiceRecording();
+    const canApply = () =>
+      shouldApplyMainReplacementVoiceResult({
+        requestId,
+        activeRequestId: mainVoiceRequestIdRef.current,
+        refinementVisible: refinementVisibleRef.current,
+        mounted: mountedRef.current,
+      });
     if (!recording) {
-      setVoiceError(VOICE_EDIT_FALLBACK_MESSAGE);
+      if (canApply()) setVoiceError(VOICE_EDIT_FALLBACK_MESSAGE);
       return;
     }
 
+    if (!canApply()) {
+      await resetVoiceRecording();
+      return;
+    }
     setVoiceProcessing(true);
     try {
       const result = await callVoiceDescribe(recording, {
@@ -454,31 +499,51 @@ export default function ReplacementPricingScreen() {
       const transcript = result.response?.success
         ? replacementVoiceTranscriptToQuery(result.response.transcript)
         : "";
+      if (!canApply()) return;
       if (!transcript) {
         setVoiceError(VOICE_EDIT_FALLBACK_MESSAGE);
         return;
       }
       setSearchQuery(transcript);
     } catch {
-      setVoiceError(VOICE_EDIT_FALLBACK_MESSAGE);
+      if (canApply()) setVoiceError(VOICE_EDIT_FALLBACK_MESSAGE);
     } finally {
-      setVoiceProcessing(false);
+      if (canApply()) setVoiceProcessing(false);
       await resetVoiceRecording();
     }
   }, [item?.category, item?.name, resetVoiceRecording, searchQuery, stopVoiceRecording]);
 
   const handleVoiceSearchDescription = React.useCallback(async () => {
-    if (searching || voiceProcessing || voiceIsRequestingPermission || voiceIsStartingRecording) return;
+    if (
+      mainReplacementVoiceDisabled({
+        searching,
+        processing: voiceProcessing,
+        requestingPermission: voiceIsRequestingPermission,
+        startingRecording: voiceIsStartingRecording,
+        refinementVisible: refinementVisibleRef.current,
+      })
+    )
+      return;
     setVoiceError(null);
     setVoiceNotice(null);
     if (voiceIsRecording) {
       await stopAndTranscribeSearch();
       return;
     }
+    const requestId = mainVoiceRequestIdRef.current + 1;
+    mainVoiceRequestIdRef.current = requestId;
+    const canApply = () =>
+      shouldApplyMainReplacementVoiceResult({
+        requestId,
+        activeRequestId: mainVoiceRequestIdRef.current,
+        refinementVisible: refinementVisibleRef.current,
+        mounted: mountedRef.current,
+      });
     if (voicePermission !== "granted") {
       logVoiceDiagnostic("voice_permission_button_pressed");
       try {
         const granted = await requestVoicePermission();
+        if (!canApply()) return;
         if (granted) {
           setVoiceNotice("Microphone enabled. Tap the mic again to speak your search.");
         } else {
@@ -491,6 +556,10 @@ export default function ReplacementPricingScreen() {
     }
     try {
       const started = await startVoiceRecording();
+      if (!canApply()) {
+        await resetVoiceRecording();
+        return;
+      }
       if (!started) {
         setVoiceError(VOICE_EDIT_FALLBACK_MESSAGE);
       }
@@ -500,6 +569,7 @@ export default function ReplacementPricingScreen() {
   }, [
     logVoiceDiagnostic,
     requestVoicePermission,
+    resetVoiceRecording,
     searching,
     startVoiceRecording,
     stopAndTranscribeSearch,
@@ -511,8 +581,9 @@ export default function ReplacementPricingScreen() {
   ]);
 
   React.useEffect(() => {
-    if (voiceMaxDurationReached) void stopAndTranscribeSearch();
-  }, [stopAndTranscribeSearch, voiceMaxDurationReached]);
+    if (voiceMaxDurationReached && !refinementVisible)
+      void stopAndTranscribeSearch();
+  }, [refinementVisible, stopAndTranscribeSearch, voiceMaxDurationReached]);
 
   React.useEffect(() => () => {
     void resetVoiceRecording();
@@ -522,6 +593,7 @@ export default function ReplacementPricingScreen() {
     mountedRef.current = true;
     return () => {
       mountedRef.current = false;
+      mainVoiceRequestIdRef.current += 1;
       searchControllerRef.current?.abort();
       searchControllerRef.current = null;
       searchInFlightRef.current = false;
@@ -611,9 +683,9 @@ export default function ReplacementPricingScreen() {
   }, [item, runSearch]);
 
   const handleRefinedSearch = React.useCallback((criteria: ReplacementSearchCriteria) => {
-    setRefinementVisible(false);
+    closeRefinementModal();
     void runSearch(criteria, "refined");
-  }, [runSearch]);
+  }, [closeRefinementModal, runSearch]);
 
   const handleRerunOriginalSearch = React.useCallback(() => {
     if (!originalCriteria) return;
@@ -784,13 +856,13 @@ export default function ReplacementPricingScreen() {
               <Pressable
                 accessibilityRole="button"
                 accessibilityLabel="Speak search description"
-                disabled={searching || voiceProcessing || voiceIsRequestingPermission || voiceIsStartingRecording}
+                disabled={mainVoiceDisabled}
                 onPress={() => void handleVoiceSearchDescription()}
                 style={({ pressed }) => [
                   styles.voiceButton,
                   {
                     backgroundColor: voiceIsRecording ? colors.primary : colors.secondary,
-                    opacity: searching || voiceProcessing || voiceIsRequestingPermission || voiceIsStartingRecording ? 0.5 : pressed ? 0.72 : 1,
+                    opacity: mainVoiceDisabled ? 0.5 : pressed ? 0.72 : 1,
                   },
                 ]}
               >
@@ -858,7 +930,7 @@ export default function ReplacementPricingScreen() {
               <Pressable
                 accessibilityRole="button"
                 disabled={searching}
-                onPress={() => setRefinementVisible(true)}
+                onPress={openRefinementModal}
                 style={({ pressed }) => [
                   styles.refineButton,
                   { backgroundColor: colors.primary, opacity: searching ? 0.5 : pressed ? 0.82 : 1 },
@@ -922,6 +994,9 @@ export default function ReplacementPricingScreen() {
               <View style={styles.filterHeading}>
                 <Text style={[styles.filterEyebrow, { color: colors.mutedForeground }]}>FILTER THESE RESULTS</Text>
                 <Text style={[styles.filterHelper, { color: colors.mutedForeground }]}>Low, Similar, and High only filter the listings already returned.</Text>
+                {estimate == null ? (
+                  <Text style={[styles.filterHelper, { color: colors.mutedForeground }]}>Add an estimated replacement value to enable Low, Similar and High filters.</Text>
+                ) : null}
               </View>
               <ScrollView
                 horizontal
@@ -1018,7 +1093,7 @@ export default function ReplacementPricingScreen() {
         initialDraft={refinementDraft}
         itemContext={refinementItemContext}
         submitting={searching}
-        onDismiss={() => setRefinementVisible(false)}
+        onDismiss={closeRefinementModal}
         onSubmit={handleRefinedSearch}
       />
     </>

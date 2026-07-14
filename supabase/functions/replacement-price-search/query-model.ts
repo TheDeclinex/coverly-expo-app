@@ -310,6 +310,15 @@ function dedupeQueryWords(value: string): string {
     .join(" ");
 }
 
+function normaliseProductTypePhrases(value: string): string {
+  return value
+    .replace(/\bsubwoofer\s+speakers?\b/gi, "subwoofer")
+    .replace(/\bspeakers?\s+subwoofer\b/gi, "subwoofer")
+    .replace(/\bmonitor\s+riser\s+stand\b/gi, "monitor riser")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 export function buildReplacementExternalQuery(
   request: PriceSearchRequest,
 ): string {
@@ -338,7 +347,7 @@ export function buildReplacementExternalQuery(
 
   const range = priceIntent(request.minPrice, request.maxPrice);
   const rangeAllowance = range ? range.length + 1 : 0;
-  const base = dedupeQueryWords(parts.join(" "))
+  const base = dedupeQueryWords(normaliseProductTypePhrases(parts.join(" ")))
     .slice(0, PRICE_SEARCH_LIMITS.query - rangeAllowance)
     .trim();
   return `${base}${range ? ` ${range}` : ""}`.trim();

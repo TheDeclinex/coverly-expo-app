@@ -75,9 +75,15 @@ export function voiceControlDisabled(input: {
 }
 
 export function refinedSearchSubmitDisabled(input: {
+  searchTerm: string;
   submitting: boolean;
   aiLoading: boolean;
   voiceStatus: RefinementVoicePresentationState["status"];
 }): boolean {
-  return input.submitting || input.aiLoading || input.voiceStatus !== "idle";
+  return (
+    !input.searchTerm.trim() ||
+    input.submitting ||
+    input.aiLoading ||
+    input.voiceStatus !== "idle"
+  );
 }

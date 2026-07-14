@@ -49,7 +49,52 @@ export interface ReplacementResultEvaluation {
   rejectionReason: string | null;
   relevanceScore: number;
   matchType: QualifiedReplacementResult["matchType"] | null;
+  queryProductType: string;
+  candidateProductTypes: string[];
+  eligibilitySignals: string[];
 }
+
+export interface ReplacementResultQualitySummary {
+  candidateCount: number;
+  acceptedCount: number;
+  pricedAcceptedCount: number;
+  rejectedCount: number;
+  rejectionReasons: Record<string, number>;
+}
+
+type KnownProductType =
+  | "coffee_machine"
+  | "dining_chair"
+  | "laptop"
+  | "microwave"
+  | "monitor"
+  | "monitor_riser"
+  | "soundbar"
+  | "subwoofer"
+  | "television"
+  | "toaster"
+  | "vacuum_cleaner"
+  | "washer";
+
+const PRODUCT_TYPE_ALIASES: Record<KnownProductType, string[]> = {
+  coffee_machine: ["coffee machine", "espresso machine", "coffee maker"],
+  dining_chair: ["dining chair"],
+  laptop: ["laptop", "notebook"],
+  microwave: ["microwave oven", "microwave"],
+  monitor: ["monitor", "display"],
+  monitor_riser: [
+    "monitor riser",
+    "monitor stand",
+    "desktop monitor stand",
+    "monitor shelf",
+  ],
+  soundbar: ["soundbar", "sound bar"],
+  subwoofer: ["subwoofer"],
+  television: ["television", "smart tv", "oled tv", "qled tv", "tv"],
+  toaster: ["toaster"],
+  vacuum_cleaner: ["vacuum cleaner", "vacuum"],
+  washer: ["washer", "washing machine"],
+};
 
 const NON_IDENTITY_WORDS = new Set([
   "and",
@@ -96,11 +141,7 @@ function terms(value: string | undefined): string[] {
 
 function productTerms(context: ReplacementResultQualityContext): string[] {
   return [
-    ...new Set([
-      ...terms(context.itemName),
-      ...terms(context.searchTerm),
-      ...terms(context.category),
-    ]),
+    ...new Set([...terms(context.itemName), ...terms(context.searchTerm)]),
   ].filter(
     (word) =>
       !terms(context.brand).includes(word) &&
@@ -117,47 +158,109 @@ function safeUrl(value: string): URL | null {
 }
 
 function contextText(context: ReplacementResultQualityContext): string {
-  return normalise(
-    `${context.itemName} ${context.searchTerm ?? ""} ${context.category ?? ""}`,
-  );
+  return normalise(`${context.itemName} ${context.searchTerm ?? ""}`);
+}
+
+function containsPhrase(text: string, phrase: string): boolean {
+  return ` ${text} `.includes(` ${normalise(phrase)} `);
+}
+
+export function inferQueryProductType(
+  context: ReplacementResultQualityContext,
+): string {
+  const text = contextText(context);
+  if (/\b(?:coffee|espresso)\s+(?:machine|maker)\b/.test(text))
+    return "coffee_machine";
+  if (/\bdining\s+chairs?\b/.test(text)) return "dining_chair";
+  if (
+    /\b(?:monitor|display)\b/.test(text) &&
+    /\b(?:riser|stand|shelf)\b/.test(text)
+  )
+    return "monitor_riser";
+  if (/\b(?:laptop|notebook)\b/.test(text)) return "laptop";
+  if (/\bmicrowave(?:\s+oven)?\b/.test(text)) return "microwave";
+  if (/\b(?:monitor|display)\b/.test(text)) return "monitor";
+  if (/\bsound\s*bar\b|\bsoundbar\b/.test(text)) return "soundbar";
+  if (/\bsubwoofer\b/.test(text)) return "subwoofer";
+  if (/\b(?:television|tv)\b/.test(text)) return "television";
+  if (/\btoaster\b/.test(text)) return "toaster";
+  if (/\bvacuum(?:\s+cleaner)?\b/.test(text)) return "vacuum_cleaner";
+  if (/\bwasher|washing machine\b/.test(text)) return "washer";
+  return productTerms(context)[0] ?? "unknown";
 }
 
 function expectedTypeTerms(context: ReplacementResultQualityContext): string[] {
-  const text = contextText(context);
-  const expected = new Set<string>();
-  if (/\b(?:laptop|notebook)\b/.test(text)) {
-    expected.add("laptop");
-    expected.add("notebook");
+  const inferred = inferQueryProductType(context);
+  return inferred in PRODUCT_TYPE_ALIASES
+    ? PRODUCT_TYPE_ALIASES[inferred as KnownProductType]
+    : inferred === "unknown"
+      ? []
+      : [inferred];
+}
+
+export function inferCandidateProductTypes(
+  candidate: Pick<ReplacementResultCandidate, "title">,
+): string[] {
+  const title = normalise(candidate.title);
+  if (!title) return [];
+  const found: string[] = [];
+  for (const [productType, aliases] of Object.entries(PRODUCT_TYPE_ALIASES)) {
+    if (aliases.some((alias) => containsPhrase(title, alias))) {
+      found.push(productType);
+    }
   }
-  if (/\bmonitor\b/.test(text) && /\b(?:riser|stand)\b/.test(text)) {
-    expected.add("monitor riser");
-    expected.add("monitor stand");
-    expected.add("riser");
+  if (found.includes("monitor_riser")) {
+    return found.filter((productType) => productType !== "monitor");
   }
-  if (/\bsound\s*bar\b|\bsoundbar\b/.test(text)) expected.add("soundbar");
-  if (/\bsubwoofer\b/.test(text)) expected.add("subwoofer");
-  if (/\b(?:television|tv)\b/.test(text)) {
-    expected.add("television");
-    expected.add("tv");
-  }
-  if (/\bwasher|washing machine\b/.test(text)) expected.add("washer");
-  return expected.size ? [...expected] : productTerms(context).slice(0, 3);
+  return found;
 }
 
 function titleHasExpectedType(
   title: string,
   context: ReplacementResultQualityContext,
 ): boolean {
-  return expectedTypeTerms(context).some((term) => title.includes(term));
+  return expectedTypeTerms(context).some((term) => containsPhrase(title, term));
 }
 
 export function hasContradictoryProductType(
   candidate: Pick<ReplacementResultCandidate, "title" | "snippet">,
   context: ReplacementResultQualityContext,
 ): boolean {
-  const expected = contextText(context);
-  const result = normalise(`${candidate.title} ${candidate.snippet ?? ""}`);
-  if (/\bmonitor\b/.test(expected) && /\b(?:riser|stand)\b/.test(expected)) {
+  const expectedType = inferQueryProductType(context);
+  const result = normalise(candidate.title);
+  if (expectedType === "coffee_machine") {
+    if (
+      /\b(?:coffee grinder|replacement filters?|filter papers?|cleaning tablets?|portafilter|tamper|milk jug|coffee pods?)\b/.test(
+        result,
+      )
+    )
+      return true;
+  }
+  if (expectedType === "dining_chair") {
+    if (
+      /\b(?:dining table|chair covers?|chair cushions?|slipcovers?|replacement legs?)\b/.test(
+        result,
+      )
+    )
+      return true;
+  }
+  if (expectedType === "microwave") {
+    if (
+      /\b(?:microwave shelf|storage rack|microwave cover|turntable plate|replacement plate|microwave stand|microwave cabinet)\b/.test(
+        result,
+      )
+    )
+      return true;
+  }
+  if (expectedType === "vacuum_cleaner") {
+    if (
+      /\b(?:replacement filters?|vacuum bags?|replacement hose|vacuum hose|replacement battery|vacuum battery|vacuum heads?|floor heads?|brush attachments?|vacuum attachments?|vacuum charger)\b/.test(
+        result,
+      )
+    )
+      return true;
+  }
+  if (expectedType === "monitor_riser") {
     if (
       /\b(?:desk|monitor mount|monitor arm|mounting arm|wall mount|bracket)\b/.test(
         result,
@@ -165,7 +268,15 @@ export function hasContradictoryProductType(
     )
       return true;
   }
-  if (/\b(?:laptop|notebook)\b/.test(expected)) {
+  if (expectedType === "monitor") {
+    if (
+      /\b(?:monitor mount|monitor arm|wall mount|mounting bracket|monitor riser|monitor shelf|replacement stand|display stand|display mount|display arm|display cable)\b/.test(
+        result,
+      )
+    )
+      return true;
+  }
+  if (expectedType === "laptop") {
     if (
       /\b(?:bag|case|charger|dock|sleeve|battery|screen protector|laptop stand)\b/.test(
         result,
@@ -173,13 +284,21 @@ export function hasContradictoryProductType(
     )
       return true;
   }
-  if (/\b(?:soundbar|subwoofer)\b/.test(expected)) {
+  if (expectedType === "soundbar" || expectedType === "subwoofer") {
     if (/\b(?:mount|bracket|remote|replacement cable)\b/.test(result))
       return true;
   }
-  if (/\b(?:television|tv)\b/.test(expected)) {
+  if (expectedType === "television") {
     if (
       /\b(?:wall mount|mounting bracket|remote control|replacement remote)\b/.test(
+        result,
+      )
+    )
+      return true;
+  }
+  if (expectedType === "toaster") {
+    if (
+      /\b(?:toaster cover|toast rack|sandwich cage|replacement element)\b/.test(
         result,
       )
     )
@@ -190,7 +309,64 @@ export function hasContradictoryProductType(
 
 function productSpecificPath(url: URL | null): boolean {
   if (!url) return false;
-  return /\/(?:products?|item|dp)\/[^/?#]+/i.test(url.pathname);
+  if (/\/(?:products?|item|dp|p|productdetails?)\/[^/?#]+/i.test(url.pathname))
+    return true;
+  const lastSegment = url.pathname.split("/").filter(Boolean).at(-1) ?? "";
+  return (
+    /\.html?$/i.test(lastSegment) &&
+    !/^(?:index|products?|category|catalog)\.html?$/i.test(lastSegment)
+  );
+}
+
+const GENERIC_IDENTITY_WORDS = new Set([
+  "active",
+  "audio",
+  "black",
+  "computer",
+  "curved",
+  "display",
+  "gaming",
+  "home",
+  "inch",
+  "monitor",
+  "new",
+  "only",
+  "powered",
+  "qhd",
+  "slice",
+  "smart",
+  "speaker",
+  "stainless",
+  "steel",
+  "subwoofer",
+  "theatre",
+  "toaster",
+  "uhd",
+  "wireless",
+]);
+
+function specificIdentityTerms(
+  candidate: ReplacementResultCandidate,
+  context: ReplacementResultQualityContext,
+): string[] {
+  const contextTerms = new Set([
+    ...terms(context.itemName),
+    ...terms(context.searchTerm),
+    ...terms(context.brand),
+    ...terms(context.model),
+    ...expectedTypeTerms(context).flatMap((term) => terms(term)),
+  ]);
+  return terms(candidate.title).filter(
+    (term) => !contextTerms.has(term) && !GENERIC_IDENTITY_WORDS.has(term),
+  );
+}
+
+function modelOrSpecificationSignal(title: string): boolean {
+  return (
+    /\b(?=[a-z0-9-]*[a-z])(?=[a-z0-9-]*\d)[a-z0-9]+(?:-[a-z0-9]+)*\b/i.test(
+      title,
+    ) || /\b\d+(?:\.\d+)?\s*(?:inch|hz|gb|tb|slice|channel|ch)\b/i.test(title)
+  );
 }
 
 function matchingAttributes(
@@ -224,16 +400,27 @@ function genericCollectionSignal(
   const model = normalise(context.model);
   const exactModel = Boolean(model) && title.includes(model);
   const productPath = productSpecificPath(url);
+  const genericExpectedTypeTitle = expectedTypeTerms(context).some(
+    (term) => title === normalise(term) || title === `${normalise(term)}s`,
+  );
 
   if (candidate.title.includes(">")) return true;
   if (
-    /\b(?:for work study everyday use|shop .* new zealand|all laptops|all products|view all|filter by|mounts accessories risers stands)\b/.test(
+    /\b(?:for work study everyday use|shop .* new zealand|all laptops|all products|view all|filter by|mounts accessories risers stands|find the best price|compare prices)\b/.test(
       title,
     )
   )
     return true;
   if (
-    /\b(?:collections?|categories?|catalog|product category|filtered products?)\b/.test(
+    /^(?:gaming monitors|monitors|displays|toasters|vacuum cleaners|microwaves|dining chairs|coffee machines|home theatre speakers (?:and )?subwoofers|speakers (?:and )?subwoofers|laptops|notebooks|soundbars|subwoofers|televisions)$/i.test(
+      title,
+    )
+  )
+    return true;
+  if (genericExpectedTypeTitle && !productPath && !modelOrSpecificationSignal(title))
+    return true;
+  if (
+    /\b(?:collections?|categor(?:y|ies)|catalog|product category|filtered products?)\b/.test(
       path,
     ) &&
     !productPath
@@ -246,7 +433,7 @@ function genericCollectionSignal(
   )
     return true;
   if (
-    /\/(?:shop|laptops?|notebooks?|soundbars?|subwoofers?|monitors?|accessories)\/?$/i.test(
+    /\/(?:shop|laptops?|notebooks?|soundbars?|subwoofers?|monitors?|displays?|gaming-monitors?|toasters?|vacuum-cleaners?|microwaves?|dining-chairs?|coffee-machines?|accessories)\/?$/i.test(
       url?.pathname ?? "",
     )
   )
@@ -272,7 +459,6 @@ export function classifyReplacementResult(
   const host = normalise(url?.hostname);
   const path = normalise(url?.pathname);
   const query = normalise(url?.search);
-  const productPath = productSpecificPath(url);
   const text = normalise(
     `${candidate.title} ${candidate.snippet ?? ""} ${path}`,
   );
@@ -305,27 +491,9 @@ export function classifyReplacementResult(
   if (genericCollectionSignal(candidate, context)) return "collection";
   if (hasContradictoryProductType(candidate, context)) return "unknown";
 
-  const model = normalise(context.model);
   const title = normalise(candidate.title);
-  const brand = normalise(context.brand);
   const typeMatches = titleHasExpectedType(title, context);
-  const brandMatches = !brand || title.includes(brand);
-  const modelMatches = Boolean(model) && title.includes(model);
-  const validPrice = candidate.price != null && candidate.price > 0;
-
-  if (
-    modelMatches ||
-    (candidate.providerType === "shopping" &&
-      candidate.priceSource === "structured" &&
-      validPrice &&
-      typeMatches) ||
-    (productPath && typeMatches && brandMatches) ||
-    (validPrice &&
-      typeMatches &&
-      brandMatches &&
-      matchingAttributes(candidate, context) > 0)
-  )
-    return "product";
+  if (typeMatches) return "product";
   return "unknown";
 }
 
@@ -342,7 +510,11 @@ function assignMatchType(
 
   if (model && title.includes(model)) return "best_match";
   if (model) return "similar_item";
-  if (typeMatches && (!brand || brandMatches) && attributeMatches > 0)
+  if (
+    typeMatches &&
+    (!brand || brandMatches) &&
+    (attributeMatches > 0 || brandMatches)
+  )
     return "close_match";
   return "similar_item";
 }
@@ -359,20 +531,32 @@ function score(
   const preferredRetailer = normalise(context.preferredRetailer);
   const typeMatches = titleHasExpectedType(title, context);
   const attributeMatches = matchingAttributes(candidate, context);
+  const identityMatches = specificIdentityTerms(candidate, context).length;
+  const hasModelOrSpecification = modelOrSpecificationSignal(candidate.title);
+  const specificPage = productSpecificPath(safeUrl(candidate.link));
+  const knownRetailer =
+    Boolean(normalise(candidate.source)) &&
+    !/^unknown(?: retailer)?$/.test(normalise(candidate.source));
   return (
     (model && title.includes(model) ? 80 : 0) +
     (brand && title.includes(brand) ? 30 : 0) +
     (typeMatches ? 25 : 0) +
     attributeMatches * 8 +
+    (identityMatches > 0 ? 18 : 0) +
+    (hasModelOrSpecification ? 12 : 0) +
+    (specificPage ? 12 : 0) +
     (candidate.price != null && candidate.price > 0 ? 20 : 0) +
-    (candidate.providerType === "shopping" ? 18 : 0) +
-    (candidate.priceSource === "structured" ? 15 : 0) +
+    (candidate.providerType === "shopping" ? 10 : 0) +
+    (candidate.priceSource === "structured" ? 10 : 0) +
+    (knownRetailer ? 4 : 0) +
     (hostname.endsWith(".nz") ? 8 : 0) +
     (preferredRetailer && sourceAndLink.includes(preferredRetailer) ? 10 : 0)
   );
 }
 
-function rejectionReason(classification: ReplacementResultPageKind): string {
+function pageRejectionReason(
+  classification: ReplacementResultPageKind,
+): string {
   const reasons: Record<
     Exclude<ReplacementResultPageKind, "product">,
     string
@@ -384,7 +568,7 @@ function rejectionReason(classification: ReplacementResultPageKind): string {
     search: "search_or_filter_page",
     trade_in: "trade_in_page",
     support: "support_page",
-    unknown: "insufficient_product_identity_or_contradictory_type",
+    unknown: "insufficient_product_identity",
   };
   return reasons[
     classification as Exclude<ReplacementResultPageKind, "product">
@@ -397,12 +581,68 @@ export function evaluateReplacementResult(
 ): ReplacementResultEvaluation {
   const classification = classifyReplacementResult(candidate, context);
   const accepted = classification === "product";
+  const typeMatches = titleHasExpectedType(normalise(candidate.title), context);
+  const contradictoryType = hasContradictoryProductType(candidate, context);
+  const queryProductType = inferQueryProductType(context);
+  const candidateProductTypes = inferCandidateProductTypes(candidate);
+  const url = safeUrl(candidate.link);
+  const eligibilitySignals = [
+    ...(typeMatches ? ["product_type_match"] : []),
+    ...(candidate.providerType === "shopping" ? ["shopping_result"] : []),
+    ...(candidate.price != null && candidate.price > 0 ? ["valid_price"] : []),
+    ...(candidate.priceSource === "structured" ? ["structured_price"] : []),
+    ...(productSpecificPath(url) ? ["product_specific_url"] : []),
+    ...(specificIdentityTerms(candidate, context).length > 0
+      ? ["specific_title_identity"]
+      : []),
+    ...(modelOrSpecificationSignal(candidate.title)
+      ? ["model_or_specification"]
+      : []),
+  ];
+  const rejectionReason = accepted
+    ? null
+    : classification !== "unknown"
+      ? pageRejectionReason(classification)
+      : contradictoryType
+        ? "contradictory_product_type"
+        : !typeMatches
+          ? "product_type_mismatch"
+          : "insufficient_product_identity";
   return {
     classification,
     accepted,
-    rejectionReason: accepted ? null : rejectionReason(classification),
+    rejectionReason,
     relevanceScore: score(candidate, context),
     matchType: accepted ? assignMatchType(candidate, context) : null,
+    queryProductType,
+    candidateProductTypes,
+    eligibilitySignals,
+  };
+}
+
+export function summarizeReplacementCandidates(
+  candidates: ReplacementResultCandidate[],
+  context: ReplacementResultQualityContext,
+): ReplacementResultQualitySummary {
+  const evaluations = candidates.map((candidate) => ({
+    candidate,
+    evaluation: evaluateReplacementResult(candidate, context),
+  }));
+  const accepted = evaluations.filter(({ evaluation }) => evaluation.accepted);
+  const rejectionReasons: Record<string, number> = {};
+  for (const { evaluation } of evaluations) {
+    if (!evaluation.rejectionReason) continue;
+    rejectionReasons[evaluation.rejectionReason] =
+      (rejectionReasons[evaluation.rejectionReason] ?? 0) + 1;
+  }
+  return {
+    candidateCount: candidates.length,
+    acceptedCount: accepted.length,
+    pricedAcceptedCount: accepted.filter(
+      ({ candidate }) => candidate.price != null && candidate.price > 0,
+    ).length,
+    rejectedCount: evaluations.length - accepted.length,
+    rejectionReasons,
   };
 }
 
@@ -411,14 +651,26 @@ export function rankAndFilterReplacementResults(
   context: ReplacementResultQualityContext,
   limit: number,
 ): QualifiedReplacementResult[] {
-  const seen = new Set<string>();
+  const seenLinks = new Set<string>();
+  const seenRetailerTitles = new Set<string>();
   return candidates
     .flatMap((candidate) => {
       const evaluation = evaluateReplacementResult(candidate, context);
       if (!evaluation.accepted || !evaluation.matchType) return [];
-      const identity = normalise(candidate.link) || normalise(candidate.title);
-      if (!identity || seen.has(identity)) return [];
-      seen.add(identity);
+      const url = safeUrl(candidate.link);
+      const linkIdentity = url
+        ? `${url.hostname.toLowerCase()}${url.pathname.toLowerCase().replace(/\/$/, "")}`
+        : normalise(candidate.link);
+      const titleIdentity = normalise(candidate.title);
+      const retailerTitleIdentity = `${normalise(candidate.source)}|${titleIdentity}`;
+      if (
+        (!linkIdentity && !titleIdentity) ||
+        (linkIdentity && seenLinks.has(linkIdentity)) ||
+        (titleIdentity && seenRetailerTitles.has(retailerTitleIdentity))
+      )
+        return [];
+      if (linkIdentity) seenLinks.add(linkIdentity);
+      if (titleIdentity) seenRetailerTitles.add(retailerTitleIdentity);
       return [
         {
           candidate,

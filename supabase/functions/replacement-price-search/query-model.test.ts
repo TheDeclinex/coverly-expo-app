@@ -30,6 +30,22 @@ test("preserves the existing initial query shape", () => {
   );
 });
 
+test("keeps broad default product queries concise without hidden exclusions", () => {
+  for (const [searchQuery, expected] of [
+    ["Black curved gaming monitor", "Black curved gaming monitor NZ"],
+    ["Black subwoofer speaker", "Black subwoofer NZ"],
+    ["Black toaster", "Black toaster NZ"],
+    ["Black monitor riser stand", "Black monitor riser NZ"],
+  ] as const) {
+    const validation = validRequest({ itemName: searchQuery, searchQuery });
+    assert.equal(validation.ok, true);
+    if (!validation.ok) continue;
+    const query = buildReplacementExternalQuery(validation.value);
+    assert.equal(query, expected);
+    assert.doesNotMatch(query, /\b(?:exclude|without|-\w+)\b/i);
+  }
+});
+
 test("builds a refined query with deduplicated brand model details and price intent", () => {
   const validation = validRequest({
     searchQuery: "Samsung premium television",
@@ -203,16 +219,37 @@ test("hard price bounds allow fewer than ten results and can return none", () =>
 
 test("the handler filters bounds before usable-result accounting and retains the refund path", () => {
   const source = readFileSync(new URL("./index.ts", import.meta.url), "utf8");
-  const qualityFilterIndex = source.indexOf("rankAndFilterReplacementResults(");
-  const filterIndex = source.indexOf("results = filterResultsToPriceRange(");
+  const finalizerSource = readFileSync(
+    new URL("./finalize-results.ts", import.meta.url),
+    "utf8",
+  );
+  const qualityFilterIndex = finalizerSource.indexOf(
+    "rankAndFilterReplacementResults(",
+  );
+  const filterIndex = finalizerSource.indexOf("filterResultsToPriceRange(");
+  const topNIndex = finalizerSource.indexOf("constrained.slice(");
+  const finalizerIndex = source.indexOf("finalizeReplacementResults(");
   const usablePricesIndex = source.indexOf("const prices = results");
   const refundIndex = source.indexOf("no_usable_priced_results");
 
   assert.ok(qualityFilterIndex >= 0);
   assert.ok(qualityFilterIndex < filterIndex);
-  assert.ok(filterIndex < usablePricesIndex);
+  assert.ok(filterIndex < topNIndex);
+  assert.ok(finalizerIndex >= 0);
+  assert.ok(finalizerIndex < usablePricesIndex);
   assert.ok(usablePricesIndex < refundIndex);
   assert.equal(source.includes("reserve_my_feature_usage"), true);
   assert.equal(source.includes("commit_my_feature_usage"), true);
   assert.equal(source.includes("refund_my_feature_usage"), true);
+});
+
+test("hybrid Shopping and Organic retrieval remains one metered search", () => {
+  const source = readFileSync(new URL("./index.ts", import.meta.url), "utf8");
+  assert.equal(source.match(/reserveUsage\(/g)?.length, 2);
+  assert.equal(source.match(/commitUsage\(/g)?.length, 2);
+  assert.equal(source.includes("planReplacementProviders("), true);
+  assert.equal(source.includes("Promise.all(["), true);
+  assert.equal(source.includes("evaluateExactModelShoppingCoverage("), true);
+  assert.equal(source.includes("usageOutcome = 'committed'"), true);
+  assert.match(source, /usageOutcome = \(?await refundUsage\(/);
 });
