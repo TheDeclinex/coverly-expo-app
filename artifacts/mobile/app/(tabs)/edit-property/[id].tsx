@@ -116,6 +116,7 @@ export default function EditPropertyScreen() {
   const invalidate = () => {
     queryClient.invalidateQueries({ queryKey: ["properties"] });
     queryClient.invalidateQueries({ queryKey: ["property", id] });
+    queryClient.invalidateQueries({ queryKey: ["property-allowance"] });
   };
 
   const handleSave = async () => {

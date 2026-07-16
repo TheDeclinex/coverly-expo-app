@@ -1,6 +1,9 @@
 import { supabase } from "@/lib/supabase";
 import { normalizePropertyTypeValue } from "@/constants/propertyTypes";
 import type { InventoryFile } from "@/types";
+import { normalizePropertyCreationError } from "@/lib/property-errors";
+
+export { formatPropertySaveError, PropertyCreationError } from "@/lib/property-errors";
 
 interface CreatePropertyInput {
   name: string;
@@ -9,27 +12,6 @@ interface CreatePropertyInput {
   insurerName?: string | null;
   policyNumber?: string | null;
   propertyCoverImageUrl?: string | null;
-}
-
-const UNSUPPORTED_PROPERTY_TYPE_MESSAGE =
-  "This property type is not currently supported. Please choose another type or update the app.";
-
-export function formatPropertySaveError(error: unknown): string {
-  const message =
-    error instanceof Error
-      ? error.message
-      : typeof error === "object" && error !== null && typeof (error as { message?: unknown }).message === "string"
-        ? (error as { message: string }).message
-        : String(error ?? "");
-
-  if (
-    /inventory_files_property_type_check/i.test(message) ||
-    /property_type/i.test(message)
-  ) {
-    return UNSUPPORTED_PROPERTY_TYPE_MESSAGE;
-  }
-
-  return message || "Could not create property. Please try again.";
 }
 
 export async function createProperty(input: CreatePropertyInput): Promise<InventoryFile> {
@@ -50,7 +32,7 @@ export async function createProperty(input: CreatePropertyInput): Promise<Invent
     .single();
 
   if (error) {
-    throw new Error(formatPropertySaveError(error));
+    throw normalizePropertyCreationError(error);
   }
 
   if (!data) {

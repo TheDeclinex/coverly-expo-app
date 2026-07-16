@@ -92,11 +92,11 @@ export function normalizeLimitError(input: LimitErrorInput): NormalizedLimitErro
   if (code === "PROPERTY_LIMIT_REACHED") {
     return {
       feature: "property",
-      title: "You've used your free property",
-      body: "You've reached the free property limit. You can keep building this property, or view plan options for more property space.",
-      benefit: "Plus unlocks more household inventory space, AI features, and claim-ready exports.",
-      primaryCta: "View plan options",
-      secondaryCta: "Not now",
+      title: "You've reached your property limit",
+      body: "Your current plan includes one property.\n\nUpgrade to Coverly Family to add additional properties while continuing to manage your existing property.",
+      benefit: "",
+      primaryCta: "Upgrade to Family",
+      secondaryCta: "Continue with current property",
       usage,
     };
   }

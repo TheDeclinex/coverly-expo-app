@@ -69,6 +69,8 @@ test("comparison uses the configured allowance values returned by the existing s
 
   assert.equal(comparison.find((row) => row.label === "AI inventory scans")?.free, "13 / month");
   assert.equal(comparison.find((row) => row.label === "Price searches")?.free, "7 / month");
+  const properties = comparison.find((row) => row.label === "Properties");
+  assert.deepEqual(properties, { label: "Properties", free: "1", plus: "1", family: "Multiple" });
 });
 
 test("identifies current plans and only disables the exact active package", () => {

@@ -74,3 +74,10 @@ export function hasActiveRevenueCatEntitlement(
 ) {
   return resolveRevenueCatPlan(customerInfo, config).plan !== null;
 }
+
+export function profilePlanMatchesExpected(
+  profilePlan: CoverlyBillingPlan,
+  expectedPlan: Exclude<CoverlyBillingPlan, "free"> | null,
+) {
+  return expectedPlan === null || profilePlan === expectedPlan;
+}

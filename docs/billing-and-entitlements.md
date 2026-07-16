@@ -24,6 +24,16 @@ Plus
 Family
 ```
 
+Property allowance is plan-specific:
+- Free: one property.
+- Plus: one property.
+- Family: multiple properties.
+- Explicit tester/admin full access: multiple properties.
+
+Property creation must use the server-backed property allowance and
+`create_my_property`; a broad paid/unpaid boolean is not sufficient because
+Plus and Family have different property capabilities.
+
 ## Free plan direction
 
 Free users should be able to experience the product, not hit a wall immediately.

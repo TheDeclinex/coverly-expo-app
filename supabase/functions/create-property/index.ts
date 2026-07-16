@@ -1,9 +1,8 @@
 /**
  * Supabase Edge Function: create-property
  *
- * Creates a new inventory_files (property) record using the service role key,
- * which bypasses RLS. The caller's JWT is verified manually to ensure only
- * authenticated users can create properties under their own user_id.
+ * Legacy HTTP wrapper that delegates persistence and plan enforcement to the
+ * authoritative create_my_property RPC.
  *
  * Deploy:
  *   npx supabase functions deploy create-property --no-verify-jwt
@@ -43,15 +42,16 @@ serve(async (req) => {
     }
 
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
-    const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+    const anonKey = Deno.env.get('SUPABASE_ANON_KEY')!;
 
-    // Service role client — bypasses RLS for the actual insert
-    const adminClient = createClient(supabaseUrl, serviceRoleKey, {
+    // Forward the caller's JWT so auth.uid() is available inside the RPC.
+    const callerClient = createClient(supabaseUrl, anonKey, {
       auth: { persistSession: false },
+      global: { headers: { Authorization: authHeader } },
     });
 
     // Verify the caller's JWT and resolve their user_id
-    const { data: { user }, error: authError } = await adminClient.auth.getUser(jwt);
+    const { data: { user }, error: authError } = await callerClient.auth.getUser(jwt);
     if (authError || !user) {
       return jsonResponse({ error: 'Invalid or expired token' }, 401);
     }
@@ -69,41 +69,25 @@ serve(async (req) => {
       return jsonResponse({ error: 'name is required' }, 400);
     }
 
-    const now = new Date().toISOString();
-
-    // Resolve next file_number for this user.
-    // file_number is a bigint NOT NULL per-user sequential integer.
-    // Using the service role client so RLS doesn't filter results — we scope
-    // the query manually to the verified user_id.
-    const { data: maxRow } = await adminClient
-      .from('inventory_files')
-      .select('file_number')
-      .eq('user_id', user.id)
-      .order('file_number', { ascending: false })
-      .limit(1)
-      .maybeSingle();
-    const nextFileNumber = ((maxRow as { file_number?: number } | null)?.file_number ?? 0) + 1;
-
-    const { data, error: insertError } = await adminClient
-      .from('inventory_files')
-      .insert({
-        id: crypto.randomUUID(),
-        user_id: user.id,
-        file_number: nextFileNumber,
-        name,
-        status: typeof body.status === 'string' ? body.status : 'active',
-        property_type: typeof body.property_type === 'string' ? body.property_type : null,
-        created_by_email: typeof body.created_by_email === 'string' ? body.created_by_email : (user.email ?? null),
-        created_date: typeof body.created_date === 'string' ? body.created_date : now,
-        last_modified: typeof body.last_modified === 'string' ? body.last_modified : now,
-        contents_sum_insured: typeof body.contents_sum_insured === 'number' ? body.contents_sum_insured : null,
-        property_cover_image_url: null,
+    // The RPC owns allowance checks, locking, file-number allocation and insert.
+    const { data, error: insertError } = await callerClient
+      .rpc('create_my_property', {
+        p_name: name,
+        p_property_type: typeof body.property_type === 'string' ? body.property_type : null,
+        p_contents_sum_insured: typeof body.contents_sum_insured === 'number' ? body.contents_sum_insured : null,
+        p_insurer_name: typeof body.insurer_name === 'string' ? body.insurer_name : null,
+        p_policy_number: typeof body.policy_number === 'string' ? body.policy_number : null,
+        p_property_cover_image_url: typeof body.property_cover_image_url === 'string' ? body.property_cover_image_url : null,
       })
-      .select()
       .single();
 
     if (insertError) {
-      return jsonResponse({ error: insertError.message, code: insertError.code }, 500);
+      const propertyLimit = insertError.message.includes('PROPERTY_LIMIT_REACHED');
+      return jsonResponse({
+        error: propertyLimit ? 'PROPERTY_LIMIT_REACHED' : 'Could not create property',
+        code: propertyLimit ? 'PROPERTY_LIMIT_REACHED' : insertError.code,
+        details: propertyLimit ? insertError.details : undefined,
+      }, propertyLimit ? 409 : 500);
     }
 
     return jsonResponse({ data });

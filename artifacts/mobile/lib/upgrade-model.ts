@@ -28,7 +28,8 @@ export type UpgradeDisplayPackage<T extends UpgradePackageLike = UpgradePackageL
 export type PlanComparisonRow = {
   label: string;
   free: string;
-  paid: string;
+  plus: string;
+  family: string;
 };
 
 function packageSearchText(pkg: UpgradePackageLike) {
@@ -121,9 +122,9 @@ export function buildPlanComparison(allowances: UsageAllowance[]): PlanCompariso
   const scans = configuredLimit(allowances, "ai_scan");
   const pricing = configuredLimit(allowances, "replacement_pricing");
   return [
-    { label: "Properties", free: "1", paid: "Additional properties" },
-    { label: "AI inventory scans", free: scans == null ? "Monthly allowance" : `${scans} / month`, paid: "Included (fair use)" },
-    { label: "Price searches", free: pricing == null ? "Monthly allowance" : `${pricing} / month`, paid: "Included (fair use)" },
-    { label: "Claim-pack exports", free: "Not included", paid: "Included" },
+    { label: "Properties", free: "1", plus: "1", family: "Multiple" },
+    { label: "AI inventory scans", free: scans == null ? "Monthly allowance" : `${scans} / month`, plus: "Included (fair use)", family: "Included (fair use)" },
+    { label: "Price searches", free: pricing == null ? "Monthly allowance" : `${pricing} / month`, plus: "Included (fair use)", family: "Included (fair use)" },
+    { label: "Claim-pack exports", free: "Not included", plus: "Included", family: "Included" },
   ];
 }

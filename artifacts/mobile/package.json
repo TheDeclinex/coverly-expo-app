@@ -9,7 +9,8 @@
     "serve": "node server/serve.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test:voice": "node --experimental-strip-types --test lib/__tests__/voice-item-mapper.test.ts lib/__tests__/item-update-preservation.test.ts lib/__tests__/voice-item-update.test.ts",
-    "test:profile": "node --experimental-strip-types --test lib/__tests__/profile-settings-model.test.ts"
+    "test:profile": "node --experimental-strip-types --test lib/__tests__/profile-settings-model.test.ts",
+    "test:property-limits": "node --experimental-strip-types --test lib/__tests__/property-allowance.test.ts lib/__tests__/property-errors.test.ts lib/__tests__/property-limits-contract.test.ts lib/__tests__/billing-entitlements.test.ts lib/__tests__/upgrade-model.test.ts lib/__tests__/limit-errors.test.ts lib/__tests__/production-readiness-screen-contract.test.ts"
   },
   "devDependencies": {
     "@babel/core": "^7.25.2",

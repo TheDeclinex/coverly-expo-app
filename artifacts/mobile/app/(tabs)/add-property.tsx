@@ -2,7 +2,7 @@ import { Feather } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { Stack, router } from "expo-router";
 import { useQueryClient } from "@tanstack/react-query";
-import React, { useState } from "react";
+import React, { useRef, useState } from "react";
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
@@ -17,12 +17,13 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { ContextBackButton } from "@/components/ContextBackButton";
+import { LoadingState } from "@/components/LoadingState";
+import { PropertyAllowanceModal } from "@/components/PropertyAllowanceModal";
 import { useAuth } from "@/context/AuthContext";
-import { useEntitlements } from "@/context/EntitlementsContext";
 import { PROPERTY_TYPES, propertyTypeLabel } from "@/constants/propertyTypes";
 import { useColors } from "@/hooks/useColors";
-import { createProperty } from "@/lib/property-service";
-import { supabase } from "@/lib/supabase";
+import { usePropertyAllowance } from "@/hooks/usePropertyAllowance";
+import { createProperty, PropertyCreationError } from "@/lib/property-service";
 
 type SetupStep = 0 | 1 | 2;
 
@@ -132,7 +133,7 @@ function StepPill({
 
 export default function AddPropertyScreen() {
   const { session } = useAuth();
-  const { enforce } = useEntitlements();
+  const { allowance, refreshAllowance } = usePropertyAllowance();
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const queryClient = useQueryClient();
@@ -145,6 +146,8 @@ export default function AddPropertyScreen() {
   const [policyNumber, setPolicyNumber] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [serverAllowanceVisible, setServerAllowanceVisible] = useState(false);
+  const submissionLockRef = useRef(false);
 
   const trimmedName = name.trim();
   const parsedCoverAmount = parseFloat(coverAmount.replace(/[^0-9.]/g, ""));
@@ -188,16 +191,19 @@ export default function AddPropertyScreen() {
       return;
     }
     if (!session?.user) return;
-    const { count, error: countError } = await supabase
-      .from("inventory_files").select("id", { count: "exact", head: true });
-    if (countError) { setError("Could not verify your property allowance. Please try again."); return; }
-    if (!enforce("property", count ?? 0)) return;
+    if (submissionLockRef.current) return;
+    submissionLockRef.current = true;
 
     setSaving(true);
     setError(null);
 
     let data;
     try {
+      const freshAllowance = await refreshAllowance();
+      if (!freshAllowance.canCreateProperty) {
+        setServerAllowanceVisible(true);
+        return;
+      }
       data = await createProperty({
         name: trimmedName,
         propertyType,
@@ -206,21 +212,57 @@ export default function AddPropertyScreen() {
         policyNumber: policyNumber.trim() || null,
       });
     } catch (err) {
-      setSaving(false);
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-      setError(err instanceof Error ? err.message : "Could not create property. Please try again.");
+      if (err instanceof PropertyCreationError && (
+        err.errorCode === "PROPERTY_LIMIT_REACHED"
+        || err.errorCode === "PROPERTY_ALLOWANCE_UNAVAILABLE"
+      )) {
+        await refreshAllowance();
+        setServerAllowanceVisible(true);
+      } else {
+        setError(err instanceof Error ? err.message : "Could not create property. Please try again.");
+      }
       return;
+    } finally {
+      setSaving(false);
+      submissionLockRef.current = false;
     }
 
-    setSaving(false);
     await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    queryClient.invalidateQueries({ queryKey: ["properties"] });
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ["properties"] }),
+      queryClient.invalidateQueries({ queryKey: ["property-allowance"] }),
+    ]);
 
     router.replace({
       pathname: "/(tabs)/property/[id]",
       params: { id: data.id, name: data.name },
     });
   };
+
+  if (allowance.state === "loading") {
+    return (
+      <>
+        <Stack.Screen options={{ title: "New Property" }} />
+        <LoadingState message="Checking your plan" />
+      </>
+    );
+  }
+
+  if (!allowance.canCreateProperty) {
+    return (
+      <>
+        <Stack.Screen options={{ title: "New Property" }} />
+        <View style={{ flex: 1, backgroundColor: colors.background }} />
+        <PropertyAllowanceModal
+          visible
+          allowance={allowance}
+          onDismiss={() => router.back()}
+          onRetry={() => void refreshAllowance()}
+        />
+      </>
+    );
+  }
 
   const renderEssentials = () => (
     <View style={styles.section}>
@@ -455,6 +497,15 @@ export default function AddPropertyScreen() {
           {step === 0 ? renderEssentials() : step === 1 ? renderOptional() : renderReview()}
         </ScrollView>
       </KeyboardAvoidingView>
+      <PropertyAllowanceModal
+        visible={serverAllowanceVisible}
+        allowance={allowance}
+        onDismiss={() => setServerAllowanceVisible(false)}
+        onRetry={() => {
+          setServerAllowanceVisible(false);
+          void refreshAllowance();
+        }}
+      />
     </>
   );
 }

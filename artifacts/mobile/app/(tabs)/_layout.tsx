@@ -1,13 +1,30 @@
-import { Redirect, Stack } from "expo-router";
+import { useQueryClient } from "@tanstack/react-query";
+import { Redirect, Stack, usePathname } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import React from "react";
 
+import { LoadingState } from "@/components/LoadingState";
 import { useAuth } from "@/context/AuthContext";
+import { useAccountProfile } from "@/hooks/useAccountProfile";
 import { useColors } from "@/hooks/useColors";
+import { isAdminQueryKey, isAdminRoutePath } from "@/lib/admin-access";
 
 export default function AppLayout() {
   const { session, loading, hasSeenOnboarding } = useAuth();
   const colors = useColors();
+  const pathname = usePathname();
+  const queryClient = useQueryClient();
+  const { isAdmin, isLoading: isProfileLoading } = useAccountProfile();
+  const userId = session?.user.id ?? null;
+  const previousUserId = React.useRef<string | null | undefined>(undefined);
+
+  React.useEffect(() => {
+    const userChanged = previousUserId.current !== undefined && previousUserId.current !== userId;
+    if (userChanged || (!isProfileLoading && !isAdmin)) {
+      queryClient.removeQueries({ predicate: (query) => isAdminQueryKey(query.queryKey) });
+    }
+    previousUserId.current = userId;
+  }, [isAdmin, isProfileLoading, queryClient, userId]);
 
   if (!loading && !session) {
     return <Redirect href="/login" />;
@@ -18,6 +35,11 @@ export default function AppLayout() {
   // redirect back to the onboarding wizard.
   if (!loading && session && hasSeenOnboarding === false) {
     return <Redirect href="/onboarding" />;
+  }
+
+  if (!loading && session && isAdminRoutePath(pathname)) {
+    if (isProfileLoading) return <LoadingState />;
+    if (!isAdmin) return <Redirect href="/account" />;
   }
 
   return (

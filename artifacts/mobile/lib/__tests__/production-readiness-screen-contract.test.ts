@@ -29,10 +29,13 @@ test("dedicated deletion screen does not expose generic feedback or attachment c
   assert.doesNotMatch(deletionSource, /ChipGroup|ImagePicker|Attach screenshot|priorityOptions|categoryOptions|typeOptions/);
 });
 
-test("upgrade screen keeps restore, current-package protection, and factual Family copy", () => {
+test("upgrade screen keeps restore, current-package protection, and an authoritative comparison", () => {
   assert.match(upgradeSource, /Restore purchases/);
   assert.match(upgradeSource, /Current subscription/);
   assert.match(upgradeSource, /purchaseActionLockRef\.current/);
-  assert.match(upgradeSource, /Includes the same currently available mobile access as Plus\./);
+  assert.match(upgradeSource, />Compare plans</);
+  assert.doesNotMatch(upgradeSource, /Only Coverly Family enables multiple properties\./);
+  assert.doesNotMatch(upgradeSource, /Your Plus plan includes one property\./);
+  assert.match(upgradeSource, /propertyAllowance\.accessClass === "full_access"/);
   assert.doesNotMatch(upgradeSource, /invit|collaborat|shared access|household members/i);
 });

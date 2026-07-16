@@ -10,6 +10,7 @@ import {
   type CustomerInfo, type PurchasesOffering, type PurchasesPackage,
 } from "@/lib/billing";
 import type { CoverlyBillingPlan } from "@/lib/billing-entitlements";
+import { profilePlanMatchesExpected } from "@/lib/billing-entitlements";
 
 export type GatedFeature = "property" | "ai_scan" | "replacement_pricing" | "claim_pack";
 
@@ -20,7 +21,6 @@ type EntitlementsValue = {
   gatesEnabled: boolean; isLoading: boolean; isRefreshing: boolean; purchaseLoading: boolean;
   offering: PurchasesOffering | null; customerInfo: CustomerInfo | null; error: string | null;
   isSubscriptionSyncPending: boolean;
-  canCreateProperty: (currentCount: number) => boolean;
   canUseAiScan: boolean; canUseReplacementPricing: boolean; canExportClaimPack: boolean;
   shouldShowUpgradeFor: (feature: GatedFeature, currentPropertyCount?: number) => boolean;
   enforce: (feature: GatedFeature, currentPropertyCount?: number) => boolean;
@@ -58,7 +58,7 @@ export function EntitlementsProvider({ children }: { children: React.ReactNode }
     : profileQuery.profile?.subscriptionPeriodEnd ?? revenueCatPlan.subscriptionPeriodEnd;
   const isPaid = plan !== "free";
 
-  const refreshEntitlements = useCallback(async () => {
+  const refreshEntitlements = useCallback(async (expectedPlan: Exclude<CoverlyBillingPlan, "free"> | null = null) => {
     const userId = session?.user.id;
     if (!userId) return;
     setRefreshing(true);
@@ -68,11 +68,13 @@ export function EntitlementsProvider({ children }: { children: React.ReactNode }
       if (customer.ok) setCustomerInfo(customer.value);
       for (let attempt = 0; attempt < 4; attempt += 1) {
         await queryClient.invalidateQueries({ queryKey: ["account-profile"] });
+        await queryClient.invalidateQueries({ queryKey: ["property-allowance"] });
         const refreshed = await profileQuery.refetch();
         if (activeUserIdRef.current !== userId) return;
-        if (refreshed.data?.plan && refreshed.data.plan !== "Free") break;
+        if (profilePlanMatchesExpected(profilePlanToCode(refreshed.data?.plan), expectedPlan)) break;
         if (attempt < 3) await wait(1000 * (attempt + 1));
       }
+      await queryClient.invalidateQueries({ queryKey: ["property-allowance"] });
     } finally {
       if (activeUserIdRef.current === userId) setRefreshing(false);
     }
@@ -92,7 +94,10 @@ export function EntitlementsProvider({ children }: { children: React.ReactNode }
       const configured = await configureBilling(session.user.id);
       if (!configured.ok) { if (!cancelled) setError(configured.error); return; }
       const listener = await addCustomerInfoListener((info) => {
-        if (!cancelled && activeUserIdRef.current === session.user.id) setCustomerInfo(info);
+        if (!cancelled && activeUserIdRef.current === session.user.id) {
+          setCustomerInfo(info);
+          void queryClient.invalidateQueries({ queryKey: ["property-allowance"] });
+        }
       });
       if (listener.ok) {
         if (cancelled) listener.value();
@@ -104,7 +109,7 @@ export function EntitlementsProvider({ children }: { children: React.ReactNode }
       if (info.ok) setCustomerInfo(info.value); else setError((current) => current ?? info.error);
     })();
     return () => { cancelled = true; removeCustomerInfoListener?.(); };
-  }, [session?.user.id]);
+  }, [queryClient, session?.user.id]);
 
   const purchasePackage = useCallback(async (pkg: PurchasesPackage) => {
     setPurchaseLoading(true); setError(null);
@@ -113,7 +118,8 @@ export function EntitlementsProvider({ children }: { children: React.ReactNode }
     // RevenueCat returns confirmed CustomerInfo from the completed store
     // purchase. Make that access available now while Supabase catches up.
     setCustomerInfo(result.value);
-    void refreshEntitlements().catch(() => undefined);
+    const purchasedPlan = resolveCustomerPlan(result.value).plan;
+    await refreshEntitlements(purchasedPlan).catch(() => undefined);
     setPurchaseLoading(false);
     return { ok: true, message: "Purchase received. Your access has been refreshed." };
   }, [refreshEntitlements]);
@@ -123,23 +129,25 @@ export function EntitlementsProvider({ children }: { children: React.ReactNode }
     const result = await restoreBilling();
     if (!result.ok) { setPurchaseLoading(false); setError(result.error); return { ok: false, message: result.error }; }
     setCustomerInfo(result.value);
-    void refreshEntitlements().catch(() => undefined);
+    const restoredPlan = resolveCustomerPlan(result.value).plan;
+    await refreshEntitlements(restoredPlan).catch(() => undefined);
     setPurchaseLoading(false);
     const active = hasActiveCustomerEntitlement(result.value);
     return { ok: active, message: active ? "Purchases restored and access refreshed." : "No active Coverly subscription was found." };
   }, [refreshEntitlements]);
 
-  const canCreateProperty = useCallback((count: number) => isPaid || count < 1, [isPaid]);
   const canUseMeteredAiFeatures = true;
   const canExportClaimPack = isPaid;
   const shouldShowUpgradeFor = useCallback((feature: GatedFeature, count = 0) => {
-    if (feature === "property") return !canCreateProperty(count);
+    // Property creation uses the server-backed usePropertyAllowance hook.
+    // Any legacy caller reaching this generic gate must fail closed.
+    if (feature === "property") return true;
     // AI scans and replacement pricing are usage-metered. Free users should be
     // allowed to attempt their included allowance; the server remains the source
     // of truth for monthly limit enforcement.
     if (feature === "ai_scan" || feature === "replacement_pricing") return false;
     return !isPaid;
-  }, [canCreateProperty, isPaid]);
+  }, [isPaid]);
   const enforce = useCallback((feature: GatedFeature, count = 0) => {
     const blocked = shouldShowUpgradeFor(feature, count);
     if (!blocked) return true;
@@ -151,10 +159,10 @@ export function EntitlementsProvider({ children }: { children: React.ReactNode }
     effectivePlan: plan, subscriptionStatus, subscriptionPeriodEnd,
     isFree: !isPaid, isPlus: plan === "coverly_plus", isFamily: plan === "coverly_family", isPaid,
     gatesEnabled: billingGatesEnabled, isLoading: profileQuery.isLoading, isRefreshing, purchaseLoading,
-    offering, customerInfo, error, isSubscriptionSyncPending, canCreateProperty, canUseAiScan: canUseMeteredAiFeatures,
+    offering, customerInfo, error, isSubscriptionSyncPending, canUseAiScan: canUseMeteredAiFeatures,
     canUseReplacementPricing: canUseMeteredAiFeatures, canExportClaimPack, shouldShowUpgradeFor, enforce,
     refreshEntitlements, purchasePackage, restorePurchases,
-  }), [plan, subscriptionStatus, subscriptionPeriodEnd, profileQuery.profile, profileQuery.isLoading, isRefreshing, purchaseLoading, offering, customerInfo, error, isSubscriptionSyncPending, canCreateProperty, canExportClaimPack, shouldShowUpgradeFor, enforce, refreshEntitlements, purchasePackage, restorePurchases]);
+  }), [plan, subscriptionStatus, subscriptionPeriodEnd, profileQuery.profile, profileQuery.isLoading, isRefreshing, purchaseLoading, offering, customerInfo, error, isSubscriptionSyncPending, canExportClaimPack, shouldShowUpgradeFor, enforce, refreshEntitlements, purchasePackage, restorePurchases]);
   return <Context.Provider value={value}>{children}</Context.Provider>;
 }
 

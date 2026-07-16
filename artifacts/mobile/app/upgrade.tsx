@@ -1,6 +1,6 @@
 import { Feather } from "@expo/vector-icons";
 import { useQuery } from "@tanstack/react-query";
-import { Stack, router } from "expo-router";
+import { Stack, router, useLocalSearchParams } from "expo-router";
 import * as WebBrowser from "expo-web-browser";
 import React, { useMemo } from "react";
 import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
@@ -9,6 +9,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useAuth } from "@/context/AuthContext";
 import { useEntitlements } from "@/context/EntitlementsContext";
 import { useColors } from "@/hooks/useColors";
+import { usePropertyAllowance } from "@/hooks/usePropertyAllowance";
 import { type PurchasesPackage } from "@/lib/billing";
 import { loadUsageAllowances } from "@/lib/usage-allowances";
 import {
@@ -29,15 +30,14 @@ const planLabels: Record<UpgradePlanGroup, string> = {
 };
 
 const planPositioning: Record<UpgradePlanGroup, string> = {
-  plus: "For individuals and households building a complete home inventory.",
-  family: "Includes the same currently available mobile access as Plus.",
+  plus: "AI tools, pricing and claim-ready exports included.",
+  family: "Everything in Plus, with support for multiple properties.",
 };
 
 const paidBenefits = [
   "AI inventory scans included (fair use applies)",
   "Replacement-price searches included (fair use applies)",
   "Claim-ready PDF exports included",
-  "Add more than one property",
 ];
 
 function periodLabel(period: UpgradeBillingPeriod) {
@@ -60,6 +60,7 @@ function actionLabel(period: UpgradeBillingPeriod, currentPlan: boolean, hasPaid
 }
 
 export default function UpgradeScreen() {
+  const { feature } = useLocalSearchParams<{ feature?: string }>();
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const { session } = useAuth();
@@ -67,6 +68,7 @@ export default function UpgradeScreen() {
     effectivePlan, offering, customerInfo, error, purchaseLoading, isRefreshing,
     purchasePackage, restorePurchases, gatesEnabled,
   } = useEntitlements();
+  const { allowance: propertyAllowance } = usePropertyAllowance();
   const allowancesQuery = useQuery({
     queryKey: ["usage-allowances", session?.user.id],
     queryFn: loadUsageAllowances,
@@ -78,6 +80,10 @@ export default function UpgradeScreen() {
   const groupedPackages = useMemo(() => buildUpgradePackages(packages), [packages]);
   const comparison = useMemo(() => buildPlanComparison(allowancesQuery.data ?? []), [allowancesQuery.data]);
   const hasPaidPlan = effectivePlan !== "free";
+  const propertyUpgrade = feature === "property";
+  const displayedPlans: readonly UpgradePlanGroup[] = propertyUpgrade && effectivePlan === "coverly_plus"
+    ? ["family"]
+    : ["plus", "family"];
   const purchaseActionLockRef = React.useRef(false);
 
   const buy = async (pkg: PurchasesPackage) => {
@@ -136,31 +142,33 @@ export default function UpgradeScreen() {
         </View>
       </View>
 
-      {!gatesEnabled ? <View style={[styles.notice, { backgroundColor: colors.accent }]}>
+      {!gatesEnabled && propertyAllowance.accessClass === "full_access" ? <View style={[styles.notice, { backgroundColor: colors.accent }]}>
         <Text style={[styles.noticeText, { color: colors.accentForeground }]}>Tester mode: limits may be visible without blocking access.</Text>
       </View> : null}
 
       <View style={styles.sectionIntro}>
-        <Text accessibilityRole="header" style={[styles.sectionTitle, { color: colors.foreground }]}>Free versus paid</Text>
-        <Text style={[styles.body, { color: colors.mutedForeground }]}>See what changes when you upgrade.</Text>
+        <Text accessibilityRole="header" style={[styles.sectionTitle, { color: colors.foreground }]}>Compare plans</Text>
+        <Text style={[styles.body, { color: colors.mutedForeground }]}>Choose the plan that fits your home.</Text>
       </View>
       <View style={[styles.comparisonCard, { backgroundColor: colors.card, borderColor: colors.border, borderRadius: colors.radius }]}>
         <View style={[styles.comparisonHeader, { borderBottomColor: colors.border }]}>
           <Text style={[styles.comparisonFeature, { color: colors.mutedForeground }]}>FEATURE</Text>
           <Text style={[styles.comparisonValue, { color: colors.mutedForeground }]}>FREE</Text>
-          <Text style={[styles.comparisonValue, { color: colors.primary }]}>PLUS & FAMILY</Text>
+          <Text style={[styles.comparisonValue, { color: colors.mutedForeground }]}>PLUS</Text>
+          <Text style={[styles.comparisonValue, { color: colors.primary }]}>FAMILY</Text>
         </View>
         {comparison.map((row, index) => <View key={row.label} style={[styles.comparisonRow, index < comparison.length - 1 && { borderBottomColor: colors.border, borderBottomWidth: StyleSheet.hairlineWidth }]}>
           <Text style={[styles.comparisonFeatureText, { color: colors.foreground }]}>{row.label}</Text>
           <Text style={[styles.comparisonValueText, { color: colors.mutedForeground }]}>{row.free}</Text>
-          <Text style={[styles.comparisonValueText, styles.paidValue, { color: colors.foreground }]}>{row.paid}</Text>
+          <Text style={[styles.comparisonValueText, { color: colors.foreground }]}>{row.plus}</Text>
+          <Text style={[styles.comparisonValueText, styles.paidValue, { color: colors.foreground }]}>{row.family}</Text>
         </View>)}
       </View>
 
       {packages.length === 0 ? <View style={[styles.empty, { backgroundColor: colors.card, borderColor: colors.border, borderRadius: colors.radius }]}>
         <Text style={[styles.optionTitle, { color: colors.foreground }]}>Plan options are not available in this build</Text>
         <Text style={[styles.body, { color: colors.mutedForeground }]}>{error ?? "Store products are still being prepared for tester builds. You can continue using available Free features."}</Text>
-      </View> : (["plus", "family"] as const).map((plan) => {
+      </View> : displayedPlans.map((plan) => {
         const planPackages = groupedPackages[plan];
         if (planPackages.length === 0) return null;
         const currentPlan = isCurrentPlan(plan, effectivePlan);

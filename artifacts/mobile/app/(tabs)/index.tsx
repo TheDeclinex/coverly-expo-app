@@ -25,13 +25,14 @@ import Svg, { Circle } from "react-native-svg";
 
 import { ErrorState } from "@/components/ErrorState";
 import { LoadingState } from "@/components/LoadingState";
+import { PropertyAllowanceModal } from "@/components/PropertyAllowanceModal";
 import { RecommendedActionCard } from "@/components/RecommendedActionCard";
 import { ReliableImage } from "@/components/ReliableImage";
 import { useAuth } from "@/context/AuthContext";
-import { useEntitlements } from "@/context/EntitlementsContext";
 import { ENABLE_RECOMMENDED_ACTIONS } from "@/constants/recommendedActions";
 import { propertyTypeLabel } from "@/constants/propertyTypes";
 import { useColors } from "@/hooks/useColors";
+import { usePropertyAllowance } from "@/hooks/usePropertyAllowance";
 import { useSignedImageRecovery, useSignedUrl, useSignedUrls } from "@/hooks/useSignedUrls";
 import { calcPortfolioStats } from "@/lib/dashboard-stats";
 import {
@@ -450,12 +451,13 @@ function PropertyCard({
 
 export default function HomeScreen() {
   const { session } = useAuth();
-  const { canCreateProperty, enforce } = useEntitlements();
+  const { allowance, refreshAllowance } = usePropertyAllowance();
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const [globalSearchVisible, setGlobalSearchVisible] = React.useState(false);
   const [globalSearchText, setGlobalSearchText] = React.useState("");
   const [globalReadinessFilter, setGlobalReadinessFilter] = React.useState<GlobalReadinessFilter>("all");
+  const [propertyAllowanceVisible, setPropertyAllowanceVisible] = React.useState(false);
 
   const {
     data: properties,
@@ -611,6 +613,7 @@ export default function HomeScreen() {
       refetchItems(),
       refetchItemCount(),
       refetchRooms(),
+      refreshAllowance(),
     ]);
   };
 
@@ -629,11 +632,13 @@ export default function HomeScreen() {
 
   const handleScanItems = () => navigateWithProperty("/(tabs)/scan");
   const handleAddManually = () => navigateWithProperty("/(tabs)/add-item");
-  const propertyCount = properties?.length ?? 0;
-  const canAddProperty = canCreateProperty(propertyCount);
+  const canAddProperty = allowance.state === "ready" && allowance.canCreateProperty;
 
   const handleAddProperty = () => {
-    if (!enforce("property", propertyCount)) return;
+    if (!canAddProperty) {
+      setPropertyAllowanceVisible(true);
+      return;
+    }
     router.push("/(tabs)/add-property");
   };
 
@@ -1054,7 +1059,7 @@ export default function HomeScreen() {
                 onPress={handleAddProperty}
                 hitSlop={8}
                 accessibilityRole="button"
-                accessibilityLabel={canAddProperty ? "Add property" : "Upgrade to add another property"}
+                accessibilityLabel={allowance.state === "loading" ? "Checking your plan" : canAddProperty ? "Add property" : "View Family plan"}
                 style={({ pressed }) => [
                   styles.addPropertyAction,
                   {
@@ -1125,6 +1130,15 @@ export default function HomeScreen() {
         />
       )}
       {renderGlobalSearchModal()}
+      <PropertyAllowanceModal
+        visible={propertyAllowanceVisible}
+        allowance={allowance}
+        onDismiss={() => setPropertyAllowanceVisible(false)}
+        onRetry={() => {
+          setPropertyAllowanceVisible(false);
+          void refreshAllowance();
+        }}
+      />
     </>
   );
 }

@@ -57,12 +57,14 @@ export function LimitReachedModal({
           <Text style={[styles.body, { color: colors.mutedForeground }]}>
             {content.body}
           </Text>
-          <View style={[styles.benefitBox, { backgroundColor: colors.muted }]}>
-            <Feather name="star" size={15} color={colors.primary} />
-            <Text style={[styles.benefit, { color: colors.foreground }]}>
-              {content.benefit}
-            </Text>
-          </View>
+          {content.benefit ? (
+            <View style={[styles.benefitBox, { backgroundColor: colors.muted }]}>
+              <Feather name="star" size={15} color={colors.primary} />
+              <Text style={[styles.benefit, { color: colors.foreground }]}>
+                {content.benefit}
+              </Text>
+            </View>
+          ) : null}
 
           <Pressable
             onPress={onPrimary}

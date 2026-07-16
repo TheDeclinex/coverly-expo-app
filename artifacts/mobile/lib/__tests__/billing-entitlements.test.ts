@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { hasActiveRevenueCatEntitlement, resolveRevenueCatPlan } from "../billing-entitlements.ts";
+import { hasActiveRevenueCatEntitlement, profilePlanMatchesExpected, resolveRevenueCatPlan } from "../billing-entitlements.ts";
 
 const config = {
   plusEntitlementId: "Coverly Plus",
@@ -58,4 +58,10 @@ test("prefers the configured Family entitlement when both paid entitlements are 
   assert.equal(state.plan, "coverly_family");
   assert.equal(state.subscriptionStatus, "trialing");
   assert.equal(hasActiveRevenueCatEntitlement({ entitlements: { active: { "Coverly Family": {} } } }, config), true);
+});
+
+test("Plus-to-Family refresh does not accept stale Plus as the expected plan", () => {
+  assert.equal(profilePlanMatchesExpected("coverly_plus", "coverly_family"), false);
+  assert.equal(profilePlanMatchesExpected("coverly_family", "coverly_family"), true);
+  assert.equal(profilePlanMatchesExpected("coverly_plus", null), true);
 });

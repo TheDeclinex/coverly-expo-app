@@ -29,13 +29,13 @@ import Animated, {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { CoverlyAuthBackground, CoverlyAuthMark } from "@/components/auth/CoverlyAuthBrand";
+import { PropertyAllowanceModal } from "@/components/PropertyAllowanceModal";
 import { coverlyBrand } from "@/constants/brand";
 import { useAuth } from "@/context/AuthContext";
-import { useEntitlements } from "@/context/EntitlementsContext";
 import { PROPERTY_TYPES } from "@/constants/propertyTypes";
 import { useColors } from "@/hooks/useColors";
-import { createProperty } from "@/lib/property-service";
-import { supabase } from "@/lib/supabase";
+import { usePropertyAllowance } from "@/hooks/usePropertyAllowance";
+import { createProperty, PropertyCreationError } from "@/lib/property-service";
 
 // ─── Design tokens ─────────────────────────────────────────────────────────────
 const BTN_TOP = coverlyBrand.teal;
@@ -75,7 +75,7 @@ function ProgressDots({
 // ─── Main screen ───────────────────────────────────────────────────────────────
 export default function OnboardingScreen() {
   const { session, markOnboardingComplete, hasSeenOnboarding } = useAuth();
-  const { enforce } = useEntitlements();
+  const { allowance, refreshAllowance } = usePropertyAllowance();
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const { height } = useWindowDimensions();
@@ -93,8 +93,10 @@ export default function OnboardingScreen() {
   const [createError, setCreateError]       = useState<string | null>(null);
   const [newPropertyId, setNewPropertyId]   = useState<string | null>(null);
   const [newPropertyName, setNewPropertyName] = useState("");
+  const [propertyAllowanceVisible, setPropertyAllowanceVisible] = useState(false);
 
   const nameInputRef = useRef<TextInput>(null);
+  const propertySubmissionLockRef = useRef(false);
 
   useEffect(() => {
     if (!userId) {
@@ -219,16 +221,20 @@ export default function OnboardingScreen() {
   };
 
   const handleCreateProperty = async () => {
-    const { count } = await supabase.from("inventory_files").select("id", { count: "exact", head: true });
-    if (!enforce("property", count ?? 0)) return;
-    if (!session.user || creating) return;
+    if (!session?.user || creating || propertySubmissionLockRef.current) return;
     const trimmedName = propertyName.trim();
     if (!trimmedName) return;
 
+    propertySubmissionLockRef.current = true;
     setCreating(true);
     setCreateError(null);
 
     try {
+      const freshAllowance = await refreshAllowance();
+      if (!freshAllowance.canCreateProperty) {
+        setPropertyAllowanceVisible(true);
+        return;
+      }
       const n = parseFloat(coverAmount);
       const row = await createProperty({
         name: trimmedName,
@@ -239,12 +245,22 @@ export default function OnboardingScreen() {
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       setNewPropertyId(row.id);
       setNewPropertyName(row.name);
+      await refreshAllowance();
       setStep(3);
     } catch (err) {
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-      setCreateError(err instanceof Error ? err.message : "Could not create property. Please try again.");
+      if (err instanceof PropertyCreationError && (
+        err.errorCode === "PROPERTY_LIMIT_REACHED"
+        || err.errorCode === "PROPERTY_ALLOWANCE_UNAVAILABLE"
+      )) {
+        await refreshAllowance();
+        setPropertyAllowanceVisible(true);
+      } else {
+        setCreateError(err instanceof Error ? err.message : "Could not create property. Please try again.");
+      }
     } finally {
       setCreating(false);
+      propertySubmissionLockRef.current = false;
     }
   };
 
@@ -504,14 +520,14 @@ export default function OnboardingScreen() {
             <ProgressDots activeIndex={1} total={3} />
             <Pressable
               onPress={handleCreateProperty}
-              disabled={!propertyName.trim() || creating}
+              disabled={!propertyName.trim() || creating || allowance.state === "loading"}
               style={({ pressed }) => [
                 styles.primaryBtn,
-                { opacity: !propertyName.trim() || creating || pressed ? 0.52 : 1 },
+                { opacity: !propertyName.trim() || creating || allowance.state === "loading" || pressed ? 0.52 : 1 },
               ]}
             >
               <LinearGradient colors={[BTN_TOP, BTN_BOT]} start={{ x: 0.5, y: 0 }} end={{ x: 0.5, y: 1 }} style={styles.primaryBtnInner}>
-                {creating ? (
+                {creating || allowance.state === "loading" ? (
                   <ActivityIndicator color="#FFFFFF" />
                 ) : (
                   <>
@@ -581,6 +597,15 @@ export default function OnboardingScreen() {
           {hasPassedPrivacyStep && step === 3 && renderStep3()}
         </Animated.View>
       </CoverlyAuthBackground>
+      <PropertyAllowanceModal
+        visible={propertyAllowanceVisible}
+        allowance={allowance}
+        onDismiss={() => setPropertyAllowanceVisible(false)}
+        onRetry={() => {
+          setPropertyAllowanceVisible(false);
+          void refreshAllowance();
+        }}
+      />
     </View>
   );
 }
