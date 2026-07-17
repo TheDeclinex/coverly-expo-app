@@ -26,7 +26,7 @@ import { resolveMarketConfig } from "@/constants/market-config";
 import { useColors } from "@/hooks/useColors";
 import { usePropertyAllowance } from "@/hooks/usePropertyAllowance";
 import { createProperty, PropertyCreationError } from "@/lib/property-service";
-import { formatMoney, moneyDisplayToken } from "@/lib/money";
+import { formatPropertyMoney, moneyDisplayToken } from "@/lib/money";
 import { supabase } from "@/lib/supabase";
 
 type SetupStep = 0 | 1 | 2;
@@ -432,7 +432,7 @@ export default function AddPropertyScreen() {
         <ReviewRow label="Property" value={trimmedName || "Not set"} colors={colors} />
         <ReviewRow label="Type" value={propertyTypeLabel(propertyType) ?? "Not set"} colors={colors} />
         <ReviewRow label="Country" value={`${market.countryName} · ${market.currencyCode}`} colors={colors} />
-        <ReviewRow label="Contents cover" value={hasValidCoverAmount ? formatMoney(parsedCoverAmount, market.currencyCode, { locale: market.locale }) : "Not set"} colors={colors} />
+        <ReviewRow label="Contents cover" value={hasValidCoverAmount ? formatPropertyMoney(parsedCoverAmount, market.countryCode, market.currencyCode) : "Not set"} colors={colors} />
         <ReviewRow label="Insurer" value={insurerName.trim() || "Not set"} colors={colors} />
         <ReviewRow label="Policy number" value={policyNumber.trim() || "Not set"} colors={colors} />
       </View>

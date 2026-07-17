@@ -35,6 +35,15 @@ test("manual scan values and attention displays carry property market context", 
   assert.match(attention, /resolveStoredValueCurrency\(item\.estimated_currency, propertyCurrency\)/);
 });
 
+test("single-property cover and claim-builder values keep property currency context", () => {
+  const addProperty = source("artifacts/mobile/app/(tabs)/add-property.tsx");
+  const claimBuilder = source("artifacts/mobile/app/(tabs)/claim-pack/[fileId].tsx");
+  assert.match(addProperty, /formatPropertyMoney\(parsedCoverAmount, market\.countryCode, market\.currencyCode\)/);
+  assert.match(claimBuilder, /formatCurrencyTotals\(selectedTotals, \{ contextCurrency: currencyCode \}\)/);
+  assert.match(claimBuilder, /resolveClaimItemCurrency\(item\.estimated_currency, currencyCode\), \{ contextCurrency: currencyCode \}/);
+  assert.doesNotMatch(claimBuilder, /resolveClaimItemCurrency\(item\.estimated_currency, currencyCode\), \{ mode: "explicit" \}/);
+});
+
 test("Edge price paths use strict finite helpers and preserve metering code", () => {
   const scan = source("supabase/functions/scan-room-photo/index.ts");
   const search = source("supabase/functions/replacement-price-search/index.ts");

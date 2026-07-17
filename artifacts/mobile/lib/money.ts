@@ -17,10 +17,64 @@ export interface FormatMoneyOptions {
   locale?: string;
   mode?: MoneyDisplayMode;
   showCode?: boolean;
+  trimWholeDecimals?: boolean;
 }
 
 export function isCurrencyCode(value: unknown): value is string {
   return typeof value === "string" && /^[A-Z]{3}$/.test(value.trim().toUpperCase());
+}
+
+function normalizeMoneySpacing(value: string): string {
+  return value.replace(/\u00a0/g, " ");
+}
+
+function formatSymbolWithoutParts(
+  amount: number,
+  locale: string,
+  token: string,
+  currencyOptions: Intl.NumberFormatOptions,
+  currencyFormatter: Intl.NumberFormat,
+): string {
+  const resolved = currencyFormatter.resolvedOptions();
+  const decimalOptions: Intl.NumberFormatOptions = {
+    numberingSystem: resolved.numberingSystem,
+    useGrouping: resolved.useGrouping,
+    minimumFractionDigits: resolved.minimumFractionDigits,
+    maximumFractionDigits: resolved.maximumFractionDigits,
+  };
+  const decimalFormatter = new Intl.NumberFormat(locale, decimalOptions);
+  const formattedAmount = decimalFormatter.format(Math.abs(amount));
+  const placementSample = 1234.5;
+  const formattedSample = decimalFormatter.format(placementSample);
+  const codeSample = new Intl.NumberFormat(locale, {
+    ...currencyOptions,
+    currencyDisplay: "code",
+  }).format(placementSample);
+  const numberPosition = codeSample.indexOf(formattedSample);
+  const tokenFirst = numberPosition > 0 || numberPosition === -1;
+  const sign = amount < 0 ? "-" : "";
+  return tokenFirst
+    ? `${sign}${token}${formattedAmount}`
+    : `${sign}${formattedAmount} ${token}`;
+}
+
+function manualMoneyFallback(
+  amount: number,
+  currency: string,
+  locale: string,
+  mode: MoneyDisplayMode,
+  token: string,
+  trimWholeDecimals: boolean,
+): string {
+  const fractionDigits = currency === "JPY" || currency === "KRW" ? 0 : 2;
+  const wholeAppValue = mode !== "formal" && trimWholeDecimals && Number.isInteger(amount);
+  const formattedAmount = amount.toLocaleString(locale, {
+    minimumFractionDigits: wholeAppValue ? 0 : fractionDigits,
+    maximumFractionDigits: fractionDigits,
+  });
+  return token === currency
+    ? `${currency} ${formattedAmount}`
+    : `${token}${formattedAmount}`;
 }
 
 export function formatMoney(
@@ -36,24 +90,57 @@ export function formatMoney(
     ? "formal"
     : options.mode ?? (contextCurrency ? (currency === contextCurrency ? "compact" : "explicit") : "explicit");
   const locale = options.locale ?? "en";
+  const token = mode === "formal"
+    ? currency
+    : mode === "compact"
+      ? COMPACT_SYMBOLS[currency] ?? currency
+      : EXPLICIT_SYMBOLS[currency] ?? currency;
+  const useCodeSpacing = token === currency;
+  const formatOptions: Intl.NumberFormatOptions = {
+    style: "currency",
+    currency,
+    currencyDisplay: useCodeSpacing ? "code" : "narrowSymbol",
+    ...(mode !== "formal" && options.trimWholeDecimals !== false && Number.isInteger(amount)
+      ? { minimumFractionDigits: 0 }
+      : {}),
+  };
   try {
-    const token = mode === "formal"
-      ? currency
-      : mode === "compact"
-        ? COMPACT_SYMBOLS[currency] ?? currency
-        : EXPLICIT_SYMBOLS[currency] ?? currency;
-    const useCodeSpacing = token === currency;
-    const formatter = new Intl.NumberFormat(locale, {
-      style: "currency",
-      currency,
-      currencyDisplay: useCodeSpacing ? "code" : "narrowSymbol",
-      ...(mode !== "formal" && Number.isInteger(amount) ? { minimumFractionDigits: 0 } : {}),
-    });
-    const parts = formatter.formatToParts(amount);
-    return parts.map((part) => part.type === "currency" ? token : part.value).join("").replace(/\u00a0/g, " ");
+    let formatter: Intl.NumberFormat;
+    try {
+      formatter = new Intl.NumberFormat(locale, formatOptions);
+    } catch {
+      formatter = new Intl.NumberFormat(locale, {
+        ...formatOptions,
+        currencyDisplay: useCodeSpacing ? "code" : "symbol",
+      });
+    }
+
+    if (typeof formatter.formatToParts === "function") {
+      try {
+        const parts = formatter.formatToParts(amount);
+        return normalizeMoneySpacing(
+          parts.map((part) => part.type === "currency" ? token : part.value).join(""),
+        );
+      } catch {
+        // Hermes on Apple does not expose NumberFormat#formatToParts.
+      }
+    }
+
+    if (useCodeSpacing) return normalizeMoneySpacing(formatter.format(amount));
+    return normalizeMoneySpacing(
+      formatSymbolWithoutParts(amount, locale, token, formatOptions, formatter),
+    );
   } catch {
-    return `${currency} ${amount.toLocaleString("en")}`;
+    // Fall through to a symbol-aware last resort for limited Intl runtimes.
   }
+  return manualMoneyFallback(
+    amount,
+    currency,
+    locale,
+    mode,
+    token,
+    options.trimWholeDecimals !== false,
+  );
 }
 
 export function moneyDisplayToken(

@@ -1837,7 +1837,7 @@ function DraftRoomCard({
         <View style={styles.roomHeaderCopy}>
           <Text style={[styles.roomTitle, { color: colors.foreground }]}>{room.name}</Text>
           <Text style={[styles.roomSubtitle, { color: colors.mutedForeground }]}>
-            {selectedCount > 0 ? `${selectedCount} of ${items.length} items selected` : "No items selected yet"} · {formatCurrencyTotals(selectedTotals)} est.
+            {selectedCount > 0 ? `${selectedCount} of ${items.length} items selected` : "No items selected yet"} · {formatCurrencyTotals(selectedTotals, { contextCurrency: currencyCode })} est.
           </Text>
           <Text style={[styles.roomSubtitle, { color: colors.mutedForeground }]}>
             {formatCount(evidenceCount, "evidence file", "evidence files")}
@@ -2016,7 +2016,7 @@ function ClaimPackItemRow({
           {item.name || "Unnamed item"}
         </Text>
         <Text style={[styles.itemMeta, { color: colors.mutedForeground }]} numberOfLines={1}>
-          {formatMoney(getItemTotalValue(item), resolveClaimItemCurrency(item.estimated_currency, currencyCode), { mode: "explicit" })} · {formatCount(evidenceCount, "evidence file", "evidence files")}
+          {formatMoney(getItemTotalValue(item), resolveClaimItemCurrency(item.estimated_currency, currencyCode), { contextCurrency: currencyCode })} · {formatCount(evidenceCount, "evidence file", "evidence files")}
         </Text>
         {warning ? (
           <Text style={[styles.itemWarnings, { color: colors.warning }]} numberOfLines={1}>{warning}</Text>

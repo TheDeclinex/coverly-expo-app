@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { formatCurrencyTotals, formatMoney, groupAmountsByCurrency, moneyDisplayToken } from "../money.ts";
+import { formatCurrency, formatCurrencyFull } from "../inventory-mappers.ts";
+import { formatCurrencyTotals, formatMoney, formatPropertyMoney, groupAmountsByCurrency, moneyDisplayToken } from "../money.ts";
 
 test("compact money uses familiar symbols in matching property context", () => {
   for (const [currency, locale, expected] of [
@@ -67,4 +68,65 @@ test("database-valid historic and special currencies remain visible and grouped"
     { XDR: 1250, NZD: 10 },
   );
   assert.equal(formatCurrencyTotals({ XDR: 1250, NZD: 10 }), "XDR 1,250 · NZ$10");
+});
+
+test("single-property display inherits one currency across property, room, and item totals", () => {
+  const propertyTotal = formatCurrency(81443.99, "NZD");
+  const roomTotal = formatCurrencyTotals({ NZD: 58000 }, { contextCurrency: "NZD" });
+  const itemTotal = formatCurrencyFull(200, "NZD");
+
+  assert.equal(propertyTotal, "$81,443.99");
+  assert.equal(roomTotal, "$58,000");
+  assert.equal(itemTotal, "$200.00");
+  assert.equal(formatCurrencyFull(200.25, "NZD"), "$200.25");
+  assert.equal(formatCurrency(1250, null), "$1,250");
+  assert.equal(formatPropertyMoney(1250, null, null), "$1,250");
+  assert.equal(formatCurrency(1250, "GBP"), "£1,250");
+  for (const output of [propertyTotal, roomTotal, itemTotal]) {
+    assert.doesNotMatch(output, /NZ\$|NZD/);
+  }
+});
+
+test("Hermes Apple fallback formats money when NumberFormat.formatToParts is unavailable", () => {
+  const descriptor = Object.getOwnPropertyDescriptor(Intl.NumberFormat.prototype, "formatToParts");
+  assert.ok(descriptor);
+  Object.defineProperty(Intl.NumberFormat.prototype, "formatToParts", {
+    configurable: true,
+    value: undefined,
+  });
+
+  try {
+    for (const [currency, locale, expected] of [
+      ["NZD", "en-NZ", "$1,250"],
+      ["AUD", "en-AU", "$1,250"],
+      ["USD", "en-US", "$1,250"],
+      ["CAD", "en-CA", "$1,250"],
+      ["GBP", "en-GB", "£1,250"],
+      ["EUR", "en-IE", "€1,250"],
+      ["INR", "en-IN", "₹1,250"],
+      ["JPY", "en", "¥1,250"],
+      ["KRW", "en", "₩1,250"],
+    ]) {
+      assert.equal(formatMoney(1250, currency, { contextCurrency: currency, locale }), expected);
+    }
+
+    assert.equal(formatMoney(1250.5, "NZD", { contextCurrency: "NZD", locale: "en-NZ" }), "$1,250.50");
+    assert.equal(formatMoney(1250.99, "NZD", { contextCurrency: "NZD", locale: "en-NZ" }), "$1,250.99");
+    assert.equal(formatMoney(81443.99, "NZD", { contextCurrency: "NZD" }), "$81,443.99");
+    assert.equal(formatMoney(200, "NZD", { contextCurrency: "NZD", trimWholeDecimals: false }), "$200.00");
+    assert.equal(formatMoney(1250.5, "EUR", { contextCurrency: "EUR", locale: "de-DE" }), "1.250,50 €");
+    assert.equal(formatMoney(1250, "NZD", { contextCurrency: "AUD", locale: "en-AU" }), "NZ$1,250");
+    assert.equal(formatMoney(1250, "AUD", { contextCurrency: "NZD", locale: "en-NZ" }), "A$1,250");
+    assert.equal(formatMoney(1250, "USD", { contextCurrency: "NZD", locale: "en-NZ" }), "US$1,250");
+    assert.equal(formatMoney(1250, "CAD", { contextCurrency: "NZD", locale: "en-NZ" }), "CA$1,250");
+    assert.equal(formatMoney(1250, "NZD", { mode: "formal", locale: "en-NZ" }), "NZD 1,250.00");
+    assert.equal(formatMoney(125000, "JPY", { mode: "formal", locale: "en" }), "JPY 125,000");
+
+    for (const currency of ["XDR", "XAU", "XAG"]) {
+      assert.equal(formatMoney(1250, currency, { mode: "explicit", locale: "en" }), `${currency} 1,250`);
+    }
+    assert.equal(formatCurrencyTotals({ XDR: 1250, NZD: 10 }), "XDR 1,250 · NZ$10");
+  } finally {
+    Object.defineProperty(Intl.NumberFormat.prototype, "formatToParts", descriptor);
+  }
 });

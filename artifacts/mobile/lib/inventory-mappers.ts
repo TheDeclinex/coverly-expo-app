@@ -1,5 +1,5 @@
 import type { InventoryItem, ItemPhoto } from "@/types";
-import { formatMoney } from "./money.ts";
+import { formatMoney, isCurrencyCode } from "./money.ts";
 
 export function getItemPrice(item: InventoryItem): number {
   return getItemUnitPrice(item);
@@ -50,28 +50,23 @@ export function needsReview(item: InventoryItem): boolean {
 
 export function formatCurrency(
   value: number | null | undefined,
-  currencyCode = "NZD",
-  contextCurrency: string | null | undefined = currencyCode,
+  currencyCode: string | null | undefined = "NZD",
+  contextCurrency?: string | null,
 ): string {
-  return formatMoney(value, currencyCode, { contextCurrency });
-  /* legacy formatter retained below only for source-history clarity
-  if (value === null || value === undefined) return "—";
-  return `$${value.toLocaleString("en-US", {
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 0,
-  })}`; */
+  const propertyCurrency = isCurrencyCode(currencyCode) ? currencyCode.trim().toUpperCase() : "NZD";
+  return formatMoney(value, propertyCurrency, {
+    contextCurrency: contextCurrency === undefined ? propertyCurrency : contextCurrency,
+  });
 }
 
 export function formatCurrencyFull(
   value: number | null | undefined,
-  currencyCode = "NZD",
-  contextCurrency: string | null | undefined = currencyCode,
+  currencyCode: string | null | undefined = "NZD",
+  contextCurrency?: string | null,
 ): string {
-  return formatMoney(value, currencyCode, { contextCurrency });
-  /* legacy formatter retained below only for source-history clarity
-  if (value === null || value === undefined) return "—";
-  return `$${value.toLocaleString("en-US", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  })}`; */
+  const propertyCurrency = isCurrencyCode(currencyCode) ? currencyCode.trim().toUpperCase() : "NZD";
+  return formatMoney(value, propertyCurrency, {
+    contextCurrency: contextCurrency === undefined ? propertyCurrency : contextCurrency,
+    trimWholeDecimals: false,
+  });
 }
