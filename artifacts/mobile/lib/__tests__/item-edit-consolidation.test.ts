@@ -14,7 +14,7 @@ const photoSource = source("../../components/DraggablePhotoStrip.tsx");
 test("Item Detail mounts the single complete maintenance form", () => {
   assert.ok(detailSource.includes("<ItemMaintenanceForm"));
   assert.ok(detailSource.includes("ref={maintenanceFormRef}"));
-  for (const label of ["Name", "Description", "Category", "Each price (", "Quantity", "Brand / Maker", "Model / Series", "Condition", "Purchased from", "Purchase year", "Original price (", "Notes", "ROOM", "PHOTOS"]) {
+  for (const label of ["Name", "Description", "Category", "Each price (", "Quantity", "Brand / Maker", "Model / Series", "Condition", "Purchased from", "Purchase year", "Original purchase price (", "Notes", "ROOM", "PHOTOS"]) {
     assert.ok(formSource.includes(label), `Missing ${label}`);
   }
   assert.ok(formSource.includes("<DraggablePhotoStrip"));

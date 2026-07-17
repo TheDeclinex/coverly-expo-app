@@ -29,6 +29,7 @@ import { useAuth } from "@/context/AuthContext";
 import { useColors } from "@/hooks/useColors";
 import { formatCurrencyFull } from "@/lib/inventory-mappers";
 import { buildItemInsertPayload } from "@/lib/item-insert-helpers";
+import { moneyDisplayToken } from "@/lib/money";
 import { parseReplacementPriceInput, resolveReviewedValueCurrency, resolveValueMarket, supportedCurrencyCode } from "@/lib/replacement-value";
 import { stageRecentItemBatch } from "@/lib/recent-items";
 import { formatUploadFailure, uploadItemPhoto } from "@/lib/photo-upload";
@@ -206,6 +207,8 @@ export default function AddItemScreen() {
   });
   const replacementCurrency = resolveReviewedValueCurrency(voiceEstimatedCurrency, null, selectedFile?.currency_code);
   const purchaseCurrency = resolveReviewedValueCurrency(voiceOriginalCurrency, null, selectedFile?.currency_code);
+  const replacementCurrencyToken = moneyDisplayToken(replacementCurrency, selectedFile?.currency_code);
+  const purchaseCurrencyToken = moneyDisplayToken(purchaseCurrency, selectedFile?.currency_code);
 
   const pickPhoto = async () => {
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -713,7 +716,7 @@ export default function AddItemScreen() {
 
             <View style={{ flexDirection: "row", gap: 12 }}>
               <View style={{ flex: 2 }}>
-                <FormField label={`Each price (${replacementCurrency})`} colors={colors} action={<VoiceFieldButton label="each price" onPress={() => openVoice("replacement_price")} />}>
+                <FormField label={`Each price (${replacementCurrencyToken})`} colors={colors} action={<VoiceFieldButton label="each price" onPress={() => openVoice("replacement_price")} />}>
                   <StyledInput
                     value={estimatedPrice}
                     onChangeText={setEstimatedPrice}
@@ -740,6 +743,7 @@ export default function AddItemScreen() {
                     (parseReplacementPriceInput(estimatedPrice).value ?? 0) *
                       (Number.parseInt(quantity, 10) || 1),
                     replacementCurrency,
+                    selectedFile?.currency_code,
                   )}
                 </Text>
               </View>
@@ -778,7 +782,7 @@ export default function AddItemScreen() {
                     </FormField>
                   </View>
                   <View style={{ flex: 1 }}>
-                    <FormField label={`Original price (${purchaseCurrency})`} colors={colors} action={<VoiceFieldButton label="original purchase price" onPress={() => openVoice("original_purchase_price")} />}>
+                    <FormField label={`Original purchase price (${purchaseCurrencyToken})`} colors={colors} action={<VoiceFieldButton label="original purchase price" onPress={() => openVoice("original_purchase_price")} />}>
                       <StyledInput value={originalPurchasePrice} onChangeText={setOriginalPurchasePrice} placeholder="0" keyboardType="decimal-pad" colors={colors} />
                     </FormField>
                   </View>

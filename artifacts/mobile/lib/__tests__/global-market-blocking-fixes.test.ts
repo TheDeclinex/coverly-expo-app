@@ -19,10 +19,10 @@ test("stored and reviewed currencies are wired through add, maintenance, and qui
   const add = source("artifacts/mobile/app/(tabs)/add-item.tsx");
   const maintenance = source("artifacts/mobile/components/ItemMaintenanceForm.tsx");
   const room = source("artifacts/mobile/app/(tabs)/room/[id].tsx");
-  assert.ok(add.includes('label={`Each price (${replacementCurrency})`}'));
+  assert.ok(add.includes('label={`Each price (${replacementCurrencyToken})`}'));
   assert.match(add, /estimatedCurrency: replacementCurrency/);
   assert.match(maintenance, /resolveReviewedValueCurrency\(voiceEstimatedCurrency, item\.estimated_currency/);
-  assert.ok(maintenance.includes('Original price (${purchaseCurrency})'));
+  assert.ok(maintenance.includes('Original purchase price (${purchaseCurrencyToken})'));
   assert.match(room, /supportedCurrencyCode\(patch\.estimated_currency\)/);
   assert.match(room, /estimated_currency: normalizedUnitPrice == null \? null : draftCurrency/);
 });

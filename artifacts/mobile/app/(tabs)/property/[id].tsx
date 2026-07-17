@@ -371,7 +371,7 @@ function InsightCard({
       <View style={styles.insightStatsRow}>
         <View style={[styles.insightStatCell, { flex: 1.45 }]}>
           <Text style={styles.insightStatValue} numberOfLines={1} adjustsFontSizeToFit>
-            {formatCurrencyTotals(stats.totalsByCurrency)}
+            {formatCurrencyTotals(stats.totalsByCurrency, { contextCurrency: currencyCode })}
           </Text>
           <Text style={styles.insightStatLabel}>{stats.hasMixedCurrencies ? "Multiple currencies" : "Inventory value"}</Text>
         </View>

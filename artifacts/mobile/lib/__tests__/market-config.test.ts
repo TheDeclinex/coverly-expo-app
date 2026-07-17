@@ -4,11 +4,13 @@ import { URL } from "node:url";
 import test from "node:test";
 
 import { COUNTRY_CURRENCY_PAIRS as backendPairs, resolveMarketConfig as resolveBackend } from "../../../../supabase/functions/_shared/market-config.ts";
-import { COUNTRY_CURRENCY_PAIRS, MARKET_CONFIGS, resolveMarketConfig } from "../../constants/market-config.ts";
+import { COUNTRY_NAME_BY_CODE } from "../../constants/country-names.ts";
+import { COUNTRY_CURRENCY_PAIRS, COUNTRY_OPTIONS, filterCountryOptions, MARKET_CONFIGS, resolveMarketConfig } from "../../constants/market-config.ts";
 
 type ComparableMarket = Omit<(typeof MARKET_CONFIGS)[number], "countryName">;
 const root = new URL("../../../../", import.meta.url);
 const migration = readFileSync(new URL("supabase/migrations/20260717_global_market_foundation.sql", root), "utf8");
+const countrySelectSource = readFileSync(new URL("artifacts/mobile/components/CountrySelect.tsx", root), "utf8");
 
 function comparable(market: (typeof MARKET_CONFIGS)[number]): ComparableMarket {
   const { countryName: _countryName, ...fields } = market;
@@ -97,6 +99,34 @@ test("all selectable countries have unique uppercase ISO-style codes and currenc
     assert.match(market.currencyCode, /^[A-Z]{3}$/);
     assert.deepEqual(resolveBackend(market.countryCode), market);
   }
+});
+
+test("all 249 selectable countries have canonical names sorted alphabetically", () => {
+  assert.equal(Object.keys(COUNTRY_NAME_BY_CODE).length, 249);
+  assert.equal(COUNTRY_OPTIONS.length, 249);
+  assert.equal(resolveMarketConfig("NZ")?.countryName, "New Zealand");
+  assert.equal(resolveMarketConfig("NF")?.countryName, "Norfolk Island");
+  assert.equal(resolveMarketConfig("NG")?.countryName, "Nigeria");
+  for (const option of COUNTRY_OPTIONS) assert.notEqual(option.label, option.code, option.code);
+  assert.equal(new Set(COUNTRY_OPTIONS.map((option) => option.label)).size, COUNTRY_OPTIONS.length);
+  assert.deepEqual(
+    COUNTRY_OPTIONS.map((option) => option.label),
+    [...COUNTRY_OPTIONS].map((option) => option.label).sort((left, right) => left.localeCompare(right)),
+  );
+});
+
+test("country search matches name, country code, and currency code", () => {
+  for (const query of ["New Zealand", "Zeal", "NZ", "NZD"]) {
+    assert.ok(filterCountryOptions(query).some((option) => option.code === "NZ"), query);
+  }
+  assert.deepEqual(filterCountryOptions("Nigeria").map((option) => option.code), ["NG"]);
+});
+
+test("country selector renders names as primary labels and codes as metadata", () => {
+  assert.match(countrySelectSource, />\{market\.countryName\}<\/Text>/);
+  assert.match(countrySelectSource, />\{item\.label\}<\/Text>/);
+  assert.match(countrySelectSource, /\{item\.code\} · \{item\.currencyCode\}/);
+  assert.doesNotMatch(countrySelectSource, /styles\.name[^\n]+>\{item\.code\}<\/Text>/);
 });
 
 test("verified markets use approved currency and Serper localisation", () => {

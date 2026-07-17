@@ -38,6 +38,7 @@ import { PROPERTY_TYPES } from "@/constants/propertyTypes";
 import { useColors } from "@/hooks/useColors";
 import { usePropertyAllowance } from "@/hooks/usePropertyAllowance";
 import { createProperty, PropertyCreationError } from "@/lib/property-service";
+import { moneyDisplayToken } from "@/lib/money";
 import { supabase } from "@/lib/supabase";
 
 // ─── Design tokens ─────────────────────────────────────────────────────────────
@@ -504,7 +505,7 @@ export default function OnboardingScreen() {
               <Text style={styles.fieldLabel}>CONTENTS COVER AMOUNT</Text>
               <View style={styles.moneyInputRow}>
                 <Text style={styles.moneyPrefix}>
-                  {resolveMarketConfig(countryCode)?.currencyCode ?? "NZD"}
+                  {moneyDisplayToken(resolveMarketConfig(countryCode)?.currencyCode ?? "NZD")}
                 </Text>
                 <TextInput
                   style={styles.moneyInput}

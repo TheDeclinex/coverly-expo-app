@@ -66,7 +66,7 @@ import {
   hasPhoto,
   hasValue,
 } from "@/lib/inventory-mappers";
-import { formatCurrencyTotals, groupAmountsByCurrency } from "@/lib/money";
+import { formatCurrencyTotals, formatMoney, groupAmountsByCurrency } from "@/lib/money";
 import { supabase } from "@/lib/supabase";
 import type { InventoryFile, InventoryItem, InventoryRoom } from "@/types";
 
@@ -2016,7 +2016,7 @@ function ClaimPackItemRow({
           {item.name || "Unnamed item"}
         </Text>
         <Text style={[styles.itemMeta, { color: colors.mutedForeground }]} numberOfLines={1}>
-          {formatCurrency(getItemTotalValue(item), resolveClaimItemCurrency(item.estimated_currency, currencyCode))} · {formatCount(evidenceCount, "evidence file", "evidence files")}
+          {formatMoney(getItemTotalValue(item), resolveClaimItemCurrency(item.estimated_currency, currencyCode), { mode: "explicit" })} · {formatCount(evidenceCount, "evidence file", "evidence files")}
         </Text>
         {warning ? (
           <Text style={[styles.itemWarnings, { color: colors.warning }]} numberOfLines={1}>{warning}</Text>

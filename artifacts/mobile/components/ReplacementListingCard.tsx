@@ -15,6 +15,7 @@ import { formatMoney } from "@/lib/money";
 
 interface ReplacementListingCardProps {
   result: ReplacementPriceResult;
+  contextCurrency?: string | null;
   selecting: boolean;
   onOpen: () => void;
   onUse: () => void;
@@ -26,15 +27,16 @@ const MATCH_LABELS: Record<ReplacementPriceResult["matchType"], string> = {
   similar_item: "Similar item",
 };
 
-function formatPrice(result: ReplacementPriceResult): string {
+function formatPrice(result: ReplacementPriceResult, contextCurrency?: string | null): string {
   if (result.price != null) {
-    return result.currencyCode ? formatMoney(result.price, result.currencyCode) : result.priceRaw || String(result.price);
+    return result.currencyCode ? formatMoney(result.price, result.currencyCode, { contextCurrency }) : result.priceRaw || String(result.price);
   }
   return result.priceRaw || "Price unavailable";
 }
 
 export function ReplacementListingCard({
   result,
+  contextCurrency,
   selecting,
   onOpen,
   onUse,
@@ -84,7 +86,7 @@ export function ReplacementListingCard({
             {result.source}
           </Text>
           <Text style={[styles.price, { color: colors.foreground }]}>
-            {formatPrice(result)}
+            {formatPrice(result, contextCurrency)}
           </Text>
           <Text style={[styles.source, { color: result.fulfilmentType === "local" ? colors.primary : colors.mutedForeground }]}>{result.fulfilmentType === "local" ? "Local retailer" : result.fulfilmentType === "overseas" ? "Overseas listing" : "Retailer location unconfirmed"}</Text>
         </View>

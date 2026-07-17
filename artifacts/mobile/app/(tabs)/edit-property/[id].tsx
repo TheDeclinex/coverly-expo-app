@@ -23,6 +23,7 @@ import { PROPERTY_TYPES, normalizePropertyTypeValue } from "@/constants/property
 import { resolveMarketConfig } from "@/constants/market-config";
 import { useColors } from "@/hooks/useColors";
 import { formatPropertySaveError as formatPropertyServiceSaveError, updateProperty } from "@/lib/property-service";
+import { moneyDisplayToken } from "@/lib/money";
 import { supabase } from "@/lib/supabase";
 import type { InventoryFile } from "@/types";
 
@@ -265,7 +266,7 @@ export default function EditPropertyScreen() {
             <Text style={[styles.sectionTitle, { color: colors.mutedForeground }]}>
               INSURANCE DETAILS
             </Text>
-            <FormField label="Recorded contents cover amount" colors={colors}>
+            <FormField label={`Recorded contents cover amount (${moneyDisplayToken(resolveMarketConfig(countryCode)?.currencyCode ?? "NZD")})`} colors={colors}>
               <InputBox
                 value={coverAmount}
                 onChangeText={setCoverAmount}

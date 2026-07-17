@@ -1,3 +1,5 @@
+import { COUNTRY_NAME_BY_CODE } from "./country-names.ts";
+
 export type PricingSupportTier = "verified" | "preview" | "limited";
 
 export interface MarketConfig {
@@ -36,8 +38,6 @@ const SEARCH_LANGUAGE_BY_COUNTRY: Record<string, string> = {
 };
 const VERIFIED_THRESHOLDS: Record<string, number> = { NZ:500, AU:500, US:400, CA:500, GB:300 };
 const currencyByCountry = new Map<string, string>(COUNTRY_CURRENCY_PAIRS);
-const displayNames = typeof Intl.DisplayNames === "function" ? new Intl.DisplayNames(["en"], { type: "region" }) : null;
-
 export function normaliseCountryCode(value: unknown): string | null {
   if (typeof value !== "string") return null;
   const code = value.trim().toUpperCase();
@@ -54,7 +54,7 @@ export function resolveMarketConfig(value: unknown): MarketConfig | null {
   const searchLanguage = SEARCH_LANGUAGE_BY_COUNTRY[countryCode] ?? "en";
   return {
     countryCode,
-    countryName: displayNames?.of(countryCode) ?? countryCode,
+    countryName: COUNTRY_NAME_BY_CODE[countryCode] ?? countryCode,
     currencyCode,
     locale,
     searchLanguage,
@@ -70,3 +70,11 @@ export function resolveMarketConfig(value: unknown): MarketConfig | null {
 export const MARKET_CONFIGS = COUNTRY_CURRENCY_PAIRS.map(([countryCode]) => resolveMarketConfig(countryCode)!).sort((a, b) => a.countryName.localeCompare(b.countryName));
 export const COUNTRY_OPTIONS = MARKET_CONFIGS.map((market) => ({ code: market.countryCode, label: market.countryName, currencyCode: market.currencyCode, supportTier: market.pricingSupportTier }));
 
+export function filterCountryOptions(query: string) {
+  const needle = query.trim().toLocaleLowerCase("en");
+  if (!needle) return COUNTRY_OPTIONS;
+  return COUNTRY_OPTIONS.filter((option) =>
+    option.label.toLocaleLowerCase("en").includes(needle)
+    || option.code.toLowerCase().includes(needle)
+    || option.currencyCode.toLowerCase().includes(needle));
+}

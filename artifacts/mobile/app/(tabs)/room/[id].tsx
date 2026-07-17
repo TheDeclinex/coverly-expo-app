@@ -69,7 +69,7 @@ import { takeRecentItemBatch, withoutRecentItem } from "@/lib/recent-items";
 import { clearRoomViewSession, getRoomViewSession, resolveRoomRestoreIndex, updateRoomViewSession } from "@/lib/room-view-session";
 import { supabase } from "@/lib/supabase";
 import { subtractDeletedItems, withoutRoomItems } from "@/lib/room-deletion";
-import { formatCurrencyTotals, groupAmountsByCurrency } from "@/lib/money";
+import { formatCurrencyTotals, groupAmountsByCurrency, moneyDisplayToken } from "@/lib/money";
 import { parseReplacementPriceInput, resolveReviewedValueCurrency, resolveStoredValueCurrency, resolveValueMarket, supportedCurrencyCode } from "@/lib/replacement-value";
 import { roomCoverActions, withRoomCoverPhoto, withRoomListCoverPhoto, type RoomCoverAction } from "@/lib/room-cover-photo";
 import type { InventoryItem, InventoryRoom } from "@/types";
@@ -610,7 +610,7 @@ function ItemCard({
                       {draftQuantity > 1 ? "Each" : "Price"}
                     </Text>
                     <View style={[styles.compactPriceInputWrap, { borderColor: colors.primary, backgroundColor: colors.card }]}>
-                      <Text style={[styles.compactCurrency, { color: colors.mutedForeground }]}>{draftCurrency}</Text>
+                      <Text style={[styles.compactCurrency, { color: colors.mutedForeground }]}>{moneyDisplayToken(draftCurrency, currencyCode)}</Text>
                       <TextInput
                         autoFocus
                         accessibilityLabel={draftQuantity > 1 ? "Each price" : "Price"}
@@ -626,7 +626,7 @@ function ItemCard({
                     </View>
                   </View>
                   <Text style={[styles.compactTotalPreview, { color: colors.mutedForeground }]}>
-                    Total {formatCurrencyFull(draftTotal, draftCurrency)}
+                    Total {formatCurrencyFull(draftTotal, draftCurrency, currencyCode)}
                   </Text>
                   <View style={styles.compactEditFooter}>
                     <Pressable
@@ -665,11 +665,11 @@ function ItemCard({
                   >
                     <View style={styles.compactValuation}>
                       <Text style={[styles.mainValue, { color: colors.foreground }]} numberOfLines={1}>
-                        {formatCurrencyFull(totalValue, displayCurrency)}
+                        {formatCurrencyFull(totalValue, displayCurrency, currencyCode)}
                       </Text>
                       {quantity > 1 ? (
                         <Text style={[styles.valueMeta, { color: colors.mutedForeground }]} numberOfLines={1}>
-                          Qty {quantity} · Each {formatCurrencyFull(unitPrice, displayCurrency)}
+                          Qty {quantity} · Each {formatCurrencyFull(unitPrice, displayCurrency, currencyCode)}
                         </Text>
                       ) : null}
                     </View>
@@ -903,7 +903,7 @@ function ItemCard({
                     },
                   ]}
                 >
-                  <Text style={[styles.editCurrencyPrefix, { color: colors.mutedForeground }]}>{draftCurrency}</Text>
+                  <Text style={[styles.editCurrencyPrefix, { color: colors.mutedForeground }]}>{moneyDisplayToken(draftCurrency, currencyCode)}</Text>
                   <TextInput
                     accessibilityLabel="Replacement price"
                     value={unitPriceDraft}
@@ -921,7 +921,7 @@ function ItemCard({
             </View>
             {draftQuantity > 1 ? (
               <Text style={[styles.editTotalPreview, { color: colors.mutedForeground }]}>
-                Total {formatCurrencyFull(draftTotal, draftCurrency)}
+                Total {formatCurrencyFull(draftTotal, draftCurrency, currencyCode)}
               </Text>
             ) : null}
             <View style={styles.nameModalActions}>
@@ -1147,7 +1147,7 @@ function CompactItemCard({
             {item.name}
           </Text>
           <Text style={[styles.gridValue, { color: colors.mutedForeground }]} numberOfLines={1}>
-            {totalValue > 0 ? formatCurrencyFull(totalValue, displayCurrency) : "No value"}
+            {totalValue > 0 ? formatCurrencyFull(totalValue, displayCurrency, currencyCode) : "No value"}
           </Text>
           {readinessChip ? (
             <View style={[styles.gridReadinessChip, { borderColor: colors.warning, backgroundColor: colors.warning + "10" }]}>
@@ -2054,7 +2054,7 @@ export default function ItemsScreen() {
             </Text>
           </View>
           <Text style={[styles.roomSummaryValue, { color: colors.primary }]}>
-            {formatCurrencyTotals(roomSummary.totalsByCurrency)}
+            {formatCurrencyTotals(roomSummary.totalsByCurrency, { contextCurrency: resolvedPropertyCurrency })}
           </Text>
         </View>
         <Pressable

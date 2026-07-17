@@ -390,7 +390,7 @@ function PropertyCard({
           <View style={styles.cardStats}>
             <View style={styles.cardStat}>
               <Text style={[styles.statValue, { color: colors.foreground }]}>
-                {formatCurrencyTotals(totalsByCurrency)}
+                {formatCurrencyTotals(totalsByCurrency, { contextCurrency: item.currency_code })}
               </Text>
               <Text
                 style={[styles.statLabel, { color: colors.mutedForeground }]}
@@ -749,7 +749,7 @@ export default function HomeScreen() {
               numberOfLines={1}
               adjustsFontSizeToFit
             >
-              {formatCurrencyTotals(portfolio.inventoryTotalsByCurrency)}
+              {formatCurrencyTotals(portfolio.inventoryTotalsByCurrency, { contextCurrency: portfolioCurrencyCode })}
             </Text>
             <Text style={styles.bigLabel}>
               {portfolio.hasMultipleCurrencies ? "Inventory value · multiple currencies" : "Total inventory value"}
@@ -1004,7 +1004,7 @@ export default function HomeScreen() {
                     </Text>
                     <View style={styles.globalResultMetaRow}>
                       <Text style={[styles.globalResultValue, { color: colors.mutedForeground }]} numberOfLines={1}>
-                        {value > 0 ? formatCurrency(value, item.estimated_currency ?? property?.currency_code ?? "NZD") : "No value"}
+                        {value > 0 ? formatCurrency(value, item.estimated_currency ?? property?.currency_code ?? "NZD", property?.currency_code) : "No value"}
                       </Text>
                       {readiness ? (
                         <View style={[styles.globalReadinessChip, { borderColor: colors.warning, backgroundColor: colors.warning + "10" }]}>

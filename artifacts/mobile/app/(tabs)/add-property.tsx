@@ -26,7 +26,7 @@ import { resolveMarketConfig } from "@/constants/market-config";
 import { useColors } from "@/hooks/useColors";
 import { usePropertyAllowance } from "@/hooks/usePropertyAllowance";
 import { createProperty, PropertyCreationError } from "@/lib/property-service";
-import { formatMoney } from "@/lib/money";
+import { formatMoney, moneyDisplayToken } from "@/lib/money";
 import { supabase } from "@/lib/supabase";
 
 type SetupStep = 0 | 1 | 2;
@@ -339,7 +339,7 @@ export default function AddPropertyScreen() {
         <Text style={[styles.helperText, { color: colors.mutedForeground }]}>Coverly uses the property country to estimate replacement values and search local retailers.</Text>
       </FormField>
 
-      <FormField label="Insurance contents cover" required hint={market.currencyCode} colors={colors}>
+      <FormField label="Insurance contents cover" required hint={moneyDisplayToken(market.currencyCode)} colors={colors}>
         <InputBox
           value={coverAmount}
           onChangeText={(value) => {

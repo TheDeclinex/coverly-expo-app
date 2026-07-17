@@ -65,7 +65,7 @@ const AttentionItemCard = React.memo(function AttentionItemCard({
       <View style={styles.cardCopy}>
         <Text numberOfLines={2} style={[styles.itemName, { color: colors.foreground }]}>{item.name}</Text>
         {item.category ? <Text style={[styles.category, { color: colors.mutedForeground }]}>{item.category}</Text> : null}
-        {showValue ? <Text style={[styles.value, { color: colors.foreground }]}>{hasValue(item) ? formatCurrencyFull(getItemTotalValue(item), resolveStoredValueCurrency(item.estimated_currency, propertyCurrency)) : "No recorded value"}</Text> : null}
+        {showValue ? <Text style={[styles.value, { color: colors.foreground }]}>{hasValue(item) ? formatCurrencyFull(getItemTotalValue(item), resolveStoredValueCurrency(item.estimated_currency, propertyCurrency), propertyCurrency) : "No recorded value"}</Text> : null}
         <View style={styles.cardFooter}>
           <View style={[styles.issueChip, { backgroundColor: colors.accent }]}>
             <Text style={[styles.issueText, { color: colors.accentForeground }]}>{issue}</Text>

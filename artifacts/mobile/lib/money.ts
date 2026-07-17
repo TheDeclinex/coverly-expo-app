@@ -1,12 +1,21 @@
 import { resolveMarketConfig } from "../constants/market-config.ts";
 
-const AMBIGUOUS_DOLLAR_SYMBOLS: Record<string, string> = {
-  AUD: "A$", CAD: "CA$", HKD: "HK$", NZD: "NZ$", SGD: "S$", USD: "US$",
+export type MoneyDisplayMode = "compact" | "explicit" | "formal";
+
+const COMPACT_SYMBOLS: Record<string, string> = {
+  AUD: "$", CAD: "$", EUR: "€", GBP: "£", INR: "₹", JPY: "¥",
+  KRW: "₩", NZD: "$", USD: "$",
 };
 
+const EXPLICIT_SYMBOLS: Record<string, string> = {
+  AUD: "A$", CAD: "CA$", EUR: "€", GBP: "£", HKD: "HK$", INR: "₹",
+  JPY: "¥", KRW: "₩", NZD: "NZ$", SGD: "S$", USD: "US$",
+};
 export interface FormatMoneyOptions {
+  contextCurrency?: string | null;
   formal?: boolean;
   locale?: string;
+  mode?: MoneyDisplayMode;
   showCode?: boolean;
 }
 
@@ -22,25 +31,41 @@ export function formatMoney(
   if (amount == null || !Number.isFinite(amount)) return "—";
   const currency = currencyCode.trim().toUpperCase();
   if (!isCurrencyCode(currency)) return "—";
+  const contextCurrency = isCurrencyCode(options.contextCurrency) ? options.contextCurrency.trim().toUpperCase() : null;
+  const mode: MoneyDisplayMode = options.formal || options.showCode
+    ? "formal"
+    : options.mode ?? (contextCurrency ? (currency === contextCurrency ? "compact" : "explicit") : "explicit");
   const locale = options.locale ?? "en";
   try {
-    if (options.formal || options.showCode) {
-      return new Intl.NumberFormat(locale, {
-        style: "currency",
-        currency,
-        currencyDisplay: "code",
-      }).format(amount).replace(/\u00a0/g, " ");
-    }
+    const token = mode === "formal"
+      ? currency
+      : mode === "compact"
+        ? COMPACT_SYMBOLS[currency] ?? currency
+        : EXPLICIT_SYMBOLS[currency] ?? currency;
+    const useCodeSpacing = token === currency;
     const formatter = new Intl.NumberFormat(locale, {
       style: "currency",
       currency,
-      currencyDisplay: "narrowSymbol",
+      currencyDisplay: useCodeSpacing ? "code" : "narrowSymbol",
+      ...(mode !== "formal" && Number.isInteger(amount) ? { minimumFractionDigits: 0 } : {}),
     });
     const parts = formatter.formatToParts(amount);
-    return parts.map((part) => part.type === "currency" ? (AMBIGUOUS_DOLLAR_SYMBOLS[currency] ?? part.value) : part.value).join("");
+    return parts.map((part) => part.type === "currency" ? token : part.value).join("").replace(/\u00a0/g, " ");
   } catch {
     return `${currency} ${amount.toLocaleString("en")}`;
   }
+}
+
+export function moneyDisplayToken(
+  currencyCode: string,
+  contextCurrency: string | null | undefined = currencyCode,
+): string {
+  const currency = currencyCode.trim().toUpperCase();
+  if (!isCurrencyCode(currency)) return currencyCode;
+  const context = isCurrencyCode(contextCurrency) ? contextCurrency.trim().toUpperCase() : null;
+  return context && context !== currency
+    ? EXPLICIT_SYMBOLS[currency] ?? currency
+    : COMPACT_SYMBOLS[currency] ?? currency;
 }
 
 export function formatPropertyMoney(
@@ -51,7 +76,11 @@ export function formatPropertyMoney(
 ): string {
   const market = resolveMarketConfig(countryCode ?? "NZ");
   const currency = isCurrencyCode(currencyCode) ? currencyCode : market?.currencyCode ?? "NZD";
-  return formatMoney(amount, currency, { locale: options.locale ?? market?.locale, ...options });
+  return formatMoney(amount, currency, {
+    contextCurrency: options.contextCurrency ?? currency,
+    locale: options.locale ?? market?.locale,
+    ...options,
+  });
 }
 
 export function groupAmountsByCurrency<T>(
@@ -68,8 +97,16 @@ export function groupAmountsByCurrency<T>(
   }, {});
 }
 
-export function formatCurrencyTotals(totals: Record<string, number>, formal = false): string {
+export function formatCurrencyTotals(
+  totals: Record<string, number>,
+  options: boolean | { contextCurrency?: string | null; formal?: boolean } = {},
+): string {
   const entries = Object.entries(totals).filter(([, amount]) => Number.isFinite(amount));
   if (entries.length === 0) return "—";
-  return entries.map(([currency, amount]) => formatMoney(amount, currency, { formal })).join(" · ");
+  const normalizedOptions = typeof options === "boolean" ? { formal: options } : options;
+  const mixed = entries.length > 1;
+  return entries.map(([currency, amount]) => formatMoney(amount, currency, {
+    contextCurrency: mixed ? null : normalizedOptions.contextCurrency,
+    mode: normalizedOptions.formal ? "formal" : mixed ? "explicit" : undefined,
+  })).join(" · ");
 }

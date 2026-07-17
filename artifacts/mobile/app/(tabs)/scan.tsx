@@ -2280,7 +2280,7 @@ export default function ScanScreen() {
                     </View>
                     {item.estimatedPrice != null ? (
                       <Text style={[revStyles.price, { color: colors.foreground }]}>
-                        {formatCurrency((item.unitEstimatedPrice ?? item.estimatedPrice) * (item.quantity ?? 1), item.estimatedCurrency ?? "NZD")}
+                        {formatCurrency((item.unitEstimatedPrice ?? item.estimatedPrice) * (item.quantity ?? 1), item.estimatedCurrency ?? selectedProperty?.currency_code ?? "NZD", selectedProperty?.currency_code)}
                       </Text>
                     ) : null}
                   </View>

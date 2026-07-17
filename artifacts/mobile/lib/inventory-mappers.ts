@@ -48,8 +48,12 @@ export function needsReview(item: InventoryItem): boolean {
   return !hasPhoto(item) || !hasValue(item);
 }
 
-export function formatCurrency(value: number | null | undefined, currencyCode = "NZD"): string {
-  return formatMoney(value, currencyCode);
+export function formatCurrency(
+  value: number | null | undefined,
+  currencyCode = "NZD",
+  contextCurrency: string | null | undefined = currencyCode,
+): string {
+  return formatMoney(value, currencyCode, { contextCurrency });
   /* legacy formatter retained below only for source-history clarity
   if (value === null || value === undefined) return "—";
   return `$${value.toLocaleString("en-US", {
@@ -58,8 +62,12 @@ export function formatCurrency(value: number | null | undefined, currencyCode = 
   })}`; */
 }
 
-export function formatCurrencyFull(value: number | null | undefined, currencyCode = "NZD"): string {
-  return formatMoney(value, currencyCode, { formal: true });
+export function formatCurrencyFull(
+  value: number | null | undefined,
+  currencyCode = "NZD",
+  contextCurrency: string | null | undefined = currencyCode,
+): string {
+  return formatMoney(value, currencyCode, { contextCurrency });
   /* legacy formatter retained below only for source-history clarity
   if (value === null || value === undefined) return "—";
   return `$${value.toLocaleString("en-US", {

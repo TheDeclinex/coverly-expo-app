@@ -67,9 +67,9 @@ const SEARCH_PROCESS_TILES: LoadingTile[] = [
 const ACTIVE_TILE_INDEX = 2;
 const VOICE_EDIT_FALLBACK_MESSAGE = "Voice edit could not start. Please try again or type your changes manually.";
 
-function formatEstimate(value: number | null, currencyCode: string): string {
+function formatEstimate(value: number | null, currencyCode: string, contextCurrency?: string | null): string {
   if (value == null) return "No current estimate";
-  return formatMoney(value, currencyCode);
+  return formatMoney(value, currencyCode, { contextCurrency });
 }
 
 function ReplacementSearchLoadingPanel({
@@ -647,7 +647,7 @@ export default function ReplacementPricingScreen() {
             <Text style={[styles.eyebrow, { color: colors.mutedForeground }]}>ITEM</Text>
             <Text style={[styles.itemName, { color: colors.foreground }]}>{item.name}</Text>
             <Text style={[styles.estimate, { color: colors.mutedForeground }]}>
-              Current per-item estimate: {formatEstimate(estimate, item.estimated_currency ?? searchContext?.currencyCode ?? "NZD")}
+              Current per-item estimate: {formatEstimate(estimate, item.estimated_currency ?? searchContext?.currencyCode ?? "NZD", searchContext?.currencyCode)}
               {(item.quantity ?? 1) > 1 ? ` · Quantity ${item.quantity}` : ""}
             </Text>
           </View>
@@ -790,6 +790,7 @@ export default function ReplacementPricingScreen() {
                     <ReplacementListingCard
                       key={`${result.position}-${result.link}-${result.title}`}
                       result={result}
+                      contextCurrency={searchContext?.currencyCode}
                       selecting={selectingPosition === result.position}
                       onOpen={() => handleOpen(result)}
                       onUse={() => handleUse(result)}
