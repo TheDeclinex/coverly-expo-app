@@ -9,6 +9,24 @@ export interface ReplacementListingCurrencyDecision {
   warning: string | null;
 }
 
+export interface ReplacementListingUpdate {
+  estimated_price: number;
+  unit_estimated_price: number;
+  estimated_currency: string;
+  valuation_market: string | null;
+  estimated_at: string;
+  price_source_type: "web_listing";
+  valuation_basis: "replacement_listing";
+  web_listing_url: string;
+  web_listing_title: string;
+  web_listing_price: number;
+  web_listing_source: string;
+  web_listing_match_type: ReplacementPriceResult["matchType"];
+  web_listing_currency: string;
+  web_listing_price_raw: string;
+  web_listing_fulfilment_type: ReplacementPriceResult["fulfilmentType"];
+}
+
 function normalizedCurrency(value: string | null | undefined): string | null {
   const normalized = value?.trim().toUpperCase();
   return isCurrencyCode(normalized) ? normalized : null;
@@ -87,4 +105,48 @@ export function formatReplacementListingPrice(
     });
   }
   return result.priceRaw || (result.price != null ? String(result.price) : "Price unavailable");
+}
+
+export function buildReplacementListingUpdate(
+  result: ReplacementPriceResult,
+  currencyCode: string,
+  options: {
+    quantity?: number | null;
+    marketCountryCode?: string | null;
+    estimatedAt?: string;
+  } = {},
+): ReplacementListingUpdate | null {
+  const currency = normalizedCurrency(currencyCode);
+  const country = options.marketCountryCode?.trim().toUpperCase() ?? null;
+  if (
+    result.price == null
+    || !Number.isFinite(result.price)
+    || result.price <= 0
+    || !currency
+    || (country != null && !/^[A-Z]{2}$/.test(country))
+  ) {
+    return null;
+  }
+
+  const quantity = Number.isFinite(options.quantity) && (options.quantity ?? 0) > 0
+    ? Math.max(1, options.quantity ?? 1)
+    : 1;
+
+  return {
+    estimated_price: result.price * quantity,
+    unit_estimated_price: result.price,
+    estimated_currency: currency,
+    valuation_market: country,
+    estimated_at: options.estimatedAt ?? new Date().toISOString(),
+    price_source_type: "web_listing",
+    valuation_basis: "replacement_listing",
+    web_listing_url: result.link,
+    web_listing_title: result.title,
+    web_listing_price: result.price,
+    web_listing_source: result.source,
+    web_listing_match_type: result.matchType,
+    web_listing_currency: currency,
+    web_listing_price_raw: result.priceRaw,
+    web_listing_fulfilment_type: result.fulfilmentType,
+  };
 }

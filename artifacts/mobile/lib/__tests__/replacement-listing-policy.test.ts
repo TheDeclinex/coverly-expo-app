@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  buildReplacementListingUpdate,
   formatReplacementListingPrice,
   resolveReplacementListingCurrency,
 } from "../replacement-listing-policy.ts";
@@ -78,4 +79,46 @@ test("replacement listing prices retain listing precision in market context", ()
   assert.equal(formatReplacementListingPrice(listing({ price: 169, priceRaw: "$169.00" }), "NZD"), "$169");
   assert.equal(formatReplacementListingPrice(listing({ price: 489.99, priceRaw: "$489.99" }), "NZD"), "$489.99");
   assert.equal(formatReplacementListingPrice(listing({ price: 1539, priceRaw: "$1,539.00" }), "NZD"), "$1,539");
+});
+
+test("AUD listing save payload preserves explicit AUD without an NZ default", () => {
+  const update = buildReplacementListingUpdate(
+    listing({ currencyCode: "AUD", price: 489.99, priceRaw: "$489.99" }),
+    "AUD",
+    { quantity: 2, marketCountryCode: "AU", estimatedAt: "2026-07-18T00:00:00.000Z" },
+  );
+
+  assert.ok(update);
+  assert.equal(update.unit_estimated_price, 489.99);
+  assert.equal(update.estimated_price, 979.98);
+  assert.equal(update.estimated_currency, "AUD");
+  assert.equal(update.web_listing_currency, "AUD");
+  assert.equal(update.valuation_market, "AU");
+  assert.doesNotMatch(JSON.stringify(update), /NZD/);
+});
+
+test("missing listing currency resolves to trusted AUD before save", () => {
+  const result = listing({ currencyCode: null, warnings: [], fulfilmentType: "unknown" });
+  const decision = resolveReplacementListingCurrency(result, "AUD");
+  const update = buildReplacementListingUpdate(result, decision.currencyCode!, {
+    marketCountryCode: "AU",
+    estimatedAt: "2026-07-18T00:00:00.000Z",
+  });
+
+  assert.equal(decision.source, "search_context");
+  assert.equal(update?.estimated_currency, "AUD");
+  assert.equal(update?.web_listing_currency, "AUD");
+});
+
+test("foreign listing remains explicit in the save payload after confirmation", () => {
+  const result = listing({ currencyCode: "USD", warnings: [] });
+  const decision = resolveReplacementListingCurrency(result, "AUD");
+  const update = buildReplacementListingUpdate(result, decision.currencyCode!, {
+    marketCountryCode: "AU",
+    estimatedAt: "2026-07-18T00:00:00.000Z",
+  });
+
+  assert.equal(decision.requiresForeignCurrencyConfirmation, true);
+  assert.equal(update?.estimated_currency, "USD");
+  assert.equal(update?.web_listing_currency, "USD");
 });

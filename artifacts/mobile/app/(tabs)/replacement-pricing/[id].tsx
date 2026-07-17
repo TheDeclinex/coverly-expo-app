@@ -40,10 +40,11 @@ import {
   type ReplacementSearchContext,
 } from "@/lib/replacement-pricing";
 import { normalizeLimitError, type NormalizedLimitError } from "@/lib/limit-errors";
-import { resolveReplacementListingCurrency } from "@/lib/replacement-listing-policy";
+import { replacementMarketPresentation } from "@/lib/replacement-market-presentation";
+import { buildReplacementListingUpdate, resolveReplacementListingCurrency } from "@/lib/replacement-listing-policy";
 import { supabase } from "@/lib/supabase";
 import { formatMoney } from "@/lib/money";
-import type { InventoryItem } from "@/types";
+import type { InventoryFile, InventoryItem } from "@/types";
 
 const FILTERS: Array<{ id: ReplacementPriceFilter; label: string }> = [
   { id: "all", label: "All" },
@@ -75,8 +76,12 @@ function formatEstimate(value: number | null, currencyCode: string, contextCurre
 
 function ReplacementSearchLoadingPanel({
   colors,
+  subtitle,
+  accessibilityLabel,
 }: {
   colors: ReturnType<typeof useColors>;
+  subtitle: string;
+  accessibilityLabel: string;
 }) {
   const pulse = React.useRef(new Animated.Value(0)).current;
   const carousel = React.useRef(new Animated.Value(0)).current;
@@ -139,7 +144,7 @@ function ReplacementSearchLoadingPanel({
   return (
     <Animated.View
       accessibilityRole="progressbar"
-      accessibilityLabel="Searching replacement prices"
+      accessibilityLabel={accessibilityLabel}
       style={[
         styles.loadingPanel,
         {
@@ -179,7 +184,7 @@ function ReplacementSearchLoadingPanel({
             Searching replacement prices
           </Text>
           <Text style={[styles.loadingSubtitle, { color: colors.mutedForeground }]}>
-            Checking current NZ listings for similar items...
+            {subtitle}
           </Text>
         </View>
       </View>
@@ -295,6 +300,32 @@ export default function ReplacementPricingScreen() {
     },
     enabled: Boolean(session && id),
   });
+
+  const {
+    data: propertyMarket,
+    isPending: propertyMarketPending,
+  } = useQuery({
+    queryKey: ["replacement-pricing-property-market", item?.file_id, session?.user.id],
+    queryFn: async () => {
+      const { data, error: propertyError } = await supabase
+        .from("inventory_files")
+        .select("country_code,currency_code")
+        .eq("id", item!.file_id)
+        .single();
+      if (propertyError) throw propertyError;
+      return data as Pick<InventoryFile, "country_code" | "currency_code">;
+    },
+    enabled: Boolean(session && item?.file_id),
+  });
+
+  const activeMarketContext = searchContext ?? (propertyMarket ? {
+    countryCode: propertyMarket.country_code,
+    currencyCode: propertyMarket.currency_code,
+  } : null);
+  const marketPresentation = useMemo(
+    () => replacementMarketPresentation(activeMarketContext),
+    [activeMarketContext],
+  );
 
   const estimate = item ? getItemUnitEstimate(item) : null;
   const filteredResults = useMemo(
@@ -505,12 +536,12 @@ export default function ReplacementPricingScreen() {
   }, [dismissToRoomOrProperty, fileId, fileName, item, origin, roomId, roomName]);
 
   React.useEffect(() => {
-    if (!item || autoSearchedItemId.current === item.id) return;
+    if (!item || propertyMarketPending || autoSearchedItemId.current === item.id) return;
     const suggestedQuery = buildReplacementSearchQuery(item);
     autoSearchedItemId.current = item.id;
     setSearchQuery(suggestedQuery);
     void runSearch(suggestedQuery);
-  }, [item, runSearch]);
+  }, [item, propertyMarketPending, runSearch]);
 
   const handleOpen = async (result: ReplacementPriceResult) => {
     if (!/^https?:\/\//i.test(result.link)) return;
@@ -519,27 +550,16 @@ export default function ReplacementPricingScreen() {
 
   const saveListing = async (result: ReplacementPriceResult, currencyCode: string) => {
     if (!item || result.price == null || result.price <= 0) return;
+    const update = buildReplacementListingUpdate(result, currencyCode, {
+      quantity: item.quantity,
+      marketCountryCode: searchContext?.countryCode,
+    });
+    if (!update) return;
     setSelectingPosition(result.position);
     try {
       const { error: updateError } = await supabase
         .from("inventory_items")
-        .update({
-          estimated_price: result.price * Math.max(1, item.quantity ?? 1),
-          unit_estimated_price: result.price,
-          estimated_currency: currencyCode,
-          valuation_market: searchContext?.countryCode ?? null,
-          estimated_at: new Date().toISOString(),
-          price_source_type: "web_listing",
-          valuation_basis: "replacement_listing",
-          web_listing_url: result.link,
-          web_listing_title: result.title,
-          web_listing_price: result.price,
-          web_listing_source: result.source,
-          web_listing_match_type: result.matchType,
-          web_listing_currency: currencyCode,
-          web_listing_price_raw: result.priceRaw,
-          web_listing_fulfilment_type: result.fulfilmentType,
-        })
+        .update(update)
         .eq("id", item.id)
         .select("id")
         .single();
@@ -651,13 +671,13 @@ export default function ReplacementPricingScreen() {
             <Text style={[styles.eyebrow, { color: colors.mutedForeground }]}>ITEM</Text>
             <Text style={[styles.itemName, { color: colors.foreground }]}>{item.name}</Text>
             <Text style={[styles.estimate, { color: colors.mutedForeground }]}>
-              Current per-item estimate: {formatEstimate(estimate, item.estimated_currency ?? searchContext?.currencyCode ?? "NZD", searchContext?.currencyCode)}
+              Current per-item estimate: {formatEstimate(estimate, item.estimated_currency ?? marketPresentation.currencyCode ?? "NZD", marketPresentation.currencyCode)}
               {(item.quantity ?? 1) > 1 ? ` · Quantity ${item.quantity}` : ""}
             </Text>
           </View>
 
           <Text style={[styles.helper, { color: colors.mutedForeground }]}>
-            Find comparable NZ listings. Your item value changes only when you choose
+            {marketPresentation.introLead} Your item value changes only when you choose
             “Use this listing”.
           </Text>
 
@@ -711,6 +731,8 @@ export default function ReplacementPricingScreen() {
               </Pressable>
             </View>
             <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={marketPresentation.searchAccessibilityLabel}
               onPress={handleSearch}
               disabled={searching || !searchQuery.trim()}
               style={({ pressed }) => [
@@ -745,7 +767,11 @@ export default function ReplacementPricingScreen() {
           ) : null}
 
           {searching ? (
-            <ReplacementSearchLoadingPanel colors={colors} />
+            <ReplacementSearchLoadingPanel
+              colors={colors}
+              subtitle={marketPresentation.loadingSubtitle}
+              accessibilityLabel={marketPresentation.searchAccessibilityLabel}
+            />
           ) : results ? (
             <>
               <ScrollView
@@ -786,7 +812,7 @@ export default function ReplacementPricingScreen() {
               <Text style={[styles.resultCount, { color: colors.mutedForeground }]}>
                 {filteredResults.length} of {results.length} listings
               </Text>
-              {searchContext ? <Text style={[styles.resultCount, { color: colors.mutedForeground }]}>Searching {searchContext.countryName} retailers · {searchContext.currencyCode}{searchContext.pricingSupportTier === "preview" ? " · Local pricing preview" : ""}</Text> : null}
+              {searchContext ? <Text style={[styles.resultCount, { color: colors.mutedForeground }]}>{marketPresentation.resultContext}{searchContext.pricingSupportTier === "preview" ? " · Local pricing preview" : ""}</Text> : null}
 
               {filteredResults.length ? (
                 <View style={styles.results}>
