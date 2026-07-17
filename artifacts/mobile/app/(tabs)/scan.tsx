@@ -38,7 +38,7 @@ import { useAuth } from "@/context/AuthContext";
 import { useEntitlements } from "@/context/EntitlementsContext";
 import { useColors } from "@/hooks/useColors";
 import { buildItemInsertPayload } from "@/lib/item-insert-helpers";
-import { formatCurrency } from "@/lib/inventory-mappers";
+import { formatCurrencyFull } from "@/lib/inventory-mappers";
 import {
   MAX_MULTI_PHOTO_IMAGES,
   MAX_VIDEO_SCAN_FRAMES,
@@ -2280,7 +2280,7 @@ export default function ScanScreen() {
                     </View>
                     {item.estimatedPrice != null ? (
                       <Text style={[revStyles.price, { color: colors.foreground }]}>
-                        {formatCurrency((item.unitEstimatedPrice ?? item.estimatedPrice) * (item.quantity ?? 1), item.estimatedCurrency ?? selectedProperty?.currency_code ?? "NZD", selectedProperty?.currency_code)}
+                        {formatCurrencyFull((item.unitEstimatedPrice ?? item.estimatedPrice) * (item.quantity ?? 1), item.estimatedCurrency ?? selectedProperty?.currency_code ?? "NZD", selectedProperty?.currency_code)}
                       </Text>
                     ) : null}
                   </View>

@@ -24,6 +24,31 @@ test("compact money uses familiar symbols in matching property context", () => {
   assert.equal(moneyDisplayToken("NZD"), "$");
 });
 
+test("summary precision rounds display values to whole currency units", () => {
+  assert.equal(formatMoney(81443.99, "NZD", { contextCurrency: "NZD", precision: "summary" }), "$81,444");
+  assert.equal(formatMoney(81443.49, "NZD", { contextCurrency: "NZD", precision: "summary" }), "$81,443");
+  assert.equal(formatMoney(58000, "NZD", { contextCurrency: "NZD", precision: "summary" }), "$58,000");
+  assert.equal(formatMoney(-81443.99, "NZD", { contextCurrency: "NZD", precision: "summary" }), "-$81,444");
+});
+
+test("value precision hides zero cents and preserves meaningful currency precision", () => {
+  for (const [amount, expected] of [
+    [200, "$200"],
+    [200.0, "$200"],
+    [200.5, "$200.50"],
+    [199.99, "$199.99"],
+    [12.1, "$12.10"],
+  ] as const) {
+    assert.equal(formatMoney(amount, "NZD", { contextCurrency: "NZD", precision: "value" }), expected);
+  }
+});
+
+test("listing precision keeps supplied fractional digits without adding zero cents", () => {
+  assert.equal(formatMoney(199.99, "NZD", { contextCurrency: "NZD", precision: "listing" }), "$199.99");
+  assert.equal(formatMoney(200, "NZD", { contextCurrency: "NZD", precision: "listing" }), "$200");
+  assert.equal(formatMoney(1249.95, "NZD", { contextCurrency: "NZD", precision: "listing" }), "$1,249.95");
+});
+
 test("foreign, mixed, and context-free currencies are explicit", () => {
   assert.equal(formatMoney(1250, "NZD", { contextCurrency: "AUD", locale: "en-AU" }), "NZ$1,250");
   assert.equal(formatMoney(1250, "AUD", { contextCurrency: "NZD", locale: "en-NZ" }), "A$1,250");
@@ -41,6 +66,7 @@ test("formal money keeps ISO codes and normal currency precision", () => {
   assert.equal(formatMoney(1250, "NZD", { mode: "formal", locale: "en-NZ" }), "NZD 1,250.00");
   assert.equal(formatMoney(1250, "AUD", { mode: "formal", locale: "en-AU" }), "AUD 1,250.00");
   assert.equal(formatMoney(125000, "JPY", { mode: "formal", locale: "en" }), "JPY 125,000");
+  assert.equal(formatCurrencyTotals({ NZD: 1250.5 }, true), "NZD 1,251");
   assert.equal(formatMoney(null, "NZD"), "—");
   assert.equal(formatMoney(Number.NaN, "NZD"), "—");
   assert.equal(formatMoney(10, "bad1"), "—");
@@ -75,9 +101,10 @@ test("single-property display inherits one currency across property, room, and i
   const roomTotal = formatCurrencyTotals({ NZD: 58000 }, { contextCurrency: "NZD" });
   const itemTotal = formatCurrencyFull(200, "NZD");
 
-  assert.equal(propertyTotal, "$81,443.99");
+  assert.equal(propertyTotal, "$81,444");
   assert.equal(roomTotal, "$58,000");
-  assert.equal(itemTotal, "$200.00");
+  assert.equal(itemTotal, "$200");
+  assert.equal(formatCurrencyFull(200.5, "NZD"), "$200.50");
   assert.equal(formatCurrencyFull(200.25, "NZD"), "$200.25");
   assert.equal(formatCurrency(1250, null), "$1,250");
   assert.equal(formatPropertyMoney(1250, null, null), "$1,250");
@@ -112,8 +139,10 @@ test("Hermes Apple fallback formats money when NumberFormat.formatToParts is una
 
     assert.equal(formatMoney(1250.5, "NZD", { contextCurrency: "NZD", locale: "en-NZ" }), "$1,250.50");
     assert.equal(formatMoney(1250.99, "NZD", { contextCurrency: "NZD", locale: "en-NZ" }), "$1,250.99");
-    assert.equal(formatMoney(81443.99, "NZD", { contextCurrency: "NZD" }), "$81,443.99");
-    assert.equal(formatMoney(200, "NZD", { contextCurrency: "NZD", trimWholeDecimals: false }), "$200.00");
+    assert.equal(formatMoney(81443.99, "NZD", { contextCurrency: "NZD", precision: "summary" }), "$81,444");
+    assert.equal(formatMoney(200, "NZD", { contextCurrency: "NZD", precision: "value" }), "$200");
+    assert.equal(formatMoney(200.5, "NZD", { contextCurrency: "NZD", precision: "value" }), "$200.50");
+    assert.equal(formatMoney(1249.95, "NZD", { contextCurrency: "NZD", precision: "listing" }), "$1,249.95");
     assert.equal(formatMoney(1250.5, "EUR", { contextCurrency: "EUR", locale: "de-DE" }), "1.250,50 €");
     assert.equal(formatMoney(1250, "NZD", { contextCurrency: "AUD", locale: "en-AU" }), "NZ$1,250");
     assert.equal(formatMoney(1250, "AUD", { contextCurrency: "NZD", locale: "en-NZ" }), "A$1,250");

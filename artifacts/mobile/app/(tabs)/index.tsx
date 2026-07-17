@@ -39,7 +39,7 @@ import {
   calculateCoverageInsight,
   getCoverageColor,
 } from "@/lib/coverage";
-import { formatCurrency, getItemTotalValue } from "@/lib/inventory-mappers";
+import { formatCurrency, formatCurrencyFull, getItemTotalValue } from "@/lib/inventory-mappers";
 import { formatCurrencyTotals, groupAmountsByCurrency } from "@/lib/money";
 import { supabase } from "@/lib/supabase";
 import type { InventoryFile, InventoryItem, InventoryRoom } from "@/types";
@@ -1004,7 +1004,7 @@ export default function HomeScreen() {
                     </Text>
                     <View style={styles.globalResultMetaRow}>
                       <Text style={[styles.globalResultValue, { color: colors.mutedForeground }]} numberOfLines={1}>
-                        {value > 0 ? formatCurrency(value, item.estimated_currency ?? property?.currency_code ?? "NZD", property?.currency_code) : "No value"}
+                        {value > 0 ? formatCurrencyFull(value, item.estimated_currency ?? property?.currency_code ?? "NZD", property?.currency_code) : "No value"}
                       </Text>
                       {readiness ? (
                         <View style={[styles.globalReadinessChip, { borderColor: colors.warning, backgroundColor: colors.warning + "10" }]}>

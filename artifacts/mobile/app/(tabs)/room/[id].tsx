@@ -50,6 +50,7 @@ import { getRoomPlaceholderIcon } from "@/constants/roomVisuals";
 import { useAuth } from "@/context/AuthContext";
 import { useColors } from "@/hooks/useColors";
 import {
+  formatCurrency,
   formatCurrencyFull,
   getItemTotalValue,
   getItemUnitPrice,
@@ -357,8 +358,7 @@ function ItemCard({
     }
 
     const nextUnitPrice = parsedPrice.value ?? 0;
-    const roundedUnitPrice = Math.round(nextUnitPrice * 100) / 100;
-    const normalizedUnitPrice = roundedUnitPrice > 0 ? roundedUnitPrice : null;
+    const normalizedUnitPrice = nextUnitPrice > 0 ? nextUnitPrice : null;
     const priceChanged = normalizedUnitPrice !== (unitPrice > 0 ? unitPrice : null)
       || (normalizedUnitPrice != null && draftCurrency !== displayCurrency);
     const quantityChanged = draftQuantity !== quantity;
@@ -398,7 +398,7 @@ function ItemCard({
     const reviewedCurrency = supportedCurrencyCode(patch.estimated_currency);
     if (reviewedCurrency) setDraftCurrency(resolveReviewedValueCurrency(reviewedCurrency, item.estimated_currency, currencyCode));
     if (typeof replacementPrice === "number" && Number.isFinite(replacementPrice) && replacementPrice >= 0) {
-      setUnitPriceDraft(String(Math.round(replacementPrice * 100) / 100));
+      setUnitPriceDraft(String(replacementPrice));
     }
   };
 
@@ -2097,7 +2097,7 @@ export default function ItemsScreen() {
                   {category.label}
                 </Text>
                 <Text style={[styles.categoryLegendValue, { color: colors.mutedForeground }]}>
-                  {category.value > 0 ? formatCurrencyFull(category.value, resolvedPropertyCurrency) : `${category.count}`}
+                  {category.value > 0 ? formatCurrency(category.value, resolvedPropertyCurrency) : `${category.count}`}
                 </Text>
               </View>
             ))}

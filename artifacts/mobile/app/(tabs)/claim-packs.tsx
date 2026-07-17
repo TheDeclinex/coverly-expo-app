@@ -352,7 +352,7 @@ function claimPackHistorySubtitle(pack: ClaimPackHistoryRow): string {
   const itemCount = pack.totals?.selectedItemsCount ?? pack.item_count ?? null;
   const items = itemCount ? `${itemCount} items` : null;
   const totalValue = pack.totals?.selectedEstimatedValue ?? pack.totals?.totalEstimatedValue ?? pack.total_value;
-  const value = totalValue ? formatMoney(totalValue, pack.summary_currency ?? pack.currency_code ?? "NZD", { formal: true }) : null;
+  const value = totalValue ? formatMoney(totalValue, pack.summary_currency ?? pack.currency_code ?? "NZD", { formal: true, precision: "summary" }) : null;
   return [items, value, dateLabel].filter(Boolean).join(" · ");
 }
 

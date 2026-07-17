@@ -46,6 +46,7 @@ import {
 import { getCoverageColor } from "@/lib/coverage";
 import {
   formatCurrency,
+  formatCurrencyFull,
   getItemTotalValue,
   hasPhoto,
   hasValue,
@@ -602,7 +603,7 @@ function InsightCard({
                       {item.name}
                     </Text>
                     <Text style={[styles.categoryModalValueCell, { color: colors.foreground }]}>
-                      {formatCurrency(item.value || null, currencyCode)}
+                      {formatCurrencyFull(item.value || null, currencyCode)}
                     </Text>
                     <Text style={[styles.categoryModalPercent, { color: colors.mutedForeground }]}>
                       {percent.toFixed(percent >= 10 ? 0 : 1)}%

@@ -2016,7 +2016,7 @@ function ClaimPackItemRow({
           {item.name || "Unnamed item"}
         </Text>
         <Text style={[styles.itemMeta, { color: colors.mutedForeground }]} numberOfLines={1}>
-          {formatMoney(getItemTotalValue(item), resolveClaimItemCurrency(item.estimated_currency, currencyCode), { contextCurrency: currencyCode })} · {formatCount(evidenceCount, "evidence file", "evidence files")}
+          {formatMoney(getItemTotalValue(item), resolveClaimItemCurrency(item.estimated_currency, currencyCode), { contextCurrency: currencyCode, precision: "value" })} · {formatCount(evidenceCount, "evidence file", "evidence files")}
         </Text>
         {warning ? (
           <Text style={[styles.itemWarnings, { color: colors.warning }]} numberOfLines={1}>{warning}</Text>

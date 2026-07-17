@@ -29,7 +29,7 @@ const MATCH_LABELS: Record<ReplacementPriceResult["matchType"], string> = {
 
 function formatPrice(result: ReplacementPriceResult, contextCurrency?: string | null): string {
   if (result.price != null) {
-    return result.currencyCode ? formatMoney(result.price, result.currencyCode, { contextCurrency }) : result.priceRaw || String(result.price);
+    return result.currencyCode ? formatMoney(result.price, result.currencyCode, { contextCurrency, precision: "listing" }) : result.priceRaw || String(result.price);
   }
   return result.priceRaw || "Price unavailable";
 }

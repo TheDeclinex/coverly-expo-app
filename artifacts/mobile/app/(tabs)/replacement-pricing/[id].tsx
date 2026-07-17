@@ -69,7 +69,7 @@ const VOICE_EDIT_FALLBACK_MESSAGE = "Voice edit could not start. Please try agai
 
 function formatEstimate(value: number | null, currencyCode: string, contextCurrency?: string | null): string {
   if (value == null) return "No current estimate";
-  return formatMoney(value, currencyCode, { contextCurrency });
+  return formatMoney(value, currencyCode, { contextCurrency, precision: "value" });
 }
 
 function ReplacementSearchLoadingPanel({

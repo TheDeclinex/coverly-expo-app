@@ -56,6 +56,7 @@ export function formatCurrency(
   const propertyCurrency = isCurrencyCode(currencyCode) ? currencyCode.trim().toUpperCase() : "NZD";
   return formatMoney(value, propertyCurrency, {
     contextCurrency: contextCurrency === undefined ? propertyCurrency : contextCurrency,
+    precision: "summary",
   });
 }
 
@@ -67,6 +68,6 @@ export function formatCurrencyFull(
   const propertyCurrency = isCurrencyCode(currencyCode) ? currencyCode.trim().toUpperCase() : "NZD";
   return formatMoney(value, propertyCurrency, {
     contextCurrency: contextCurrency === undefined ? propertyCurrency : contextCurrency,
-    trimWholeDecimals: false,
+    precision: "value",
   });
 }

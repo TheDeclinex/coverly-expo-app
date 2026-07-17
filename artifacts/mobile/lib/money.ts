@@ -1,6 +1,7 @@
 import { resolveMarketConfig } from "../constants/market-config.ts";
 
 export type MoneyDisplayMode = "compact" | "explicit" | "formal";
+export type MoneyPrecisionMode = "summary" | "value" | "listing" | "formal";
 
 const COMPACT_SYMBOLS: Record<string, string> = {
   AUD: "$", CAD: "$", EUR: "€", GBP: "£", INR: "₹", JPY: "¥",
@@ -16,8 +17,8 @@ export interface FormatMoneyOptions {
   formal?: boolean;
   locale?: string;
   mode?: MoneyDisplayMode;
+  precision?: MoneyPrecisionMode;
   showCode?: boolean;
-  trimWholeDecimals?: boolean;
 }
 
 export function isCurrencyCode(value: unknown): value is string {
@@ -26,6 +27,43 @@ export function isCurrencyCode(value: unknown): value is string {
 
 function normalizeMoneySpacing(value: string): string {
   return value.replace(/\u00a0/g, " ");
+}
+
+function defaultCurrencyFractionDigits(currency: string, locale: string): { minimum: number; maximum: number } {
+  const fallback = currency === "JPY" || currency === "KRW" ? 0 : 2;
+  try {
+    const resolved = new Intl.NumberFormat(locale, { style: "currency", currency }).resolvedOptions();
+    return {
+      minimum: resolved.minimumFractionDigits ?? fallback,
+      maximum: resolved.maximumFractionDigits ?? fallback,
+    };
+  } catch {
+    return { minimum: fallback, maximum: fallback };
+  }
+}
+
+function fractionDigitOptions(
+  amount: number,
+  currency: string,
+  locale: string,
+  precision: MoneyPrecisionMode,
+): Pick<Intl.NumberFormatOptions, "minimumFractionDigits" | "maximumFractionDigits"> {
+  if (precision === "summary") {
+    return { minimumFractionDigits: 0, maximumFractionDigits: 0 };
+  }
+
+  const defaults = defaultCurrencyFractionDigits(currency, locale);
+  if (precision === "formal") {
+    return {
+      minimumFractionDigits: defaults.minimum,
+      maximumFractionDigits: defaults.maximum,
+    };
+  }
+
+  return {
+    minimumFractionDigits: precision === "listing" || Number.isInteger(amount) ? 0 : defaults.minimum,
+    maximumFractionDigits: defaults.maximum,
+  };
 }
 
 function formatSymbolWithoutParts(
@@ -62,19 +100,17 @@ function manualMoneyFallback(
   amount: number,
   currency: string,
   locale: string,
-  mode: MoneyDisplayMode,
   token: string,
-  trimWholeDecimals: boolean,
+  fractionOptions: Pick<Intl.NumberFormatOptions, "minimumFractionDigits" | "maximumFractionDigits">,
 ): string {
-  const fractionDigits = currency === "JPY" || currency === "KRW" ? 0 : 2;
-  const wholeAppValue = mode !== "formal" && trimWholeDecimals && Number.isInteger(amount);
-  const formattedAmount = amount.toLocaleString(locale, {
-    minimumFractionDigits: wholeAppValue ? 0 : fractionDigits,
-    maximumFractionDigits: fractionDigits,
+  const formattedAmount = Math.abs(amount).toLocaleString(locale, {
+    minimumFractionDigits: fractionOptions.minimumFractionDigits,
+    maximumFractionDigits: fractionOptions.maximumFractionDigits,
   });
+  const sign = amount < 0 ? "-" : "";
   return token === currency
-    ? `${currency} ${formattedAmount}`
-    : `${token}${formattedAmount}`;
+    ? `${sign}${currency} ${formattedAmount}`
+    : `${sign}${token}${formattedAmount}`;
 }
 
 export function formatMoney(
@@ -90,19 +126,19 @@ export function formatMoney(
     ? "formal"
     : options.mode ?? (contextCurrency ? (currency === contextCurrency ? "compact" : "explicit") : "explicit");
   const locale = options.locale ?? "en";
+  const precision = options.precision ?? (mode === "formal" ? "formal" : "value");
   const token = mode === "formal"
     ? currency
     : mode === "compact"
       ? COMPACT_SYMBOLS[currency] ?? currency
       : EXPLICIT_SYMBOLS[currency] ?? currency;
   const useCodeSpacing = token === currency;
+  const fractionOptions = fractionDigitOptions(amount, currency, locale, precision);
   const formatOptions: Intl.NumberFormatOptions = {
     style: "currency",
     currency,
     currencyDisplay: useCodeSpacing ? "code" : "narrowSymbol",
-    ...(mode !== "formal" && options.trimWholeDecimals !== false && Number.isInteger(amount)
-      ? { minimumFractionDigits: 0 }
-      : {}),
+    ...fractionOptions,
   };
   try {
     let formatter: Intl.NumberFormat;
@@ -137,9 +173,8 @@ export function formatMoney(
     amount,
     currency,
     locale,
-    mode,
     token,
-    options.trimWholeDecimals !== false,
+    fractionOptions,
   );
 }
 
@@ -186,7 +221,7 @@ export function groupAmountsByCurrency<T>(
 
 export function formatCurrencyTotals(
   totals: Record<string, number>,
-  options: boolean | { contextCurrency?: string | null; formal?: boolean } = {},
+  options: boolean | { contextCurrency?: string | null; formal?: boolean; precision?: MoneyPrecisionMode } = {},
 ): string {
   const entries = Object.entries(totals).filter(([, amount]) => Number.isFinite(amount));
   if (entries.length === 0) return "—";
@@ -195,5 +230,6 @@ export function formatCurrencyTotals(
   return entries.map(([currency, amount]) => formatMoney(amount, currency, {
     contextCurrency: mixed ? null : normalizedOptions.contextCurrency,
     mode: normalizedOptions.formal ? "formal" : mixed ? "explicit" : undefined,
+    precision: normalizedOptions.precision ?? "summary",
   })).join(" · ");
 }

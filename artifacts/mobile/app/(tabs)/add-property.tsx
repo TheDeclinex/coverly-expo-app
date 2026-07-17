@@ -432,7 +432,7 @@ export default function AddPropertyScreen() {
         <ReviewRow label="Property" value={trimmedName || "Not set"} colors={colors} />
         <ReviewRow label="Type" value={propertyTypeLabel(propertyType) ?? "Not set"} colors={colors} />
         <ReviewRow label="Country" value={`${market.countryName} · ${market.currencyCode}`} colors={colors} />
-        <ReviewRow label="Contents cover" value={hasValidCoverAmount ? formatPropertyMoney(parsedCoverAmount, market.countryCode, market.currencyCode) : "Not set"} colors={colors} />
+        <ReviewRow label="Contents cover" value={hasValidCoverAmount ? formatPropertyMoney(parsedCoverAmount, market.countryCode, market.currencyCode, { precision: "summary" }) : "Not set"} colors={colors} />
         <ReviewRow label="Insurer" value={insurerName.trim() || "Not set"} colors={colors} />
         <ReviewRow label="Policy number" value={policyNumber.trim() || "Not set"} colors={colors} />
       </View>
