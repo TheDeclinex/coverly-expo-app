@@ -12,6 +12,7 @@ export interface ClaimPackItemLike {
   image_url?: string | null;
   photo_url?: string | null;
   attachments?: { url?: string | null }[] | null;
+  estimated_currency?: string | null;
 }
 
 export interface ClaimPackSelection {
@@ -29,6 +30,18 @@ export interface ClaimPackSummary {
   missingValueCount: number;
   missingPhotoCount: number;
   missingEvidenceCount: number;
+  totalsByCurrency: Record<string, number>;
+}
+
+export function resolveClaimItemCurrency(
+  storedItemCurrency: string | null | undefined,
+  propertyOrSummaryCurrency?: string | null,
+): string {
+  const stored = storedItemCurrency?.trim().toUpperCase();
+  if (stored && /^[A-Z]{3}$/.test(stored)) return stored;
+  const context = propertyOrSummaryCurrency?.trim().toUpperCase();
+  if (context && /^[A-Z]{3}$/.test(context)) return context;
+  return "NZD";
 }
 
 export interface ClaimPackGenerateDraftPayload {
@@ -97,13 +110,14 @@ export function createClaimPackClientDraftId(
 }
 
 export function itemClaimPackValue(item: ClaimPackItemLike): number {
-  const unitValue = item.unit_estimated_price ?? item.estimated_price ?? 0;
-  const quantity = item.quantity ?? 1;
-  return unitValue * quantity;
+  const unitPrice = item.unit_estimated_price ?? item.estimated_price;
+  return typeof unitPrice === "number" && Number.isFinite(unitPrice) && unitPrice > 0
+    ? unitPrice * Math.max(1, item.quantity ?? 1)
+    : 0;
 }
 
 export function itemHasClaimPackValue(item: ClaimPackItemLike): boolean {
-  return item.unit_estimated_price != null || item.estimated_price != null;
+  return itemClaimPackValue(item) > 0;
 }
 
 export function itemHasClaimPackPhoto(item: ClaimPackItemLike): boolean {
@@ -273,11 +287,13 @@ export function calculateClaimPackSummary({
   items,
   evidenceCountsByItemId,
   selection,
+  summaryCurrencyCode,
 }: {
   rooms: ClaimPackRoomLike[];
   items: ClaimPackItemLike[];
   evidenceCountsByItemId: Record<string, number>;
   selection: ClaimPackSelection;
+  summaryCurrencyCode?: string | null;
 }): ClaimPackSummary {
   const selectedItems = items.filter((item) => selection.selectedItemIds.has(item.id));
   const selectedRoomIds = new Set(selection.selectedRoomIds);
@@ -289,11 +305,17 @@ export function calculateClaimPackSummary({
   return selectedItems.reduce<ClaimPackSummary>(
     (summary, item) => {
       const evidenceCount = evidenceCountsByItemId[item.id] ?? 0;
+      const value = itemClaimPackValue(item);
+      const currencyCode = resolveClaimItemCurrency(item.estimated_currency, summaryCurrencyCode);
+      const primaryCurrency = resolveClaimItemCurrency(null, summaryCurrencyCode);
       return {
         ...summary,
         selectedItemsCount: summary.selectedItemsCount + 1,
         includedEvidenceCount: summary.includedEvidenceCount + evidenceCount,
-        selectedEstimatedValue: summary.selectedEstimatedValue + itemClaimPackValue(item),
+        selectedEstimatedValue: summary.selectedEstimatedValue + (currencyCode === primaryCurrency ? value : 0),
+        totalsByCurrency: value > 0
+          ? { ...summary.totalsByCurrency, [currencyCode]: (summary.totalsByCurrency[currencyCode] ?? 0) + value }
+          : summary.totalsByCurrency,
         missingValueCount: summary.missingValueCount + (itemHasClaimPackValue(item) ? 0 : 1),
         missingPhotoCount: summary.missingPhotoCount + (itemHasClaimPackPhoto(item) ? 0 : 1),
         missingEvidenceCount: summary.missingEvidenceCount + (evidenceCount > 0 ? 0 : 1),
@@ -307,6 +329,7 @@ export function calculateClaimPackSummary({
       missingValueCount: 0,
       missingPhotoCount: 0,
       missingEvidenceCount: 0,
+      totalsByCurrency: {},
     },
   );
 }

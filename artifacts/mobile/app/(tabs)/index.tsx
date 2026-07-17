@@ -40,6 +40,7 @@ import {
   getCoverageColor,
 } from "@/lib/coverage";
 import { formatCurrency, getItemTotalValue } from "@/lib/inventory-mappers";
+import { formatCurrencyTotals, groupAmountsByCurrency } from "@/lib/money";
 import { supabase } from "@/lib/supabase";
 import type { InventoryFile, InventoryItem, InventoryRoom } from "@/types";
 
@@ -106,10 +107,12 @@ function CoverageBar({
   percent,
   inventoryValue,
   coverValue,
+  currencyCode,
 }: {
   percent: number;
   inventoryValue: number;
   coverValue: number;
+  currencyCode: string;
 }) {
   const clamped = Number.isFinite(percent) ? Math.min(Math.max(percent, 0), 100) : 0;
   const trackColor = "rgba(255,255,255,0.18)";
@@ -173,14 +176,15 @@ function CoverageBar({
           color: "rgba(255,255,255,0.62)",
         }}
       >
-        {formatCurrency(inventoryValue || null)} recorded of {formatCurrency(coverValue)} cover
+        {formatCurrency(inventoryValue || null, currencyCode)} recorded of {formatCurrency(coverValue, currencyCode)} cover
       </Text>
     </View>
   );
 }
 
 function getPropertyCoverCopy(
-  coverage: ReturnType<typeof calculateCoverageInsight>
+  coverage: ReturnType<typeof calculateCoverageInsight>,
+  currencyCode: string,
 ) {
   if (!coverage.hasCover) {
     return {
@@ -190,12 +194,12 @@ function getPropertyCoverCopy(
   }
   if (coverage.overAmount > 0) {
     return {
-      primary: `${formatCurrency(coverage.overAmount)} over cover`,
+      primary: `${formatCurrency(coverage.overAmount, currencyCode)} over cover`,
       secondary: "Review this property's contents cover",
     };
   }
   return {
-    primary: `${formatCurrency(coverage.remainingAmount)} remaining cover`,
+    primary: `${formatCurrency(coverage.remainingAmount, currencyCode)} remaining cover`,
     secondary: "Based on this property's inventory value",
   };
 }
@@ -303,15 +307,13 @@ function PropertyCard({
   const { width: windowWidth } = useWindowDimensions();
   const stackCoverage = windowWidth < 430;
   const propertyItems = items.filter((i) => i.file_id === item.id);
-  const totalValue = propertyItems.reduce(
-    (s, i) => s + getItemTotalValue(i),
-    0
-  );
+  const totalsByCurrency = groupAmountsByCurrency(propertyItems, getItemTotalValue, (inventoryItem) => inventoryItem.estimated_currency ?? item.currency_code);
+  const totalValue = totalsByCurrency[item.currency_code] ?? 0;
   const coverage = calculateCoverageInsight(
     totalValue,
     item.contents_sum_insured,
   );
-  const coverCopy = getPropertyCoverCopy(coverage);
+  const coverCopy = getPropertyCoverCopy(coverage, item.currency_code);
 
   const handlePress = async () => {
     await Haptics.selectionAsync();
@@ -388,7 +390,7 @@ function PropertyCard({
           <View style={styles.cardStats}>
             <View style={styles.cardStat}>
               <Text style={[styles.statValue, { color: colors.foreground }]}>
-                {formatCurrency(totalValue || null)}
+                {formatCurrencyTotals(totalsByCurrency)}
               </Text>
               <Text
                 style={[styles.statLabel, { color: colors.mutedForeground }]}
@@ -404,7 +406,7 @@ function PropertyCard({
             </View>
             <View style={styles.cardStat}>
               <Text style={[styles.statValue, { color: colors.foreground }]}>
-                {coverage.hasCover ? formatCurrency(item.contents_sum_insured) : "Not set"}
+                {coverage.hasCover ? formatCurrency(item.contents_sum_insured, item.currency_code) : "Not set"}
               </Text>
               <Text style={[styles.statLabel, { color: colors.mutedForeground }]}>Contents cover</Text>
             </View>
@@ -697,11 +699,14 @@ export default function HomeScreen() {
     if (!portfolio || !properties || properties.length === 0) return null;
     const roomCount = allRooms?.length ?? 0;
     const portfolioCoverPercent =
-      portfolio.totalRecordedCover > 0
+      !portfolio.hasMultipleCurrencies && portfolio.totalRecordedCover > 0
         ? (portfolio.totalInventoryValue / portfolio.totalRecordedCover) * 100
         : null;
     const hasPortfolioCoverPercent =
       portfolioCoverPercent != null && Number.isFinite(portfolioCoverPercent);
+    const portfolioCurrencyCode = Object.keys(portfolio.inventoryTotalsByCurrency)[0]
+      ?? Object.keys(portfolio.coverTotalsByCurrency)[0]
+      ?? "NZD";
 
     return (
       <View style={{ gap: 12, paddingHorizontal: 16, paddingTop: 12 }}>
@@ -744,10 +749,10 @@ export default function HomeScreen() {
               numberOfLines={1}
               adjustsFontSizeToFit
             >
-              {formatCurrency(portfolio.totalInventoryValue || null)}
+              {formatCurrencyTotals(portfolio.inventoryTotalsByCurrency)}
             </Text>
             <Text style={styles.bigLabel}>
-              Total inventory value
+              {portfolio.hasMultipleCurrencies ? "Inventory value · multiple currencies" : "Total inventory value"}
             </Text>
           </View>
 
@@ -799,6 +804,7 @@ export default function HomeScreen() {
                 percent={portfolioCoverPercent}
                 inventoryValue={portfolio.totalInventoryValue}
                 coverValue={portfolio.totalRecordedCover}
+                currencyCode={portfolioCurrencyCode}
               />
             </View>
           )}
@@ -998,7 +1004,7 @@ export default function HomeScreen() {
                     </Text>
                     <View style={styles.globalResultMetaRow}>
                       <Text style={[styles.globalResultValue, { color: colors.mutedForeground }]} numberOfLines={1}>
-                        {value > 0 ? formatCurrency(value) : "No value"}
+                        {value > 0 ? formatCurrency(value, item.estimated_currency ?? property?.currency_code ?? "NZD") : "No value"}
                       </Text>
                       {readiness ? (
                         <View style={[styles.globalReadinessChip, { borderColor: colors.warning, backgroundColor: colors.warning + "10" }]}>

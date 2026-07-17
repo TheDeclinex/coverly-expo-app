@@ -4,6 +4,7 @@ import {
   itemHasClaimPackValue,
   type ClaimPackSelection,
 } from "./claim-pack-selection-model.ts";
+import { resolveMarketConfig } from "../constants/market-config.ts";
 
 export type ClaimPackReviewIssueSeverity = "high" | "medium" | "low";
 
@@ -20,6 +21,7 @@ export interface ClaimPackReviewPropertyLike {
   insurer_name?: string | null;
   policy_number?: string | null;
   contents_sum_insured?: number | null;
+  country_code?: string | null;
 }
 
 export interface ClaimPackReviewRoomLike {
@@ -86,8 +88,6 @@ export interface BuildClaimPackReviewInput {
   draftPolicyNumber?: string | null;
 }
 
-const MATERIAL_ITEM_THRESHOLD_NZD = 500;
-
 function hasUsefulText(value: string | null | undefined): boolean {
   return Boolean(value?.trim());
 }
@@ -113,6 +113,7 @@ export function buildClaimPackReview({
   const roomById = new Map(rooms.map((room) => [room.id, room]));
   const selectedItems = items.filter((item) => selection.selectedItemIds.has(item.id));
   const issues: ClaimPackReviewIssue[] = [];
+  const materialItemThreshold = resolveMarketConfig(property.country_code ?? "NZ")?.materialItemThreshold ?? null;
 
   if (selectedItems.length === 0) {
     return {
@@ -199,7 +200,7 @@ export function buildClaimPackReview({
       });
     }
 
-    if (value > MATERIAL_ITEM_THRESHOLD_NZD && !hasUsefulText(item.brand_maker) && !hasUsefulText(item.model_series)) {
+    if (materialItemThreshold != null && value > materialItemThreshold && !hasUsefulText(item.brand_maker) && !hasUsefulText(item.model_series)) {
       issues.push({
         id: reviewIssue("missing_brand_model", item.id),
         type: "missing_brand_model",

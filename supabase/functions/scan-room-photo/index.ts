@@ -12,7 +12,8 @@
 
 import { serve } from 'https://deno.land/std@0.177.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.3';
-import { scanModelForMode, type ScanMode } from './scan-model.ts';
+import { finitePositiveScanEstimate, scanModelForMode, type ScanMode } from './scan-model.ts';
+import { resolveMarketConfig, type MarketConfig } from '../_shared/market-config.ts';
 
 // Version marker — bump this whenever the edge function is redeployed so the
 // client can confirm it is running the expected version via diagnostics.
@@ -117,8 +118,9 @@ interface RawItem {
   description?: string;
   category?: string;
   confidence?: number;
-  estimatedPrice?: number;
-  unitEstimatedPrice?: number;
+  estimatedPrice?: number | null;
+  unitEstimatedPrice?: number | null;
+  currencyCode?: string | null;
   brand_guess?: string | null;
   pin?: { x: number; y: number };
   sourceImageId?: string | number;
@@ -374,10 +376,10 @@ For repeated identical or near-identical items, create ONE grouped item record w
 - Do NOT count appearances across photos as separate quantity — count physical items
 
 PRICING RULES:
-- unitEstimatedPrice = NZD replacement value for ONE unit
-- estimatedPrice = TOTAL NZD value for the grouped record = unitEstimatedPrice × quantity
+- unitEstimatedPrice = replacement value for ONE unit in the authoritative property currency
+- estimatedPrice = TOTAL value for the grouped record = unitEstimatedPrice × quantity
 - For single items (quantity 1): estimatedPrice = unitEstimatedPrice
-- Use realistic NZD market/replacement values
+- Use realistic values for the authoritative property market supplied below
 - Numbers only, no currency symbols
 
 PIN RULES:
@@ -397,15 +399,16 @@ OUTPUT RULES:
 - Every item must be a complete JSON object with all required fields`;
 
 // ── Per-mode user prompt ──────────────────────────────────────────────────────
-function buildUserPrompt(mode: ScanRequest['mode'], imageCount: number): string {
+function buildUserPrompt(mode: ScanRequest['mode'], imageCount: number, market: MarketConfig): string {
   const FIELDS = `Each item must have EXACTLY these fields:
 {
   "name": "short descriptive label with colour+material+type",
   "description": "REQUIRED — exactly 2 sentences",
   "category": "one of the allowed Coverly categories",
   "quantity": 1,
-  "unitEstimatedPrice": 0,
-  "estimatedPrice": 0,
+  "unitEstimatedPrice": null,
+  "estimatedPrice": null,
+  "currencyCode": "${market.currencyCode}",
   "confidence": 0.0,
   "brand_guess": null,
   "pin": { "x": 0, "y": 0 },
@@ -579,16 +582,30 @@ async function prepareOpenAiImageContent(
 }
 
 // ── Build OpenAI request body ─────────────────────────────────────────────────
-function buildOpenAiBody(req: ScanRequest, imageContent: OpenAiImageContent[]): object {
+export function buildMarketPricingPrompt(market: MarketConfig): string {
+  if (!market.aiEstimatesEnabled) {
+    return `AUTHORITATIVE MARKET OVERRIDE: The property is in ${market.countryName} (${market.countryCode}). Local AI pricing is not enabled. Continue object recognition, but return null for unitEstimatedPrice and estimatedPrice. Do not substitute another country or currency.`;
+  }
+  return `AUTHORITATIVE MARKET OVERRIDE: Estimate the current retail replacement cost of an equivalent new item reasonably available to a consumer in ${market.countryName} (${market.countryCode}). Return amounts in ${market.currencyCode}. unitEstimatedPrice is one unit and estimatedPrice is unitEstimatedPrice multiplied by quantity. Numbers only, with no currency symbols.`;
+}
+
+export function buildLocalizedSystemPrompt(market: MarketConfig): string {
+  return SYSTEM_PROMPT.replace(
+    /PRICING RULES:[\s\S]*?PIN RULES:/,
+    `PRICING RULES:\n${buildMarketPricingPrompt(market)}\n\nPIN RULES:`,
+  );
+}
+
+function buildOpenAiBody(req: ScanRequest, imageContent: OpenAiImageContent[], market: MarketConfig): object {
   const model = scanModelForMode(req.mode, CONFIGURED_SCAN_MODEL);
 
-  const userPrompt = buildUserPrompt(req.mode, req.images.length);
+  const userPrompt = buildUserPrompt(req.mode, req.images.length, market);
 
   return {
     model,
     max_completion_tokens: MAX_TOKENS,
     messages: [
-      { role: 'system', content: SYSTEM_PROMPT },
+      { role: 'system', content: buildLocalizedSystemPrompt(market) },
       {
         role: 'user',
         content: [
@@ -606,7 +623,7 @@ function resolveSourcePhotoIndex(i: RawItem): number | undefined {
   if (i.sourceImageId !== undefined) {
     const str = String(i.sourceImageId).toLowerCase().replace('photo_', '').trim();
     const parsed = Number(str);
-    if (!isNaN(parsed)) {
+    if (Number.isFinite(parsed)) {
       return parsed > 0 ? parsed - 1 : 0;
     }
   }
@@ -618,7 +635,7 @@ function resolveSeenInPhotos(i: RawItem, sourcePhotoIndex: number | undefined): 
     return i.seenInPhotos.map((n: number | string) => {
       const str = String(n).toLowerCase().replace('photo_', '').trim();
       const parsed = Number(str);
-      return !isNaN(parsed) && parsed > 0 ? parsed - 1 : 0;
+      return Number.isFinite(parsed) && parsed > 0 ? parsed - 1 : 0;
     });
   }
   return sourcePhotoIndex !== undefined ? [sourcePhotoIndex] : undefined;
@@ -712,6 +729,20 @@ serve(async (req: Request) => {
     }, 400);
   }
 
+  const fileId = scanReq.context?.fileId ?? scanReq.context?.propertyId;
+  if (!fileId) {
+    return jsonResponse({ success: false, errorCode: 'PROPERTY_CONTEXT_REQUIRED', message: 'Choose a property before scanning.' }, 400);
+  }
+  const { data: property, error: propertyError } = await userClient!
+    .from('inventory_files').select('id,country_code,currency_code').eq('id', fileId).single();
+  if (propertyError || !property) {
+    return jsonResponse({ success: false, errorCode: 'PROPERTY_NOT_FOUND', message: 'The selected property could not be accessed.' }, 404);
+  }
+  const market = resolveMarketConfig(property.country_code);
+  if (!market || market.currencyCode !== property.currency_code) {
+    return jsonResponse({ success: false, errorCode: 'INVALID_PROPERTY_MARKET', message: 'The property market configuration needs review.' }, 409);
+  }
+
   const approximateBase64Length = scanReq.images.reduce((sum, image) => sum + (image.imageBase64?.length ?? 0), 0);
   const storagePathCount = scanReq.images.filter((image) => typeof image.storagePath === 'string' && image.storagePath.trim()).length;
   const legacyBase64Count = scanReq.images.filter((image) => typeof image.imageBase64 === 'string' && image.imageBase64.trim()).length;
@@ -745,6 +776,7 @@ serve(async (req: Request) => {
       errorCode,
       message: errorMessage(error),
       edgeFunctionVersion: EDGE_FUNCTION_VERSION,
+      market: { countryCode: market.countryCode, currencyCode: market.currencyCode, pricingSupportTier: market.pricingSupportTier },
     }, status);
   }
 
@@ -820,7 +852,7 @@ serve(async (req: Request) => {
   };
 
   try {
-    const openAiBody = buildOpenAiBody(scanReq, openAiImageContent);
+    const openAiBody = buildOpenAiBody(scanReq, openAiImageContent, market);
     scanLog('openai_call_started', {
       model: scanModelForMode(scanReq.mode, CONFIGURED_SCAN_MODEL),
       imageCount: scanReq.images.length,
@@ -878,20 +910,21 @@ serve(async (req: Request) => {
       .filter(i => i.name && typeof i.name === 'string' && i.name.trim())
       .map(i => {
         const quantity = typeof i.quantity === 'number' && i.quantity >= 1 ? Math.round(i.quantity) : 1;
-        const rawUnit = Number(i.unitEstimatedPrice);
-        const rawTotal = Number(i.estimatedPrice);
-        let unitEstimatedPrice: number;
-        let estimatedPrice: number;
+        const rawUnit = finitePositiveScanEstimate(i.unitEstimatedPrice);
+        const rawTotal = finitePositiveScanEstimate(i.estimatedPrice);
+        const currencyMatches = typeof i.currencyCode === 'string' && i.currencyCode.trim().toUpperCase() === market.currencyCode;
+        let unitEstimatedPrice: number | null;
+        let estimatedPrice: number | null;
 
-        if (!isNaN(rawUnit) && rawUnit > 0) {
+        if (market.aiEstimatesEnabled && currencyMatches && rawUnit != null) {
           unitEstimatedPrice = rawUnit;
           estimatedPrice = quantity > 1 ? Math.round(rawUnit * quantity * 100) / 100 : rawUnit;
-        } else if (!isNaN(rawTotal) && rawTotal > 0) {
+        } else if (market.aiEstimatesEnabled && currencyMatches && rawTotal != null) {
           estimatedPrice = rawTotal;
           unitEstimatedPrice = quantity > 1 ? Math.round((rawTotal / quantity) * 100) / 100 : rawTotal;
         } else {
-          unitEstimatedPrice = 1;
-          estimatedPrice = quantity;
+          unitEstimatedPrice = null;
+          estimatedPrice = null;
         }
 
         const sourcePhotoIndex = resolveSourcePhotoIndex(i);
@@ -905,6 +938,10 @@ serve(async (req: Request) => {
           quantity,
           unitEstimatedPrice,
           estimatedPrice,
+          estimatedCurrency: unitEstimatedPrice == null ? null : market.currencyCode,
+          valuationMarket: unitEstimatedPrice == null ? null : market.countryCode,
+          estimatedAt: unitEstimatedPrice == null ? null : new Date().toISOString(),
+          pricingSupportTier: market.pricingSupportTier,
           confidence: Math.min(1, Math.max(0, Number(i.confidence) || 0.8)),
           brand_guess: i.brand_guess ?? undefined,
           pin: i.pin ? { x: Math.min(100, Math.max(0, i.pin.x)), y: Math.min(100, Math.max(0, i.pin.y)) } : undefined,
@@ -932,7 +969,7 @@ serve(async (req: Request) => {
     }
 
     scanLog('response_returned', { status: 200, success: true, validItemCount: validItems.length });
-    return jsonResponse({ success: true, items: validItems, diagnostics });
+    return jsonResponse({ success: true, items: validItems, market, diagnostics });
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     scanError('catch_block_error', { message: msg });

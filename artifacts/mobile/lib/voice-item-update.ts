@@ -26,6 +26,10 @@ function validMoney(value: number | null | undefined, label: string): number | n
   return value;
 }
 
+function validReplacementMoney(value: number | null | undefined): number | null {
+  return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : null;
+}
+
 /**
  * Converts a user-reviewed voice patch into a narrow inventory_items update.
  * Only voice-supported fields are allowlisted. Unrelated item metadata is never
@@ -33,6 +37,7 @@ function validMoney(value: number | null | undefined, label: string): number | n
  */
 export function buildVoiceItemUpdatePayload(
   patch: VoiceItemPatch,
+  current?: Pick<InventoryItem, "quantity" | "unit_estimated_price" | "estimated_price">,
 ): Partial<InventoryItem> {
   const update: Partial<InventoryItem> = {};
 
@@ -67,17 +72,22 @@ export function buildVoiceItemUpdatePayload(
       "Original purchase price",
     );
   }
+  if (hasOwn(patch, "original_purchase_currency")) update.original_purchase_currency = patch.original_purchase_currency ?? null;
 
   if (hasOwn(patch, "unit_estimated_price") || hasOwn(patch, "estimated_price")) {
     const proposedUnitPrice = patch.unit_estimated_price ?? patch.estimated_price;
-    const unitPrice = validMoney(proposedUnitPrice, "Replacement price");
+    const unitPrice = validReplacementMoney(proposedUnitPrice);
     update.unit_estimated_price = unitPrice;
-    update.estimated_price = unitPrice;
+    update.estimated_price = unitPrice == null ? null : unitPrice * (patch.quantity ?? current?.quantity ?? 1);
 
     if (unitPrice !== null) {
       update.price_source_type = patch.price_source_type ?? "user_entered";
       update.valuation_basis = patch.valuation_basis ?? "manual";
+      if (patch.estimated_currency) update.estimated_currency = patch.estimated_currency;
     }
+  } else if (hasOwn(patch, "quantity")) {
+    const currentUnitPrice = current?.unit_estimated_price ?? current?.estimated_price;
+    if (currentUnitPrice != null) update.estimated_price = currentUnitPrice * patch.quantity!;
   }
 
   return update;

@@ -19,3 +19,7 @@ export function scanModelForMode(mode: ScanMode, configuredModel?: string | null
   }
   return resolveScanModel(configuredModel);
 }
+
+export function finitePositiveScanEstimate(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : null;
+}

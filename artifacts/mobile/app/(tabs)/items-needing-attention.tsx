@@ -18,6 +18,7 @@ import {
   type ItemAttentionFilter,
 } from "@/lib/item-attention";
 import { formatCurrencyFull, getItemPhoto, getItemTotalValue, hasValue } from "@/lib/inventory-mappers";
+import { resolveStoredValueCurrency } from "@/lib/replacement-value";
 import { supabase } from "@/lib/supabase";
 import type { InventoryItem } from "@/types";
 
@@ -25,11 +26,13 @@ const AttentionItemCard = React.memo(function AttentionItemCard({
   item,
   issue,
   showValue,
+  propertyCurrency,
   onOpen,
 }: {
   item: InventoryItem;
   issue: string;
   showValue: boolean;
+  propertyCurrency?: string | null;
   onOpen: (item: InventoryItem) => void;
 }) {
   const colors = useColors();
@@ -62,7 +65,7 @@ const AttentionItemCard = React.memo(function AttentionItemCard({
       <View style={styles.cardCopy}>
         <Text numberOfLines={2} style={[styles.itemName, { color: colors.foreground }]}>{item.name}</Text>
         {item.category ? <Text style={[styles.category, { color: colors.mutedForeground }]}>{item.category}</Text> : null}
-        {showValue ? <Text style={[styles.value, { color: colors.foreground }]}>{hasValue(item) ? formatCurrencyFull(getItemTotalValue(item)) : "No recorded value"}</Text> : null}
+        {showValue ? <Text style={[styles.value, { color: colors.foreground }]}>{hasValue(item) ? formatCurrencyFull(getItemTotalValue(item), resolveStoredValueCurrency(item.estimated_currency, propertyCurrency)) : "No recorded value"}</Text> : null}
         <View style={styles.cardFooter}>
           <View style={[styles.issueChip, { backgroundColor: colors.accent }]}>
             <Text style={[styles.issueText, { color: colors.accentForeground }]}>{issue}</Text>
@@ -106,6 +109,16 @@ export default function ItemsNeedingAttentionScreen() {
   });
 
   const itemIds = React.useMemo(() => (itemsQuery.data ?? []).map((item) => item.id), [itemsQuery.data]);
+  const resolvedFileId = fileId ?? itemsQuery.data?.[0]?.file_id ?? null;
+  const propertyQuery = useQuery({
+    queryKey: ["property-market", resolvedFileId, session?.user.id],
+    queryFn: async () => {
+      const { data, error } = await supabase.from("inventory_files").select("currency_code").eq("id", resolvedFileId!).single();
+      if (error) throw error;
+      return data as { currency_code: string };
+    },
+    enabled: Boolean(session && resolvedFileId),
+  });
   const itemIdsKey = React.useMemo(() => [...itemIds].sort().join(","), [itemIds]);
   const evidenceQuery = useQuery<Record<string, number>>({
     queryKey: ["room-evidence-counts", roomId, session?.user.id, itemIdsKey],
@@ -151,13 +164,14 @@ export default function ItemsNeedingAttentionScreen() {
       item={item}
       issue={copy.chip}
       showValue={filter === "missing_value" || filter === "ai_value" || filter === "missing_evidence"}
+      propertyCurrency={propertyQuery.data?.currency_code}
       onOpen={openItem}
     />
-  ), [copy.chip, filter, openItem]);
+  ), [copy.chip, filter, openItem, propertyQuery.data?.currency_code]);
 
   const loadingEvidence = filter === "missing_evidence" && evidenceQuery.isLoading;
-  const loading = itemsQuery.isLoading || loadingEvidence;
-  const error = itemsQuery.error ?? evidenceQuery.error;
+  const loading = itemsQuery.isLoading || loadingEvidence || (Boolean(resolvedFileId) && propertyQuery.isLoading);
+  const error = itemsQuery.error ?? evidenceQuery.error ?? propertyQuery.error;
 
   return (
     <View style={[styles.root, { backgroundColor: colors.background }]}>

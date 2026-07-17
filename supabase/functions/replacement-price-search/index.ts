@@ -2,7 +2,7 @@
  * Supabase Edge Function: replacement-price-search
  * v26.2.1 — added auth diagnostics
  *
- * Searches Google Shopping via Serper.dev for NZ replacement listings.
+ * Searches Google Shopping via Serper.dev in the property's configured market.
  * API key stays server-side in SERPER_API_KEY secret.
  *
  * DEPLOY INSTRUCTIONS:
@@ -22,6 +22,8 @@
 
 import { serve } from 'https://deno.land/std@0.177.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.3';
+import { resolveMarketConfig, type MarketConfig } from '../_shared/market-config.ts';
+import { confirmedPropertyCurrencyStats, countryCodeFromRetailerLink, detectResultCurrency, parseProviderPrice } from './market-results.ts';
 
 const EDGE_VERSION = 'v26.3.0';
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL') ?? '';
@@ -55,7 +57,6 @@ interface PriceSearchRequest {
   category?: string;
   brand?: string;
   barcode?: string;
-  country?: string;
   minPrice?: number;
   maxPrice?: number;
   searchQuery?: string;
@@ -74,6 +75,10 @@ interface PriceSearchResult {
   thumbnail?: string;
   position: number;
   matchType: 'best_match' | 'close_match' | 'similar_item';
+  currencyCode: string | null;
+  retailerCountryCode: string | null;
+  fulfilmentType: 'local' | 'overseas' | 'unknown';
+  warnings: string[];
 }
 
 interface UsageReservationResult {
@@ -195,29 +200,20 @@ async function fetchWithTimeout(
   }
 }
 
-function buildQuery(req: PriceSearchRequest): string {
-  if (req.searchQuery?.trim()) return req.searchQuery.trim().slice(0, MAX_QUERY_LEN);
+function buildQuery(req: PriceSearchRequest, market: MarketConfig): string {
+  if (req.searchQuery?.trim()) return `${req.searchQuery.trim()} ${market.countryName}`.slice(0, MAX_QUERY_LEN);
   const parts: string[] = [];
   if (req.brand) parts.push(req.brand);
   parts.push(req.itemName);
   if (req.category && req.category !== 'General') parts.push(req.category);
-  const country = (req.country ?? 'NZ').toUpperCase();
-  return `${parts.join(' ')} ${country}`.slice(0, MAX_QUERY_LEN);
+  return `${parts.join(' ')} ${market.countryName}`.slice(0, MAX_QUERY_LEN);
 }
 
-function buildRangedQuery(base: string, min?: number, max?: number): string {
-  if (min != null && max != null) return `${base} $${min}-$${max}`;
-  if (min != null) return `${base} over $${min}`;
-  if (max != null) return `${base} under $${max}`;
+function buildRangedQuery(base: string, currencyCode: string, min?: number, max?: number): string {
+  if (min != null && max != null) return `${base} ${currencyCode} ${min}-${max}`;
+  if (min != null) return `${base} over ${currencyCode} ${min}`;
+  if (max != null) return `${base} under ${currencyCode} ${max}`;
   return base;
-}
-
-function parsePrice(raw: string | undefined): number | null {
-  if (!raw) return null;
-  const m = raw.replace(/,/g, '').match(/[\d]+(?:\.\d+)?/);
-  if (!m) return null;
-  const n = parseFloat(m[0]);
-  return isNaN(n) ? null : n;
 }
 
 function assignMatchType(title: string, itemName: string, position: number): PriceSearchResult['matchType'] {
@@ -229,30 +225,38 @@ function assignMatchType(title: string, itemName: string, position: number): Pri
   return 'similar_item';
 }
 
-function priceStats(prices: number[]): { low: number; median: number; high: number } | null {
-  const valid = prices.filter(p => p > 0).sort((a, b) => a - b);
-  if (!valid.length) return null;
-  const mid = Math.floor(valid.length / 2);
-  const median = valid.length % 2 === 0 ? (valid[mid - 1] + valid[mid]) / 2 : valid[mid];
-  return { low: valid[0], median: Math.round(median * 100) / 100, high: valid[valid.length - 1] };
+function classifyResult(link: string, currencyCode: string | null, market: MarketConfig): Pick<PriceSearchResult, 'retailerCountryCode' | 'fulfilmentType' | 'warnings'> {
+  const retailerCountryCode = countryCodeFromRetailerLink(link);
+  const localDomain = retailerCountryCode === market.countryCode;
+  const foreignCurrency = currencyCode != null && currencyCode !== market.currencyCode;
+  if (localDomain && currencyCode === market.currencyCode) return { retailerCountryCode: market.countryCode, fulfilmentType: 'local', warnings: [] };
+  if (foreignCurrency) return { retailerCountryCode: null, fulfilmentType: 'overseas', warnings: [`Listed in ${currencyCode}, not ${market.currencyCode}. No conversion is applied.`] };
+  if (localDomain) return { retailerCountryCode: market.countryCode, fulfilmentType: 'local', warnings: ['The listing currency could not be confirmed. Review the raw retailer price before using it.'] };
+  return { retailerCountryCode: null, fulfilmentType: 'unknown', warnings: ['Retailer location could not be confirmed.'] };
 }
 
-function mapShoppingResults(data: unknown, itemName: string, num: number): PriceSearchResult[] {
+function mapShoppingResults(data: unknown, itemName: string, num: number, market: MarketConfig): PriceSearchResult[] {
   const shopping = (data as any)?.shopping ?? [];
-  return (shopping as any[]).slice(0, num).map((r: any, idx: number) => ({
+  return (shopping as any[]).slice(0, num).map((r: any, idx: number) => {
+    const currencyCode = detectResultCurrency(r.price ?? '', market, { retailerLink: r.link ?? '' });
+    const classification = classifyResult(r.link ?? '', currencyCode, market);
+    return ({
     title: r.title ?? 'Unknown product',
     source: r.source ?? 'Unknown retailer',
-    price: parsePrice(r.price),
+    price: parseProviderPrice(r.price),
     priceRaw: r.price ?? '',
     link: r.link ?? '',
     snippet: r.snippet,
     thumbnail: r.imageUrl || r.thumbnail,
     position: r.position ?? idx + 1,
     matchType: assignMatchType(r.title ?? '', itemName, r.position ?? idx + 1),
-  }));
+    currencyCode,
+    ...classification,
+  });
+  }).sort((a, b) => (a.fulfilmentType === 'local' ? 0 : 1) - (b.fulfilmentType === 'local' ? 0 : 1));
 }
 
-function mapOrganicResults(data: unknown, itemName: string, num: number): PriceSearchResult[] {
+function mapOrganicResults(data: unknown, itemName: string, num: number, market: MarketConfig): PriceSearchResult[] {
   const organic = (data as any)?.organic ?? [];
   return (organic as any[]).slice(0, num).map((r: any, idx: number) => ({
     title: r.title ?? 'Unknown',
@@ -264,6 +268,8 @@ function mapOrganicResults(data: unknown, itemName: string, num: number): PriceS
     thumbnail: undefined,
     position: idx + 1,
     matchType: assignMatchType(r.title ?? '', itemName, idx + 1),
+    currencyCode: null,
+    ...classifyResult(r.link ?? '', null, market),
   }));
 }
 
@@ -368,9 +374,6 @@ serve(async (req: Request) => {
   const minPrice = typeof body.minPrice === 'number' && body.minPrice >= 0 ? body.minPrice : undefined;
   const maxPrice = typeof body.maxPrice === 'number' && body.maxPrice > 0 ? body.maxPrice : undefined;
 
-  const baseQuery = buildQuery({ ...body, itemName });
-  const queryUsed = buildRangedQuery(baseQuery, minPrice, maxPrice);
-
   const usageIdempotencyKey = normaliseUsageIdempotencyKey(body.usageIdempotencyKey);
   if (!usageIdempotencyKey) {
     return jsonResponse({
@@ -379,6 +382,19 @@ serve(async (req: Request) => {
       error: 'Replacement price search is missing a usage idempotency key. Please update the app and try again.',
     }, 400, origin);
   }
+
+  if (!body.itemId) return jsonResponse({ success: false, errorCode: 'ITEM_CONTEXT_REQUIRED', error: 'Choose an inventory item before searching.' }, 400, origin);
+  const { data: item, error: itemError } = await userClient!.from('inventory_items').select('id,file_id').eq('id', body.itemId).single();
+  if (itemError || !item) return jsonResponse({ success: false, errorCode: 'ITEM_NOT_FOUND', error: 'The item could not be accessed.' }, 404, origin);
+  const { data: property, error: propertyError } = await userClient!.from('inventory_files').select('id,country_code,currency_code').eq('id', item.file_id).single();
+  if (propertyError || !property) return jsonResponse({ success: false, errorCode: 'PROPERTY_NOT_FOUND', error: 'The item property could not be accessed.' }, 404, origin);
+  const market = resolveMarketConfig(property.country_code);
+  if (!market || market.currencyCode !== property.currency_code) return jsonResponse({ success: false, errorCode: 'INVALID_PROPERTY_MARKET', error: 'The property market configuration needs review.' }, 409, origin);
+  if (!market.replacementSearchEnabled || !market.serperGl) return jsonResponse({ success: false, errorCode: 'PRICING_MARKET_LIMITED', error: `Reliable local retailer search is not available for ${market.countryName} yet. You can still enter a value manually.` }, 422, origin);
+
+  const baseQuery = buildQuery({ ...body, itemName }, market);
+  const queryUsed = buildRangedQuery(baseQuery, market.currencyCode, minPrice, maxPrice);
+  const context = { countryCode: market.countryCode, countryName: market.countryName, currencyCode: market.currencyCode, pricingSupportTier: market.pricingSupportTier, provider: 'serper', searchedAt: new Date().toISOString() };
 
   const diagnostics: Record<string, unknown> = {
     edgeVersion: EDGE_VERSION,
@@ -400,7 +416,8 @@ serve(async (req: Request) => {
   try {
     usageReservation = await reserveUsage(userClient!, usageIdempotencyKey, {
       itemId: body.itemId ?? null,
-      country: (body.country ?? 'NZ').toUpperCase(),
+      countryCode: market.countryCode,
+      currencyCode: market.currencyCode,
       num,
       hasSearchQuery: !!searchQueryFallback,
       hasBrand: !!body.brand,
@@ -435,7 +452,7 @@ serve(async (req: Request) => {
     const shopRes = await fetchWithTimeout(SERPER_SHOPPING_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-API-KEY': serperKey },
-      body: JSON.stringify({ q: queryUsed, gl: 'nz', hl: 'en', num }),
+      body: JSON.stringify({ q: queryUsed, gl: market.serperGl, hl: market.serperHl, num }),
     }, SERPER_TIMEOUT_MS);
 
     diagnostics.shoppingStatus = shopRes.status;
@@ -462,7 +479,7 @@ serve(async (req: Request) => {
         diagnostics,
       }, 502, origin);
     }
-    let results = mapShoppingResults(shopData, itemName, num);
+    let results = mapShoppingResults(shopData, itemName, num, market);
     diagnostics.shoppingResultCount = results.length;
 
     // Organic fallback if no priced results
@@ -471,7 +488,7 @@ serve(async (req: Request) => {
       const orgRes = await fetchWithTimeout(SERPER_ORGANIC_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-API-KEY': serperKey },
-        body: JSON.stringify({ q: queryUsed, gl: 'nz', hl: 'en', num }),
+        body: JSON.stringify({ q: queryUsed, gl: market.serperGl, hl: market.serperHl, num }),
       }, SERPER_TIMEOUT_MS);
       diagnostics.organicStatus = orgRes.status;
       if (orgRes.ok) {
@@ -487,7 +504,7 @@ serve(async (req: Request) => {
             diagnostics,
           }, 502, origin);
         }
-        const organicResults = mapOrganicResults(orgData, itemName, num);
+        const organicResults = mapOrganicResults(orgData, itemName, num, market);
         results = [...results, ...organicResults].slice(0, num);
         diagnostics.organicResultCount = organicResults.length;
       } else {
@@ -503,12 +520,12 @@ serve(async (req: Request) => {
     }
 
     const prices = results.map(r => r.price).filter((p): p is number => p != null && p > 0);
-    const stats = priceStats(prices);
+    const stats = confirmedPropertyCurrencyStats(results, market.currencyCode);
 
     if (!prices.length) {
       await refundUsage(userClient, usageReservationId, 'no_usable_priced_results');
       diagnostics.usageRefunded = true;
-      return jsonResponse({ success: true, results, queryUsed, ...(stats ?? {}), diagnostics }, 200, origin);
+      return jsonResponse({ success: true, context, results, queryUsed, ...(stats ?? {}), diagnostics }, 200, origin);
     }
 
     if (usageReservationId) {
@@ -516,7 +533,7 @@ serve(async (req: Request) => {
       diagnostics.usageCommitted = true;
     }
 
-    return jsonResponse({ success: true, results, queryUsed, ...(stats ?? {}), diagnostics }, 200, origin);
+    return jsonResponse({ success: true, context, results, queryUsed, ...(stats ?? {}), diagnostics }, 200, origin);
   } catch (e) {
     const msg = errorMessage(e);
     const isTimeout = e instanceof DOMException && e.name === 'AbortError';

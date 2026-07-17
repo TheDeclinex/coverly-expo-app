@@ -10,6 +10,7 @@ import { useAccountProfile } from "@/hooks/useAccountProfile";
 import { useColors } from "@/hooks/useColors";
 import {
   adminCurrencyLabel,
+  adminInventoryTotalLabel,
   adminDateLabel,
   adminNumberLabel,
   adminStatusLabel,
@@ -88,8 +89,8 @@ function FileCard({ file }: { file: AdminUserFile }) {
         {adminStatusLabel(file.property_type)} / Updated {adminDateLabel(file.updated_at)}
       </Text>
       <View style={styles.grid}>
-        <Metric label="Cover" value={adminCurrencyLabel(file.contents_sum_insured)} />
-        <Metric label="Inventory" value={adminCurrencyLabel(file.inventory_value)} />
+        <Metric label="Cover" value={adminCurrencyLabel(file.contents_sum_insured, file.currency_code)} />
+        <Metric label="Inventory" value={adminInventoryTotalLabel(file.inventory_value, file.currency_code, file.inventory_totals)} />
         <Metric label="Rooms" value={adminNumberLabel(file.room_count)} />
         <Metric label="Items" value={adminNumberLabel(file.item_count)} />
         <Metric label="Claim packs" value={adminNumberLabel(file.claim_pack_count)} />

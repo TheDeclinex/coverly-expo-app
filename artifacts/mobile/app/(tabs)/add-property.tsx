@@ -2,7 +2,7 @@ import { Feather } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { Stack, router } from "expo-router";
 import { useQueryClient } from "@tanstack/react-query";
-import React, { useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
@@ -17,13 +17,17 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { ContextBackButton } from "@/components/ContextBackButton";
+import { CountrySelect } from "@/components/CountrySelect";
 import { LoadingState } from "@/components/LoadingState";
 import { PropertyAllowanceModal } from "@/components/PropertyAllowanceModal";
 import { useAuth } from "@/context/AuthContext";
 import { PROPERTY_TYPES, propertyTypeLabel } from "@/constants/propertyTypes";
+import { resolveMarketConfig } from "@/constants/market-config";
 import { useColors } from "@/hooks/useColors";
 import { usePropertyAllowance } from "@/hooks/usePropertyAllowance";
 import { createProperty, PropertyCreationError } from "@/lib/property-service";
+import { formatMoney } from "@/lib/money";
+import { supabase } from "@/lib/supabase";
 
 type SetupStep = 0 | 1 | 2;
 
@@ -141,6 +145,7 @@ export default function AddPropertyScreen() {
   const [step, setStep] = useState<SetupStep>(0);
   const [name, setName] = useState("");
   const [propertyType, setPropertyType] = useState<string | null>(null);
+  const [countryCode, setCountryCode] = useState("NZ");
   const [coverAmount, setCoverAmount] = useState("");
   const [insurerName, setInsurerName] = useState("");
   const [policyNumber, setPolicyNumber] = useState("");
@@ -148,6 +153,13 @@ export default function AddPropertyScreen() {
   const [error, setError] = useState<string | null>(null);
   const [serverAllowanceVisible, setServerAllowanceVisible] = useState(false);
   const submissionLockRef = useRef(false);
+  const market = resolveMarketConfig(countryCode) ?? resolveMarketConfig("NZ")!;
+
+  useEffect(() => {
+    if (!session?.user.id) return;
+    void supabase.from("user_profiles").select("country_code").eq("id", session.user.id).maybeSingle()
+      .then(({ data }) => { if (resolveMarketConfig(data?.country_code)) setCountryCode(data!.country_code); });
+  }, [session?.user.id]);
 
   const trimmedName = name.trim();
   const parsedCoverAmount = parseFloat(coverAmount.replace(/[^0-9.]/g, ""));
@@ -206,6 +218,7 @@ export default function AddPropertyScreen() {
       }
       data = await createProperty({
         name: trimmedName,
+        countryCode,
         propertyType,
         contentsSumInsured: parsedCoverAmount,
         insurerName: insurerName.trim() || null,
@@ -321,7 +334,12 @@ export default function AddPropertyScreen() {
         </View>
       </FormField>
 
-      <FormField label="Insurance contents cover" required hint="NZD" colors={colors}>
+      <FormField label="Property country" required colors={colors}>
+        <CountrySelect value={countryCode} onChange={(value) => { setCountryCode(value); clearError(); }} />
+        <Text style={[styles.helperText, { color: colors.mutedForeground }]}>Coverly uses the property country to estimate replacement values and search local retailers.</Text>
+      </FormField>
+
+      <FormField label="Insurance contents cover" required hint={market.currencyCode} colors={colors}>
         <InputBox
           value={coverAmount}
           onChangeText={(value) => {
@@ -413,7 +431,8 @@ export default function AddPropertyScreen() {
       <View style={[styles.reviewCard, { backgroundColor: colors.card, borderColor: colors.border, borderRadius: colors.radius }]}>
         <ReviewRow label="Property" value={trimmedName || "Not set"} colors={colors} />
         <ReviewRow label="Type" value={propertyTypeLabel(propertyType) ?? "Not set"} colors={colors} />
-        <ReviewRow label="Contents cover" value={hasValidCoverAmount ? `$${parsedCoverAmount.toLocaleString("en-NZ")}` : "Not set"} colors={colors} />
+        <ReviewRow label="Country" value={`${market.countryName} · ${market.currencyCode}`} colors={colors} />
+        <ReviewRow label="Contents cover" value={hasValidCoverAmount ? formatMoney(parsedCoverAmount, market.currencyCode, { locale: market.locale }) : "Not set"} colors={colors} />
         <ReviewRow label="Insurer" value={insurerName.trim() || "Not set"} colors={colors} />
         <ReviewRow label="Policy number" value={policyNumber.trim() || "Not set"} colors={colors} />
       </View>

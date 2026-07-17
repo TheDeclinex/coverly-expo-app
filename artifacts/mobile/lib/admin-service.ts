@@ -94,7 +94,9 @@ export interface AdminUserFile {
   name: string | null;
   property_type: string | null;
   contents_sum_insured: number | null;
+  currency_code: string | null;
   inventory_value: number | null;
+  inventory_totals?: Record<string, number> | null;
   room_count: number | null;
   item_count: number | null;
   claim_pack_count: number | null;

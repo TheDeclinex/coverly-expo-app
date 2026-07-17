@@ -46,6 +46,7 @@ import {
   createWholePropertyClaimPackSelection,
   loadClaimPackDraftSnapshot,
   removeClaimPackRoom,
+  resolveClaimItemCurrency,
   saveClaimPackDraftSnapshot,
   selectClaimPackItem,
   selectAllClaimPackItemsInRoom,
@@ -65,6 +66,7 @@ import {
   hasPhoto,
   hasValue,
 } from "@/lib/inventory-mappers";
+import { formatCurrencyTotals, groupAmountsByCurrency } from "@/lib/money";
 import { supabase } from "@/lib/supabase";
 import type { InventoryFile, InventoryItem, InventoryRoom } from "@/types";
 
@@ -353,6 +355,7 @@ export default function ClaimPackDraftScreen() {
     items,
     evidenceCountsByItemId: evidenceCounts,
     selection: effectiveSelection,
+    summaryCurrencyCode: property?.currency_code,
   });
   const futureGeneratePayload = property
     ? buildClaimPackGeneratePayload({
@@ -1084,6 +1087,7 @@ function DraftReview({
           selectedItemIds={selection.selectedItemIds}
           evidenceCounts={evidenceCounts}
           highlightItemId={highlightItemId}
+          currencyCode={property.currency_code}
           onBack={() => onManageRoom(null)}
           onSelectAll={() => onSelectRoomItems(managedRoom.id)}
           onClear={() => onClearRoomItems(managedRoom.id)}
@@ -1199,6 +1203,7 @@ function DraftReview({
               items={itemsByRoomId.get(room.id) ?? []}
               selectedItemIds={selection.selectedItemIds}
               evidenceCounts={evidenceCounts}
+              currencyCode={property.currency_code}
               onManageItems={() => onManageRoom(room.id)}
               colors={colors}
             />
@@ -1208,6 +1213,7 @@ function DraftReview({
               items={selectedUnassignedItems}
               selectedItemIds={selection.selectedItemIds}
               evidenceCounts={evidenceCounts}
+              currencyCode={property.currency_code}
               onToggleItem={onToggleItem}
               colors={colors}
             />
@@ -1258,7 +1264,7 @@ function SummaryCard({
         <SummaryCell label="Rooms" value={summary.selectedRoomsCount} colors={colors} />
         <SummaryCell label="Items" value={summary.selectedItemsCount} colors={colors} />
         <SummaryCell label="Evidence" value={summary.includedEvidenceCount} colors={colors} />
-        <SummaryCell label="Value" value={formatCurrency(summary.selectedEstimatedValue)} colors={colors} compact />
+        <SummaryCell label="Value" value={formatCurrencyTotals(summary.totalsByCurrency, true)} colors={colors} compact />
       </View>
       <View style={[styles.readinessRow, { borderTopColor: colors.border }]}>
         <Feather
@@ -1799,6 +1805,7 @@ function DraftRoomCard({
   items,
   selectedItemIds,
   evidenceCounts,
+  currencyCode,
   onManageItems,
   colors,
 }: {
@@ -1806,12 +1813,13 @@ function DraftRoomCard({
   items: InventoryItem[];
   selectedItemIds: Set<string>;
   evidenceCounts: Record<string, number>;
+  currencyCode: string;
   onManageItems: () => void;
   colors: ReturnType<typeof useColors>;
 }) {
   const selectedItems = items.filter((item) => selectedItemIds.has(item.id));
   const selectedCount = selectedItems.length;
-  const selectedValue = selectedItems.reduce((total, item) => total + getItemTotalValue(item), 0);
+  const selectedTotals = groupAmountsByCurrency(selectedItems, getItemTotalValue, (item) => resolveClaimItemCurrency(item.estimated_currency, currencyCode));
   const evidenceCount = selectedItems.reduce((total, item) => total + (evidenceCounts[item.id] ?? 0), 0);
   const missingCount = selectedItems.reduce(
     (total, item) =>
@@ -1829,7 +1837,7 @@ function DraftRoomCard({
         <View style={styles.roomHeaderCopy}>
           <Text style={[styles.roomTitle, { color: colors.foreground }]}>{room.name}</Text>
           <Text style={[styles.roomSubtitle, { color: colors.mutedForeground }]}>
-            {selectedCount > 0 ? `${selectedCount} of ${items.length} items selected` : "No items selected yet"} · {formatCurrency(selectedValue)} est.
+            {selectedCount > 0 ? `${selectedCount} of ${items.length} items selected` : "No items selected yet"} · {formatCurrencyTotals(selectedTotals)} est.
           </Text>
           <Text style={[styles.roomSubtitle, { color: colors.mutedForeground }]}>
             {formatCount(evidenceCount, "evidence file", "evidence files")}
@@ -1862,6 +1870,7 @@ function ManageRoomPanel({
   selectedItemIds,
   evidenceCounts,
   highlightItemId,
+  currencyCode,
   onBack,
   onSelectAll,
   onClear,
@@ -1874,6 +1883,7 @@ function ManageRoomPanel({
   selectedItemIds: Set<string>;
   evidenceCounts: Record<string, number>;
   highlightItemId: string | null;
+  currencyCode: string;
   onBack: () => void;
   onSelectAll: () => void;
   onClear: () => void;
@@ -1910,6 +1920,7 @@ function ManageRoomPanel({
               item={item}
               selected={selectedItemIds.has(item.id)}
               evidenceCount={evidenceCounts[item.id] ?? 0}
+              currencyCode={currencyCode}
               highlighted={highlightItemId === item.id}
               onPress={() => onToggleItem(item)}
               colors={colors}
@@ -1930,12 +1941,14 @@ function UnassignedItemsSection({
   items,
   selectedItemIds,
   evidenceCounts,
+  currencyCode,
   onToggleItem,
   colors,
 }: {
   items: InventoryItem[];
   selectedItemIds: Set<string>;
   evidenceCounts: Record<string, number>;
+  currencyCode: string;
   onToggleItem: (item: InventoryItem) => void;
   colors: ReturnType<typeof useColors>;
 }) {
@@ -1957,6 +1970,7 @@ function UnassignedItemsSection({
             item={item}
             selected={selectedItemIds.has(item.id)}
             evidenceCount={evidenceCounts[item.id] ?? 0}
+            currencyCode={currencyCode}
             onPress={() => onToggleItem(item)}
             colors={colors}
           />
@@ -1970,6 +1984,7 @@ function ClaimPackItemRow({
   item,
   selected,
   evidenceCount,
+  currencyCode,
   highlighted = false,
   onPress,
   colors,
@@ -1977,6 +1992,7 @@ function ClaimPackItemRow({
   item: InventoryItem;
   selected: boolean;
   evidenceCount: number;
+  currencyCode: string;
   highlighted?: boolean;
   onPress: () => void;
   colors: ReturnType<typeof useColors>;
@@ -2000,7 +2016,7 @@ function ClaimPackItemRow({
           {item.name || "Unnamed item"}
         </Text>
         <Text style={[styles.itemMeta, { color: colors.mutedForeground }]} numberOfLines={1}>
-          {formatCurrency(getItemTotalValue(item))} · {formatCount(evidenceCount, "evidence file", "evidence files")}
+          {formatCurrency(getItemTotalValue(item), resolveClaimItemCurrency(item.estimated_currency, currencyCode))} · {formatCount(evidenceCount, "evidence file", "evidence files")}
         </Text>
         {warning ? (
           <Text style={[styles.itemWarnings, { color: colors.warning }]} numberOfLines={1}>{warning}</Text>

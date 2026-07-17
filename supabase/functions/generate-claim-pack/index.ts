@@ -40,6 +40,7 @@
 
 import { serve } from "https://deno.land/std@0.177.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.3";
+import { resolveMarketConfig } from "../_shared/market-config.ts";
 import {
   PDFDocument,
   type PDFImage,
@@ -90,6 +91,8 @@ interface InventoryFileRow {
   insurer_name: string | null;
   policy_number: string | null;
   user_id: string;
+  country_code: string;
+  currency_code: string;
 }
 
 interface InventoryRoomRow {
@@ -111,6 +114,9 @@ interface InventoryItemRow {
   quantity_estimate: string | null;
   estimated_price: number | null;
   unit_estimated_price?: number | null;
+  estimated_currency: string | null;
+  valuation_market: string | null;
+  estimated_at: string | null;
   valuation_basis: string | null;
   image_url: string | null;
   photo_url: string | null;
@@ -158,6 +164,9 @@ interface ItemSnapshot {
   category: string | null;
   quantity: number;
   estimated_value: number | null;
+  estimated_currency: string;
+  valuation_market: string | null;
+  estimated_at: string | null;
   valuation_basis: string | null;
   brand_maker: string | null;
   model_series: string | null;
@@ -174,6 +183,7 @@ interface ClaimPackTotals {
   selectedItemsCount: number;
   includedEvidenceCount: number;
   totalEstimatedValue: number;
+  totalsByCurrency: Record<string, number>;
 }
 
 class HttpError extends Error {
@@ -260,9 +270,15 @@ function parseRequest(body: unknown): GenerateClaimPackRequest {
   };
 }
 
-function currency(value: number | null | undefined): string {
+function currency(value: number | null | undefined, currencyCode: string): string {
   if (value == null || !Number.isFinite(value)) return "-";
-  return `$${value.toLocaleString("en-NZ", { maximumFractionDigits: 0 })}`;
+  try {
+    return new Intl.NumberFormat("en", { style: "currency", currency: currencyCode, currencyDisplay: "code" }).format(value).replace(/\u00a0/g, " ");
+  } catch { return `${currencyCode} ${value.toLocaleString("en")}`; }
+}
+
+function currencyGroups(values: Record<string, number>): string {
+  return Object.entries(values).map(([code, value]) => currency(value, code)).join(" + ") || "-";
 }
 
 function numberValue(value: unknown): number | null {
@@ -281,8 +297,9 @@ function itemQuantity(item: InventoryItemRow): number {
 function itemEstimatedValue(item: InventoryItemRow): number | null {
   const quantity = itemQuantity(item);
   const unit = numberValue(item.unit_estimated_price);
-  if (unit != null) return Math.round(unit * quantity * 100) / 100;
-  return numberValue(item.estimated_price);
+  if (unit != null && unit > 0) return Math.round(unit * quantity * 100) / 100;
+  const legacyUnit = numberValue(item.estimated_price);
+  return legacyUnit == null || legacyUnit <= 0 ? null : Math.round(legacyUnit * quantity * 100) / 100;
 }
 
 function itemHasPhoto(item: InventoryItemRow): boolean {
@@ -510,7 +527,7 @@ async function fetchValidatedData(
 ): Promise<{ property: InventoryFileRow; rooms: InventoryRoomRow[]; items: InventoryItemRow[]; evidenceByItemId: Record<string, EvidenceSummary[]> }> {
   const { data: property, error: propertyError } = await userClient
     .from("inventory_files")
-    .select("id,name,property_type,contents_sum_insured,insurer_name,policy_number,user_id")
+    .select("id,name,property_type,contents_sum_insured,insurer_name,policy_number,user_id,country_code,currency_code")
     .eq("id", payload.propertyId)
     .eq("user_id", userId)
     .maybeSingle();
@@ -572,7 +589,7 @@ async function fetchSelectedItems(
 ): Promise<InventoryItemRow[]> {
   const { data, error } = await userClient
     .from("inventory_items")
-    .select("id,file_id,room_id,room,name,category,quantity,quantity_estimate,estimated_price,unit_estimated_price,valuation_basis,image_url,photo_url,attachments,description,notes,brand_maker,model_series,condition_label,sort_order")
+    .select("id,file_id,room_id,room,name,category,quantity,quantity_estimate,estimated_price,unit_estimated_price,estimated_currency,valuation_market,estimated_at,valuation_basis,image_url,photo_url,attachments,description,notes,brand_maker,model_series,condition_label,sort_order")
     .eq("file_id", propertyId)
     .in("id", selectedItemIds);
 
@@ -631,6 +648,7 @@ function buildSnapshots(
   rooms: InventoryRoomRow[],
   items: InventoryItemRow[],
   evidenceByItemId: Record<string, EvidenceSummary[]>,
+  propertyCurrency: string,
 ): { snapshots: ItemSnapshot[]; totals: ClaimPackTotals; roomsIncluded: Array<{ id: string; name: string }> } {
   const roomById = new Map(rooms.map((room) => [room.id, room]));
   const roomsIncluded = rooms
@@ -652,6 +670,9 @@ function buildSnapshots(
         category: item.category,
         quantity: itemQuantity(item),
         estimated_value: estimatedValue,
+        estimated_currency: item.estimated_currency ?? propertyCurrency,
+        valuation_market: item.valuation_market,
+        estimated_at: item.estimated_at,
         valuation_basis: friendlyValuationBasis(item.valuation_basis),
         brand_maker: item.brand_maker,
         model_series: item.model_series,
@@ -668,12 +689,14 @@ function buildSnapshots(
     selectedRoomsCount: roomsIncluded.length,
     selectedItemsCount: summary.selectedItemsCount + 1,
     includedEvidenceCount: summary.includedEvidenceCount + item.evidence.length,
-    totalEstimatedValue: summary.totalEstimatedValue + (item.estimated_value ?? 0),
+    totalEstimatedValue: summary.totalEstimatedValue + (item.estimated_currency === propertyCurrency ? item.estimated_value ?? 0 : 0),
+    totalsByCurrency: item.estimated_value == null ? summary.totalsByCurrency : { ...summary.totalsByCurrency, [item.estimated_currency]: (summary.totalsByCurrency[item.estimated_currency] ?? 0) + item.estimated_value },
   }), {
     selectedRoomsCount: roomsIncluded.length,
     selectedItemsCount: 0,
     includedEvidenceCount: 0,
     totalEstimatedValue: 0,
+    totalsByCurrency: {},
   });
 
   return { snapshots, totals, roomsIncluded };
@@ -816,11 +839,11 @@ class PdfWriter {
     this.y -= rowHeight;
   }
 
-  roomHeading(roomName: string, count: number, total: number, packRef: string): void {
+  roomHeading(roomName: string, count: number, totalLabel: string, packRef: string): void {
     this.ensureSpace(48, packRef);
     this.box(this.margin, this.y - 32, this.contentWidth, 32, this.tealSoft, rgb(0.73, 0.89, 0.86));
     this.text(roomName, this.margin + 10, this.y - 20, 12, this.boldFont, this.ink);
-    this.text(`${count} items · ${currency(total)}`, this.width - this.margin - 150, this.y - 20, 9, this.boldFont, this.teal, 140, "right");
+    this.text(`${count} items · ${totalLabel}`, this.width - this.margin - 190, this.y - 20, 9, this.boldFont, this.teal, 180, "right");
     this.y -= 42;
   }
 
@@ -861,7 +884,7 @@ class PdfWriter {
       this.muted,
       textWidth,
     );
-    this.text(`Qty ${item.quantity} · ${currency(item.estimated_value)} · ${item.valuation_basis ?? "Policyholder estimate"}`, textX, top - 52, 9.5, this.boldFont, this.teal, textWidth);
+    this.text(`Qty ${item.quantity} · ${currency(item.estimated_value, item.estimated_currency)} · ${item.valuation_basis ?? "Policyholder estimate"}`, textX, top - 52, 9.5, this.boldFont, this.teal, textWidth);
     const detail = [
       item.condition_label ? `Condition: ${item.condition_label}` : null,
       item.photo_url ? "Photo supplied" : "No photo attached",
@@ -1059,7 +1082,8 @@ async function generatePdfBytes(params: {
     { label: "Property type", value: friendlyPropertyType(params.property.property_type) },
     { label: "Insurer name", value: params.property.insurer_name },
     { label: "Policy number", value: params.property.policy_number },
-    { label: "Policy Information Supplied", value: params.property.contents_sum_insured != null ? currency(params.property.contents_sum_insured) : null },
+    { label: "Property market", value: `${params.property.country_code} · ${params.property.currency_code}` },
+    { label: "Policy Information Supplied", value: params.property.contents_sum_insured != null ? currency(params.property.contents_sum_insured, params.property.currency_code) : null },
     { label: "Generated date", value: formatDateTime(params.generatedAt) },
   ], params.packRef);
 
@@ -1070,11 +1094,12 @@ async function generatePdfBytes(params: {
 
   writer.section("Executive Summary", params.packRef);
   writer.metricStrip([
-    { label: "Total claimed value", value: currency(params.totals.totalEstimatedValue) },
+    { label: "Primary claimed value", value: currency(params.totals.totalEstimatedValue, params.property.currency_code) },
     { label: "Selected rooms", value: params.totals.selectedRoomsCount },
     { label: "Selected items", value: params.totals.selectedItemsCount },
     { label: "Evidence references", value: params.totals.includedEvidenceCount },
   ]);
+  writer.paragraph(`Primary summary values are in ${params.property.currency_code}. Currency subtotals: ${currencyGroups(params.totals.totalsByCurrency)}. No exchange-rate conversion has been applied.`, 9.5, writer.slate);
   writer.paragraph("Only selected claim-pack items are included. Values are presented as policyholder-supplied or estimated replacement values to support the claims assessment process.", 10, writer.slate);
 
   writer.section("Rooms Included", params.packRef);
@@ -1091,8 +1116,8 @@ async function generatePdfBytes(params: {
     snapshotsByRoom.set(item.room_name, list);
   }
   for (const [roomName, items] of snapshotsByRoom.entries()) {
-    const total = items.reduce((sum, item) => sum + (item.estimated_value ?? 0), 0);
-    writer.tableRow([roomName, String(items.length), currency(total)], roomColumns, params.packRef);
+    const roomTotals = items.reduce<Record<string, number>>((sum, item) => ({ ...sum, [item.estimated_currency]: (sum[item.estimated_currency] ?? 0) + (item.estimated_value ?? 0) }), {});
+    writer.tableRow([roomName, String(items.length), currencyGroups(roomTotals)], roomColumns, params.packRef);
   }
 
   writer.section("Selected Item Schedule", params.packRef);
@@ -1110,7 +1135,7 @@ async function generatePdfBytes(params: {
       item.room_name,
       String(item.quantity),
       String(item.evidence_count),
-      currency(item.estimated_value),
+      currency(item.estimated_value, item.estimated_currency),
     ], itemColumns, params.packRef);
   }
 
@@ -1122,8 +1147,8 @@ async function generatePdfBytes(params: {
     grouped.set(item.room_name, list);
   }
   for (const [roomName, items] of grouped.entries()) {
-    const total = items.reduce((sum, item) => sum + (item.estimated_value ?? 0), 0);
-    writer.roomHeading(roomName, items.length, total, params.packRef);
+    const roomTotals = items.reduce<Record<string, number>>((sum, item) => ({ ...sum, [item.estimated_currency]: (sum[item.estimated_currency] ?? 0) + (item.estimated_value ?? 0) }), {});
+    writer.roomHeading(roomName, items.length, currencyGroups(roomTotals), params.packRef);
     for (const item of items) {
       writer.itemCard(item, imageByItemId.get(item.id) ?? null, params.packRef);
     }
@@ -1287,6 +1312,10 @@ serve(async (req: Request) => {
     }
     const payload = parseRequest(body);
     const { property, rooms, items, evidenceByItemId } = await fetchValidatedData(userClient, payload, userId);
+    const market = resolveMarketConfig(property.country_code);
+    if (!market || market.currencyCode !== property.currency_code) {
+      throw new HttpError(409, "INVALID_PROPERTY_MARKET", "The property market configuration needs review.");
+    }
 
     if (!SUPABASE_SERVICE_ROLE_KEY) {
       throw new HttpError(500, "CONFIGURATION_ERROR", "SUPABASE_SERVICE_ROLE_KEY is not configured.");
@@ -1295,7 +1324,7 @@ serve(async (req: Request) => {
       auth: { persistSession: false, autoRefreshToken: false },
     });
 
-    const { snapshots, totals, roomsIncluded } = buildSnapshots(rooms, items, evidenceByItemId);
+    const { snapshots, totals, roomsIncluded } = buildSnapshots(rooms, items, evidenceByItemId, property.currency_code);
     const generatedAt = new Date().toISOString();
     const exportId = crypto.randomUUID();
     const propertyName = property.name ?? "property";
@@ -1346,6 +1375,9 @@ serve(async (req: Request) => {
       selected_item_ids: payload.selectedItemIds,
       totals,
       generation_error: null,
+      country_code: property.country_code,
+      currency_code: property.currency_code,
+      summary_currency: property.currency_code,
     };
 
     claimPackId = await insertClaimPack(adminClient, insertRow);

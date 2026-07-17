@@ -140,6 +140,14 @@ function isUncertain(extraction: VoiceExtractionResult, ...keys: string[]): bool
   return keys.some((key) => uncertain.has(key.toLowerCase()));
 }
 
+function extractedCurrency(value: string | null | undefined): string | null {
+  const normalized = value?.trim().toUpperCase();
+  const aliases: Record<string, string> = { "NZ DOLLARS": "NZD", "AUSTRALIAN DOLLARS": "AUD", "US DOLLARS": "USD", "CANADIAN DOLLARS": "CAD", POUNDS: "GBP", EUROS: "EUR", YEN: "JPY" };
+  if (!normalized) return null;
+  if (/^[A-Z]{3}$/.test(normalized)) return normalized;
+  return aliases[normalized] ?? null;
+}
+
 function makeChange(
   field: VoiceItemField,
   currentValue: VoiceScalar,
@@ -262,7 +270,7 @@ export function mapVoiceItemExtraction({
         "original_purchase_price",
         currentValues.original_purchase_price ?? null,
         originalPrice,
-        { original_purchase_price: originalPrice },
+        { original_purchase_price: originalPrice, ...(extractedCurrency(extraction.currency) ? { original_purchase_currency: extractedCurrency(extraction.currency) } : {}) },
         isUncertain(extraction, "purchase_price"),
       ));
     }
@@ -277,6 +285,7 @@ export function mapVoiceItemExtraction({
           unit_estimated_price: replacementPrice,
           price_source_type: "user_entered",
           valuation_basis: "manual",
+          ...(extractedCurrency(extraction.currency) ? { estimated_currency: extractedCurrency(extraction.currency) } : {}),
         },
         isUncertain(extraction, "estimated_value"),
       ));

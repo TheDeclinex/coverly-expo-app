@@ -18,9 +18,11 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { useAuth } from "@/context/AuthContext";
+import { CountrySelect } from "@/components/CountrySelect";
 import { PROPERTY_TYPES, normalizePropertyTypeValue } from "@/constants/propertyTypes";
+import { resolveMarketConfig } from "@/constants/market-config";
 import { useColors } from "@/hooks/useColors";
-import { formatPropertySaveError as formatPropertyServiceSaveError } from "@/lib/property-service";
+import { formatPropertySaveError as formatPropertyServiceSaveError, updateProperty } from "@/lib/property-service";
 import { supabase } from "@/lib/supabase";
 import type { InventoryFile } from "@/types";
 
@@ -95,6 +97,7 @@ export default function EditPropertyScreen() {
 
   const [name, setName] = useState("");
   const [propertyType, setPropertyType] = useState<string | null>(null);
+  const [countryCode, setCountryCode] = useState("NZ");
   const [coverAmount, setCoverAmount] = useState("");
   const [insurerName, setInsurerName] = useState("");
   const [policyNumber, setPolicyNumber] = useState("");
@@ -107,6 +110,7 @@ export default function EditPropertyScreen() {
     if (property) {
       setName(property.name ?? "");
       setPropertyType(normalizePropertyTypeValue(property.property_type));
+      setCountryCode(property.country_code || "NZ");
       setCoverAmount(property.contents_sum_insured != null ? String(property.contents_sum_insured) : "");
       setInsurerName(property.insurer_name ?? "");
       setPolicyNumber(property.policy_number ?? "");
@@ -119,7 +123,8 @@ export default function EditPropertyScreen() {
     queryClient.invalidateQueries({ queryKey: ["property-allowance"] });
   };
 
-  const handleSave = async () => {
+  const saveChanges = async () => {
+    if (!property) return;
     if (!name.trim()) {
       setError("Property name is required.");
       return;
@@ -127,29 +132,31 @@ export default function EditPropertyScreen() {
     setSaving(true);
     setError(null);
 
-    const { error: dbError } = await supabase
-      .from("inventory_files")
-      .update({
-        name: name.trim(),
-        property_type: normalizePropertyTypeValue(propertyType),
-        contents_sum_insured: coverAmount ? parseFloat(coverAmount) : null,
-        insurer_name: insurerName.trim() || null,
-        policy_number: policyNumber.trim() || null,
-        last_modified: new Date().toISOString(),
-      })
-      .eq("id", id);
-
-    setSaving(false);
-
-    if (dbError) {
+    try {
+      await updateProperty({ propertyId: id, name, countryCode, propertyType,
+        contentsSumInsured: coverAmount ? parseFloat(coverAmount) : null,
+        insurerName: insurerName.trim() || null, policyNumber: policyNumber.trim() || null,
+        propertyCoverImageUrl: property.property_cover_image_url });
+    } catch (dbError) {
+      setSaving(false);
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
       setError(formatPropertyServiceSaveError(dbError));
       return;
     }
+    setSaving(false);
 
     await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     invalidate();
     router.back();
+  };
+
+  const handleSave = () => {
+    if (!property) return;
+    if (countryCode === property.country_code) { void saveChanges(); return; }
+    Alert.alert("Change property country?", "Future scans and replacement searches will use the new country and currency. Existing item values keep their original currency and market, and existing claim packs remain unchanged. Coverly does not automatically convert historic values.", [
+      { text: "Cancel", style: "cancel" },
+      { text: "Change country", onPress: () => void saveChanges() },
+    ]);
   };
 
   const handleDelete = () => {
@@ -287,6 +294,10 @@ export default function EditPropertyScreen() {
                 placeholder="Optional policy reference"
                 colors={colors}
               />
+            </FormField>
+            <FormField label="Property country *" colors={colors}>
+              <CountrySelect value={countryCode} onChange={setCountryCode} />
+              <Text style={{ fontSize: 11, color: colors.mutedForeground }}>Currency: {resolveMarketConfig(countryCode)?.currencyCode ?? "—"}. Existing values are not converted.</Text>
             </FormField>
           </View>
 

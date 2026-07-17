@@ -21,6 +21,7 @@ import {
   safeClaimPackPdfFilename,
 } from "@/lib/claim-pack-history";
 import { supabase } from "@/lib/supabase";
+import { formatMoney } from "@/lib/money";
 import type { InventoryFile } from "@/types";
 
 const CLAIM_PACK_SIGNED_URL_EXPIRY_SECONDS = 60 * 10;
@@ -36,6 +37,8 @@ type ClaimPackHistoryRow = {
   generation_error?: string | null;
   total_value?: number | null;
   item_count?: number | null;
+  currency_code?: string | null;
+  summary_currency?: string | null;
   totals?: {
     selectedItemsCount?: number;
     selectedEstimatedValue?: number;
@@ -69,7 +72,7 @@ export default function ClaimPacksScreen() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("claim_packs")
-        .select("id, file_id, pack_ref, status, filename, generated_at, storage_path, generation_error, total_value, item_count, totals")
+        .select("id, file_id, pack_ref, status, filename, generated_at, storage_path, generation_error, total_value, item_count, totals, currency_code, summary_currency")
         .order("generated_at", { ascending: false, nullsFirst: false })
         .limit(5);
       if (error) throw error;
@@ -349,7 +352,7 @@ function claimPackHistorySubtitle(pack: ClaimPackHistoryRow): string {
   const itemCount = pack.totals?.selectedItemsCount ?? pack.item_count ?? null;
   const items = itemCount ? `${itemCount} items` : null;
   const totalValue = pack.totals?.selectedEstimatedValue ?? pack.totals?.totalEstimatedValue ?? pack.total_value;
-  const value = totalValue ? formatCurrency(totalValue) : null;
+  const value = totalValue ? formatMoney(totalValue, pack.summary_currency ?? pack.currency_code ?? "NZD", { formal: true }) : null;
   return [items, value, dateLabel].filter(Boolean).join(" · ");
 }
 
@@ -367,14 +370,6 @@ function claimPackDraftSubtitle(draft: StoredClaimPackDraft): string {
   const items = draft.selectedItemIds.length > 0 ? `${draft.selectedItemIds.length} items` : "No items selected yet";
   const claim = draft.claimNumber.trim() ? `Claim ${draft.claimNumber.trim()}` : null;
   return [items, claim, dateLabel].filter(Boolean).join(" · ");
-}
-
-function formatCurrency(value: number): string {
-  return new Intl.NumberFormat("en-NZ", {
-    style: "currency",
-    currency: "NZD",
-    maximumFractionDigits: 0,
-  }).format(value);
 }
 
 const styles = StyleSheet.create({

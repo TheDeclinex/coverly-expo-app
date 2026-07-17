@@ -8,7 +8,6 @@ export interface ReplacementPriceSearchRequest {
   description?: string;
   category?: string;
   brand?: string;
-  country?: string;
   minPrice?: number;
   maxPrice?: number;
   searchQuery?: string;
@@ -32,6 +31,19 @@ export interface ReplacementPriceResult {
   thumbnail?: string;
   position: number;
   matchType: ReplacementMatchType;
+  currencyCode: string | null;
+  retailerCountryCode: string | null;
+  fulfilmentType: "local" | "overseas" | "unknown";
+  warnings: string[];
+}
+
+export interface ReplacementSearchContext {
+  countryCode: string;
+  countryName: string;
+  currencyCode: string;
+  pricingSupportTier: "verified" | "preview" | "limited";
+  provider: string;
+  searchedAt: string;
 }
 
 interface ReplacementPriceSearchSuccess {
@@ -41,6 +53,7 @@ interface ReplacementPriceSearchSuccess {
   low?: number;
   median?: number;
   high?: number;
+  context: ReplacementSearchContext;
 }
 
 interface ReplacementPriceSearchFailure {
@@ -77,7 +90,7 @@ export class ReplacementPriceSearchError extends Error {
 export type ReplacementPriceFilter = "all" | "lower" | "around" | "premium";
 
 export function getItemUnitEstimate(item: InventoryItem): number | null {
-  const value = item.estimated_price ?? item.unit_estimated_price;
+  const value = item.unit_estimated_price ?? item.estimated_price;
   return value != null && Number.isFinite(value) && value > 0 ? value : null;
 }
 
@@ -92,7 +105,7 @@ export function buildReplacementSearchQuery(item: InventoryItem): string {
       index,
   );
 
-  return `${uniqueTerms.join(" ")} NZ`.trim();
+  return uniqueTerms.join(" ").trim();
 }
 
 export function filterReplacementResults(
@@ -135,7 +148,6 @@ function safeRequestLogBody(body: ReplacementPriceSearchRequest): Record<string,
     descriptionPresent: !!body.description,
     category: body.category,
     brand: body.brand,
-    country: body.country,
     searchQuery: body.searchQuery,
     num: body.num,
     hasUsageIdempotencyKey: !!body.usageIdempotencyKey,

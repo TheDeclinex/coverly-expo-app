@@ -1,4 +1,5 @@
 import type { InventoryItem, ItemPhoto } from "@/types";
+import { formatMoney } from "./money.ts";
 
 export function getItemPrice(item: InventoryItem): number {
   return getItemUnitPrice(item);
@@ -6,13 +7,13 @@ export function getItemPrice(item: InventoryItem): number {
 
 /** Canonical per-item replacement price. Legacy rows may only have estimated_price. */
 export function getItemUnitPrice(item: InventoryItem): number {
-  return item.unit_estimated_price ?? item.estimated_price ?? 0;
+  const value = item.unit_estimated_price ?? item.estimated_price;
+  return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : 0;
 }
 
 export function getItemTotalValue(item: InventoryItem): number {
-  const price = getItemPrice(item);
-  const qty = item.quantity ?? 1;
-  return price * qty;
+  const unitPrice = getItemUnitPrice(item);
+  return unitPrice > 0 ? unitPrice * Math.max(1, item.quantity ?? 1) : 0;
 }
 
 export function getItemPhotos(item: InventoryItem): ItemPhoto[] {
@@ -40,25 +41,29 @@ export function hasPhoto(item: InventoryItem): boolean {
 }
 
 export function hasValue(item: InventoryItem): boolean {
-  return item.estimated_price != null || item.unit_estimated_price != null;
+  return getItemUnitPrice(item) > 0;
 }
 
 export function needsReview(item: InventoryItem): boolean {
   return !hasPhoto(item) || !hasValue(item);
 }
 
-export function formatCurrency(value: number | null | undefined): string {
+export function formatCurrency(value: number | null | undefined, currencyCode = "NZD"): string {
+  return formatMoney(value, currencyCode);
+  /* legacy formatter retained below only for source-history clarity
   if (value === null || value === undefined) return "—";
   return `$${value.toLocaleString("en-US", {
     minimumFractionDigits: 0,
     maximumFractionDigits: 0,
-  })}`;
+  })}`; */
 }
 
-export function formatCurrencyFull(value: number | null | undefined): string {
+export function formatCurrencyFull(value: number | null | undefined, currencyCode = "NZD"): string {
+  return formatMoney(value, currencyCode, { formal: true });
+  /* legacy formatter retained below only for source-history clarity
   if (value === null || value === undefined) return "—";
   return `$${value.toLocaleString("en-US", {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
-  })}`;
+  })}`; */
 }

@@ -52,6 +52,7 @@ import {
   needsReview,
 } from "@/lib/inventory-mappers";
 import { formatUploadFailure, uploadCoverPhoto } from "@/lib/photo-upload";
+import { formatCurrencyTotals } from "@/lib/money";
 import {
   DUPLICATE_ROOM_NAME_MESSAGE,
   formatRoomCreationError,
@@ -294,11 +295,13 @@ function InsightCard({
   items,
   stats,
   totalValue,
+  currencyCode,
   colors,
 }: {
   items: InventoryItem[];
   stats: ReturnType<typeof calcPropertyStats>;
   totalValue: number;
+  currencyCode: string;
   colors: ReturnType<typeof import("@/hooks/useColors").useColors>;
 }) {
   const [innerW, setInnerW] = useState(0);
@@ -368,9 +371,9 @@ function InsightCard({
       <View style={styles.insightStatsRow}>
         <View style={[styles.insightStatCell, { flex: 1.45 }]}>
           <Text style={styles.insightStatValue} numberOfLines={1} adjustsFontSizeToFit>
-            {formatCurrency(stats.totalValue)}
+            {formatCurrencyTotals(stats.totalsByCurrency)}
           </Text>
-          <Text style={styles.insightStatLabel}>Inventory value</Text>
+          <Text style={styles.insightStatLabel}>{stats.hasMixedCurrencies ? "Multiple currencies" : "Inventory value"}</Text>
         </View>
         <View style={styles.insightStatDivider} />
         <View style={styles.insightStatCell}>
@@ -577,7 +580,7 @@ function InsightCard({
               <View style={{ flex: 1, gap: 3 }}>
                 <Text style={[styles.categoryModalTotal, { color: colors.foreground }]}>100%</Text>
                 <Text style={[styles.categoryModalTotalLabel, { color: colors.mutedForeground }]}>of documented value</Text>
-                <Text style={[styles.categoryModalValue, { color: colors.foreground }]}>{formatCurrency(categoryTotal || null)}</Text>
+                <Text style={[styles.categoryModalValue, { color: colors.foreground }]}>{formatCurrency(categoryTotal || null, currencyCode)}</Text>
               </View>
             </View>
 
@@ -599,7 +602,7 @@ function InsightCard({
                       {item.name}
                     </Text>
                     <Text style={[styles.categoryModalValueCell, { color: colors.foreground }]}>
-                      {formatCurrency(item.value || null)}
+                      {formatCurrency(item.value || null, currencyCode)}
                     </Text>
                     <Text style={[styles.categoryModalPercent, { color: colors.mutedForeground }]}>
                       {percent.toFixed(percent >= 10 ? 0 : 1)}%
@@ -742,9 +745,11 @@ const LEGEND_LIMIT = 4; // dots shown beneath bars before "+N more"
 
 function RoomBarsSection({
   roomStats,
+  currencyCode,
   colors,
 }: {
   roomStats: RoomStat[];
+  currencyCode: string;
   colors: ReturnType<typeof import("@/hooks/useColors").useColors>;
 }) {
   const [modalVisible, setModalVisible] = useState(false);
@@ -1010,7 +1015,7 @@ function RoomBarsSection({
                   <Text
                     style={{ width: 90, fontSize: 14, fontFamily: "Inter_500Medium", color: colors.foreground, textAlign: "right" }}
                   >
-                    {formatCurrency(rs.totalValue || null)}
+                    {formatCurrency(rs.totalValue || null, currencyCode)}
                   </Text>
                   <Text
                     style={{ width: 52, fontSize: 14, fontFamily: "Inter_400Regular", color: colors.mutedForeground, textAlign: "right" }}
@@ -1048,6 +1053,7 @@ const RING_PATH =
 function RoomCard({
   item,
   propertyName,
+  currencyCode,
   itemCount,
   totalValue,
   categoryValues,
@@ -1059,6 +1065,7 @@ function RoomCard({
 }: {
   item: InventoryRoom;
   propertyName: string;
+  currencyCode: string;
   itemCount: number;
   totalValue: number;
   categoryValues: RoomStat["categoryValues"];
@@ -1247,7 +1254,7 @@ function RoomCard({
             </Text>
           </View>
           <Text style={[styles.metaValue, { color: colors.primary }]}>
-            {formatCurrency(totalValue || null)}
+            {formatCurrency(totalValue || null, currencyCode)}
           </Text>
         </View>
         <Pressable
@@ -1332,7 +1339,7 @@ function RoomCard({
                     {Math.round((category.value / categoryTotal) * 100)}%
                   </Text>
                   <Text style={[styles.roomLegendValue, { color: colors.foreground }]}>
-                    {formatCurrency(category.value)}
+                    {formatCurrency(category.value, currencyCode)}
                   </Text>
                 </View>
               ))}
@@ -1351,6 +1358,7 @@ const MemoizedRoomCard = React.memo(
   (previous, next) =>
     previous.item === next.item
     && previous.propertyName === next.propertyName
+    && previous.currencyCode === next.currencyCode
     && previous.itemCount === next.itemCount
     && previous.totalValue === next.totalValue
     && previous.categoryValues === next.categoryValues
@@ -2214,6 +2222,7 @@ export default function PropertyDetailScreen() {
           items={itemsWithDates}
           stats={stats}
           totalValue={stats.totalValue}
+          currencyCode={property?.currency_code ?? "NZD"}
           colors={colors}
         />
 
@@ -2453,7 +2462,7 @@ export default function PropertyDetailScreen() {
       <View style={{ paddingHorizontal: 16, paddingTop: 4, gap: 10, paddingBottom: 8 }}>
         {/* Room distribution bars */}
         {stats.roomStats.length > 0 && (
-          <RoomBarsSection roomStats={stats.roomStats} colors={colors} />
+          <RoomBarsSection roomStats={stats.roomStats} currencyCode={property?.currency_code ?? "NZD"} colors={colors} />
         )}
 
         {/* Inventory readiness */}
@@ -2716,6 +2725,7 @@ export default function PropertyDetailScreen() {
               <MemoizedRoomCard
                 item={rs.room}
                 propertyName={property?.name ?? name ?? "Property"}
+                currencyCode={property?.currency_code ?? "NZD"}
                 itemCount={rs.itemCount}
                 totalValue={rs.totalValue}
                 categoryValues={rs.categoryValues}

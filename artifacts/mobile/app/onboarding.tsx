@@ -30,12 +30,15 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { CoverlyAuthBackground, CoverlyAuthMark } from "@/components/auth/CoverlyAuthBrand";
 import { PropertyAllowanceModal } from "@/components/PropertyAllowanceModal";
+import { CountrySelect } from "@/components/CountrySelect";
 import { coverlyBrand } from "@/constants/brand";
+import { resolveMarketConfig } from "@/constants/market-config";
 import { useAuth } from "@/context/AuthContext";
 import { PROPERTY_TYPES } from "@/constants/propertyTypes";
 import { useColors } from "@/hooks/useColors";
 import { usePropertyAllowance } from "@/hooks/usePropertyAllowance";
 import { createProperty, PropertyCreationError } from "@/lib/property-service";
+import { supabase } from "@/lib/supabase";
 
 // ─── Design tokens ─────────────────────────────────────────────────────────────
 const BTN_TOP = coverlyBrand.teal;
@@ -88,6 +91,7 @@ export default function OnboardingScreen() {
 
   const [propertyName, setPropertyName]     = useState("");
   const [propertyType, setPropertyType]     = useState<string | null>(null);
+  const [countryCode, setCountryCode]       = useState("NZ");
   const [coverAmount, setCoverAmount]       = useState("");
   const [creating, setCreating]             = useState(false);
   const [createError, setCreateError]       = useState<string | null>(null);
@@ -123,6 +127,12 @@ export default function OnboardingScreen() {
     return () => {
       cancelled = true;
     };
+  }, [userId]);
+
+  useEffect(() => {
+    if (!userId) return;
+    void supabase.from("user_profiles").select("country_code").eq("id", userId).maybeSingle()
+      .then(({ data }) => { if (/^[A-Z]{2}$/.test(data?.country_code ?? "")) setCountryCode(data!.country_code); });
   }, [userId]);
 
   // ── Animated values ─────────────────────────────────────────────────────────
@@ -238,6 +248,7 @@ export default function OnboardingScreen() {
       const n = parseFloat(coverAmount);
       const row = await createProperty({
         name: trimmedName,
+        countryCode,
         propertyType,
         contentsSumInsured: isFinite(n) && n > 0 ? n : null,
       });
@@ -485,10 +496,15 @@ export default function OnboardingScreen() {
             </View>
 
             <View style={{ gap: 8 }}>
+              <Text style={styles.fieldLabel}>PROPERTY COUNTRY</Text>
+              <CountrySelect value={countryCode} onChange={setCountryCode} />
+            </View>
+
+            <View style={{ gap: 8 }}>
               <Text style={styles.fieldLabel}>CONTENTS COVER AMOUNT</Text>
               <View style={styles.moneyInputRow}>
                 <Text style={styles.moneyPrefix}>
-                  $
+                  {resolveMarketConfig(countryCode)?.currencyCode ?? "NZD"}
                 </Text>
                 <TextInput
                   style={styles.moneyInput}

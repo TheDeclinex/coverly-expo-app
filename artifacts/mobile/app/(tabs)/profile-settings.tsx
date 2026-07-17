@@ -14,12 +14,12 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { ErrorState } from "@/components/ErrorState";
+import { CountrySelect } from "@/components/CountrySelect";
 import { LoadingState } from "@/components/LoadingState";
 import { useToast } from "@/components/Toast";
 import { useProfileSettings } from "@/hooks/useProfileSettings";
 import { useColors } from "@/hooks/useColors";
 import {
-  COUNTRY_OPTIONS,
   DEFAULT_COUNTRY_CODE,
   validateProfileSettings,
   type ProfileSettingsInput,
@@ -112,27 +112,8 @@ export default function ProfileSettingsScreen() {
 
         <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border, borderRadius: colors.radius }]}> 
           <Text style={[styles.sectionTitle, { color: colors.foreground }]}>Country or region</Text>
-          <View style={styles.countryGrid}>
-            {COUNTRY_OPTIONS.map((option) => {
-              const selected = form.countryCode === option.code;
-              return (
-                <Pressable
-                  key={option.code}
-                  accessibilityRole="radio"
-                  accessibilityState={{ selected }}
-                  onPress={() => { setForm((current) => ({ ...current, countryCode: option.code })); setSaveError(null); }}
-                  style={[styles.countryOption, {
-                    borderColor: selected ? colors.primary : colors.border,
-                    backgroundColor: selected ? colors.accent : colors.card,
-                    borderRadius: colors.radius,
-                  }]}
-                >
-                  <Text style={[styles.countryLabel, { color: selected ? colors.accentForeground : colors.foreground }]}>{option.label}</Text>
-                  <Text style={[styles.countryCode, { color: colors.mutedForeground }]}>{option.code}</Text>
-                </Pressable>
-              );
-            })}
-          </View>
+          <CountrySelect value={form.countryCode} onChange={(countryCode) => { setForm((current) => ({ ...current, countryCode })); setSaveError(null); }} />
+          <Text style={[styles.helper, { color: colors.mutedForeground }]}>This is the default for new properties. Existing properties and values do not change.</Text>
         </View>
 
         <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border, borderRadius: colors.radius }]}> 

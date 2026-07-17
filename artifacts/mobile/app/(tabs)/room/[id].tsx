@@ -69,6 +69,8 @@ import { takeRecentItemBatch, withoutRecentItem } from "@/lib/recent-items";
 import { clearRoomViewSession, getRoomViewSession, resolveRoomRestoreIndex, updateRoomViewSession } from "@/lib/room-view-session";
 import { supabase } from "@/lib/supabase";
 import { subtractDeletedItems, withoutRoomItems } from "@/lib/room-deletion";
+import { formatCurrencyTotals, groupAmountsByCurrency } from "@/lib/money";
+import { parseReplacementPriceInput, resolveReviewedValueCurrency, resolveStoredValueCurrency, resolveValueMarket, supportedCurrencyCode } from "@/lib/replacement-value";
 import { roomCoverActions, withRoomCoverPhoto, withRoomListCoverPhoto, type RoomCoverAction } from "@/lib/room-cover-photo";
 import type { InventoryItem, InventoryRoom } from "@/types";
 import type { VoiceItemPatch } from "@/types/voice";
@@ -132,11 +134,6 @@ function isWebUrl(value: string | null | undefined): value is string {
   return typeof value === "string" && /^https?:\/\//i.test(value);
 }
 
-function parsePrice(value: string): number | null {
-  const parsed = Number(value.replace(/[^0-9.]/g, ""));
-  return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
-}
-
 type CardEditTarget = "name" | "valuation";
 type RoomViewMode = "detailed" | "compact";
 type RoomReadinessFilter = "all" | "needs_review" | "missing_photo" | "missing_value";
@@ -161,6 +158,8 @@ function ItemCard({
   item,
   parentRoomName,
   parentPropertyName,
+  currencyCode,
+  propertyCountryCode,
   colors,
   resolvedImageUrl,
   onImagePermanentError,
@@ -179,6 +178,8 @@ function ItemCard({
   item: InventoryItem;
   parentRoomName: string;
   parentPropertyName: string;
+  currencyCode: string;
+  propertyCountryCode: string;
   colors: ReturnType<typeof import("@/hooks/useColors").useColors>;
   /** Pre-resolved signed URL from the parent's batch useSignedUrls() call. */
   resolvedImageUrl?: string | null;
@@ -203,17 +204,20 @@ function ItemCard({
   const [nameDraft, setNameDraft] = useState(item.name);
   const [quantityDraft, setQuantityDraft] = useState(String(item.quantity ?? 1));
   const [unitPriceDraft, setUnitPriceDraft] = useState(String(getItemUnitPrice(item)));
+  const [draftCurrency, setDraftCurrency] = useState(() => resolveStoredValueCurrency(item.estimated_currency, currencyCode));
   const [savingCard, setSavingCard] = useState(false);
   const [barcodeScanOpen, setBarcodeScanOpen] = useState(false);
   const [voiceEditOpen, setVoiceEditOpen] = useState(false);
+  const displayCurrency = resolveStoredValueCurrency(item.estimated_currency, currencyCode);
 
   useEffect(() => {
     if (!editingTarget) {
       setNameDraft(item.name);
       setQuantityDraft(String(item.quantity ?? 1));
       setUnitPriceDraft(String(getItemUnitPrice(item)));
+      setDraftCurrency(resolveStoredValueCurrency(item.estimated_currency, currencyCode));
     }
-  }, [editingTarget, item]);
+  }, [currencyCode, editingTarget, item]);
 
   // The single source of truth for this item's image reference in the DB.
   // image_url takes priority; photo_url is the legacy fallback column.
@@ -256,7 +260,7 @@ function ItemCard({
   const unitPrice = getItemUnitPrice(item);
   const totalValue = unitPrice * quantity;
   const draftQuantity = Math.max(1, Number.parseInt(quantityDraft, 10) || 1);
-  const draftUnitPrice = parsePrice(unitPriceDraft) ?? 0;
+  const draftUnitPrice = parseReplacementPriceInput(unitPriceDraft).value ?? 0;
   const draftTotal = draftUnitPrice * draftQuantity;
   const valLabel = valuationLabel(item);
   const hasReplacementListing = valLabel === "Replacement listing";
@@ -304,6 +308,7 @@ function ItemCard({
     setNameDraft(item.name);
     setQuantityDraft(String(quantity));
     setUnitPriceDraft(String(unitPrice));
+    setDraftCurrency(displayCurrency);
     onBeginEdit("name");
     void Haptics.selectionAsync().catch(() => undefined);
   };
@@ -317,6 +322,7 @@ function ItemCard({
     setNameDraft(item.name);
     setQuantityDraft(String(quantity));
     setUnitPriceDraft(String(unitPrice));
+    setDraftCurrency(displayCurrency);
     onBeginEdit("valuation");
     void Haptics.selectionAsync().catch(() => undefined);
   };
@@ -330,6 +336,7 @@ function ItemCard({
     setNameDraft(item.name);
     setQuantityDraft(String(quantity));
     setUnitPriceDraft(String(unitPrice));
+    setDraftCurrency(displayCurrency);
     closeEdit();
     Keyboard.dismiss();
     void Haptics.selectionAsync().catch(() => undefined);
@@ -343,23 +350,28 @@ function ItemCard({
       return;
     }
 
-    const nextUnitPrice = parsePrice(unitPriceDraft);
-    if (nextUnitPrice === null) {
-      Alert.alert("Check replacement price", "Enter a valid replacement price of zero or more.");
+    const parsedPrice = parseReplacementPriceInput(unitPriceDraft);
+    if (parsedPrice.status === "invalid") {
+      Alert.alert("Check replacement price", "Enter a valid replacement price. Use zero to clear the value.");
       return;
     }
 
+    const nextUnitPrice = parsedPrice.value ?? 0;
     const roundedUnitPrice = Math.round(nextUnitPrice * 100) / 100;
-    const priceChanged = roundedUnitPrice !== unitPrice;
+    const normalizedUnitPrice = roundedUnitPrice > 0 ? roundedUnitPrice : null;
+    const priceChanged = normalizedUnitPrice !== (unitPrice > 0 ? unitPrice : null)
+      || (normalizedUnitPrice != null && draftCurrency !== displayCurrency);
     const quantityChanged = draftQuantity !== quantity;
     const nameChanged = nextName !== item.name;
     const updates: Partial<InventoryItem> = {
       name: nextName,
       quantity: draftQuantity,
-      estimated_price: roundedUnitPrice,
-      unit_estimated_price: roundedUnitPrice,
+      estimated_price: normalizedUnitPrice == null ? null : normalizedUnitPrice * draftQuantity,
+      unit_estimated_price: normalizedUnitPrice,
+      estimated_currency: normalizedUnitPrice == null ? null : draftCurrency,
+      valuation_market: normalizedUnitPrice == null ? null : resolveValueMarket(draftCurrency, item.estimated_currency, item.valuation_market, currencyCode, propertyCountryCode),
       ...(priceChanged
-        ? { price_source_type: "user_entered", valuation_basis: "manual" }
+        ? { price_source_type: "user_entered", valuation_basis: "manual", estimated_at: normalizedUnitPrice == null ? null : new Date().toISOString() }
         : {}),
     };
 
@@ -383,6 +395,8 @@ function ItemCard({
       setQuantityDraft(String(Math.max(1, Math.round(patch.quantity))));
     }
     const replacementPrice = patch.unit_estimated_price ?? patch.estimated_price;
+    const reviewedCurrency = supportedCurrencyCode(patch.estimated_currency);
+    if (reviewedCurrency) setDraftCurrency(resolveReviewedValueCurrency(reviewedCurrency, item.estimated_currency, currencyCode));
     if (typeof replacementPrice === "number" && Number.isFinite(replacementPrice) && replacementPrice >= 0) {
       setUnitPriceDraft(String(Math.round(replacementPrice * 100) / 100));
     }
@@ -596,7 +610,7 @@ function ItemCard({
                       {draftQuantity > 1 ? "Each" : "Price"}
                     </Text>
                     <View style={[styles.compactPriceInputWrap, { borderColor: colors.primary, backgroundColor: colors.card }]}>
-                      <Text style={[styles.compactCurrency, { color: colors.mutedForeground }]}>$</Text>
+                      <Text style={[styles.compactCurrency, { color: colors.mutedForeground }]}>{draftCurrency}</Text>
                       <TextInput
                         autoFocus
                         accessibilityLabel={draftQuantity > 1 ? "Each price" : "Price"}
@@ -612,7 +626,7 @@ function ItemCard({
                     </View>
                   </View>
                   <Text style={[styles.compactTotalPreview, { color: colors.mutedForeground }]}>
-                    Total {formatCurrencyFull(draftTotal)}
+                    Total {formatCurrencyFull(draftTotal, draftCurrency)}
                   </Text>
                   <View style={styles.compactEditFooter}>
                     <Pressable
@@ -651,11 +665,11 @@ function ItemCard({
                   >
                     <View style={styles.compactValuation}>
                       <Text style={[styles.mainValue, { color: colors.foreground }]} numberOfLines={1}>
-                        {formatCurrencyFull(totalValue)}
+                        {formatCurrencyFull(totalValue, displayCurrency)}
                       </Text>
                       {quantity > 1 ? (
                         <Text style={[styles.valueMeta, { color: colors.mutedForeground }]} numberOfLines={1}>
-                          Qty {quantity} · Each {formatCurrencyFull(unitPrice)}
+                          Qty {quantity} · Each {formatCurrencyFull(unitPrice, displayCurrency)}
                         </Text>
                       ) : null}
                     </View>
@@ -889,7 +903,7 @@ function ItemCard({
                     },
                   ]}
                 >
-                  <Text style={[styles.editCurrencyPrefix, { color: colors.mutedForeground }]}>$</Text>
+                  <Text style={[styles.editCurrencyPrefix, { color: colors.mutedForeground }]}>{draftCurrency}</Text>
                   <TextInput
                     accessibilityLabel="Replacement price"
                     value={unitPriceDraft}
@@ -907,7 +921,7 @@ function ItemCard({
             </View>
             {draftQuantity > 1 ? (
               <Text style={[styles.editTotalPreview, { color: colors.mutedForeground }]}>
-                Total {formatCurrencyFull(draftTotal)}
+                Total {formatCurrencyFull(draftTotal, draftCurrency)}
               </Text>
             ) : null}
             <View style={styles.nameModalActions}>
@@ -1020,6 +1034,7 @@ function CompactItemCard({
   item,
   parentRoomName,
   parentPropertyName,
+  currencyCode,
   colors,
   resolvedImageUrl,
   onImagePermanentError,
@@ -1034,6 +1049,7 @@ function CompactItemCard({
   item: InventoryItem;
   parentRoomName: string;
   parentPropertyName: string;
+  currencyCode: string;
   colors: ReturnType<typeof import("@/hooks/useColors").useColors>;
   resolvedImageUrl?: string | null;
   onImagePermanentError?: () => void;
@@ -1047,6 +1063,7 @@ function CompactItemCard({
 }) {
   const readinessChip = itemReadinessChip(item);
   const totalValue = getItemTotalValue(item);
+  const displayCurrency = item.estimated_currency ?? currencyCode;
   const placeholderIcon = categoryIcon(item.category);
   const pin = normalizedItemPin(item);
 
@@ -1130,7 +1147,7 @@ function CompactItemCard({
             {item.name}
           </Text>
           <Text style={[styles.gridValue, { color: colors.mutedForeground }]} numberOfLines={1}>
-            {totalValue > 0 ? formatCurrencyFull(totalValue) : "No value"}
+            {totalValue > 0 ? formatCurrencyFull(totalValue, displayCurrency) : "No value"}
           </Text>
           {readinessChip ? (
             <View style={[styles.gridReadinessChip, { borderColor: colors.warning, backgroundColor: colors.warning + "10" }]}>
@@ -1313,15 +1330,17 @@ export default function ItemsScreen() {
     queryFn: async () => {
       const { data, error: queryError } = await supabase
         .from("inventory_files")
-        .select("id, name")
+        .select("id, name, currency_code, country_code")
         .eq("id", resolvedFileId!)
         .single();
       if (queryError) throw queryError;
-      return data as { id: string; name: string };
+      return data as { id: string; name: string; currency_code: string; country_code: string };
     },
-    enabled: Boolean(session && resolvedFileId && !fileName),
+    enabled: Boolean(session && resolvedFileId),
   });
   const resolvedPropertyName = fileName ?? parentProperty?.name ?? "Property";
+  const resolvedPropertyCurrency = parentProperty?.currency_code ?? "NZD";
+  const resolvedPropertyCountry = parentProperty?.country_code ?? "NZ";
   const resolvedRoomName = room?.name ?? name ?? "Room";
   const scanAddedCount = Number.parseInt(addedCount ?? "", 10);
   const scanSuccessMessage = Number.isFinite(scanAddedCount) && scanAddedCount > 0
@@ -1475,10 +1494,12 @@ export default function ItemsScreen() {
 
   const roomSummary = React.useMemo(() => {
     const roomItems = items ?? [];
-    const totalValue = roomItems.reduce((sum, item) => sum + getItemTotalValue(item), 0);
+    const totalsByCurrency = groupAmountsByCurrency(roomItems, getItemTotalValue, (item) => item.estimated_currency ?? resolvedPropertyCurrency);
+    const primaryItems = roomItems.filter((item) => (item.estimated_currency ?? resolvedPropertyCurrency) === resolvedPropertyCurrency);
+    const totalValue = totalsByCurrency[resolvedPropertyCurrency] ?? 0;
     const categoryMap = new Map<string, { label: string; value: number; count: number; color: string }>();
 
-    roomItems.forEach((item) => {
+    primaryItems.forEach((item) => {
       const label = item.category?.trim() || "General items";
       const current = categoryMap.get(label) ?? {
         label,
@@ -1495,9 +1516,10 @@ export default function ItemsScreen() {
     return {
       itemCount: roomItems.length,
       totalValue,
+      totalsByCurrency,
       categories,
     };
-  }, [items]);
+  }, [items, resolvedPropertyCurrency]);
 
   useEffect(() => {
     if (isLoading || visibleItems.length === 0 || restoredRoomScrollRef.current) return;
@@ -2032,7 +2054,7 @@ export default function ItemsScreen() {
             </Text>
           </View>
           <Text style={[styles.roomSummaryValue, { color: colors.primary }]}>
-            {formatCurrencyFull(roomSummary.totalValue)}
+            {formatCurrencyTotals(roomSummary.totalsByCurrency)}
           </Text>
         </View>
         <Pressable
@@ -2075,7 +2097,7 @@ export default function ItemsScreen() {
                   {category.label}
                 </Text>
                 <Text style={[styles.categoryLegendValue, { color: colors.mutedForeground }]}>
-                  {category.value > 0 ? formatCurrencyFull(category.value) : `${category.count}`}
+                  {category.value > 0 ? formatCurrencyFull(category.value, resolvedPropertyCurrency) : `${category.count}`}
                 </Text>
               </View>
             ))}
@@ -2312,6 +2334,7 @@ export default function ItemsScreen() {
           item={item}
           parentRoomName={resolvedRoomName}
           parentPropertyName={resolvedPropertyName}
+          currencyCode={resolvedPropertyCurrency}
           colors={colors}
           isNew={newItemIds.has(item.id)}
           resolvedImageUrl={itemSignedUrls.get(item.image_url ?? item.photo_url ?? "") ?? null}
@@ -2331,6 +2354,8 @@ export default function ItemsScreen() {
         item={item}
         parentRoomName={resolvedRoomName}
         parentPropertyName={resolvedPropertyName}
+        currencyCode={resolvedPropertyCurrency}
+        propertyCountryCode={resolvedPropertyCountry}
         colors={colors}
         evidenceCount={evidenceCounts[item.id] ?? 0}
         isNew={newItemIds.has(item.id)}

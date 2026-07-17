@@ -13,6 +13,7 @@ import {
   createWholePropertyClaimPackSelection,
   loadClaimPackDraftSnapshot,
   removeClaimPackRoom,
+  resolveClaimItemCurrency,
   saveClaimPackDraftSnapshot,
   selectClaimPackItem,
   selectAllClaimPackItemsInRoom,
@@ -182,10 +183,44 @@ test("summary counts selected value, evidence, and missing readiness data", () =
   assert.equal(summary.selectedRoomsCount, 2);
   assert.equal(summary.selectedItemsCount, 3);
   assert.equal(summary.includedEvidenceCount, 3);
+  // Legacy estimated_price-only rows store a per-unit value.
   assert.equal(summary.selectedEstimatedValue, 1100);
+  assert.deepEqual(summary.totalsByCurrency, { NZD: 1100 });
   assert.equal(summary.missingValueCount, 1);
   assert.equal(summary.missingPhotoCount, 1);
   assert.equal(summary.missingEvidenceCount, 1);
+});
+
+test("claim currency fallback uses item, then property or snapshot, then historic NZD", () => {
+  assert.equal(resolveClaimItemCurrency("USD", "AUD"), "USD");
+  assert.equal(resolveClaimItemCurrency(null, "NZD"), "NZD");
+  assert.equal(resolveClaimItemCurrency(null, "AUD"), "AUD");
+  assert.equal(resolveClaimItemCurrency(undefined, undefined), "NZD");
+
+  const selection = createInitialClaimPackSelection(rooms, items);
+  const auSummary = calculateClaimPackSummary({
+    rooms,
+    items: [
+      { ...items[0], estimated_currency: null },
+      { ...items[1], estimated_currency: "USD" },
+      items[2],
+    ],
+    evidenceCountsByItemId: {},
+    selection,
+    summaryCurrencyCode: "AUD",
+  });
+  assert.equal(auSummary.selectedEstimatedValue, 900);
+  assert.deepEqual(auSummary.totalsByCurrency, { AUD: 900, USD: 200 });
+
+  const unknownSummary = calculateClaimPackSummary({
+    rooms,
+    items: [items[2]],
+    evidenceCountsByItemId: {},
+    selection: createInitialClaimPackSelection(rooms, [items[2]]),
+    summaryCurrencyCode: "AUD",
+  });
+  assert.equal(unknownSummary.selectedEstimatedValue, 0);
+  assert.deepEqual(unknownSummary.totalsByCurrency, {});
 });
 
 test("client draft ids are stable-format local ids", () => {

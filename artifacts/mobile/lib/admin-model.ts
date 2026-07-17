@@ -3,13 +3,26 @@ export function adminNumberLabel(value: number | null | undefined): string {
   return new Intl.NumberFormat("en-NZ").format(value);
 }
 
-export function adminCurrencyLabel(value: number | null | undefined): string {
+export function adminCurrencyLabel(value: number | null | undefined, currencyCode?: string | null): string {
   if (value === null || value === undefined || !Number.isFinite(value)) return "Not available";
-  return value.toLocaleString("en-NZ", {
-    style: "currency",
-    currency: "NZD",
-    maximumFractionDigits: 0,
-  });
+  if (!currencyCode) return `${adminNumberLabel(value)} (currency unavailable)`;
+  try { return new Intl.NumberFormat("en", { style: "currency", currency: currencyCode, currencyDisplay: "code", maximumFractionDigits: 0 }).format(value); }
+  catch { return `${currencyCode} ${adminNumberLabel(value)}`; }
+}
+
+export function adminInventoryTotalLabel(
+  primaryValue: number | null | undefined,
+  propertyCurrency: string | null | undefined,
+  totals: Record<string, number> | null | undefined,
+): string {
+  const priced = Object.entries(totals ?? {})
+    .filter(([, value]) => Number.isFinite(value) && value > 0)
+    .sort(([left], [right]) => left.localeCompare(right));
+  if (priced.length === 0) return "Not available";
+  if (priced.length === 1 && priced[0][0] === propertyCurrency) {
+    return adminCurrencyLabel(primaryValue ?? priced[0][1], propertyCurrency);
+  }
+  return priced.map(([currencyCode, value]) => adminCurrencyLabel(value, currencyCode)).join(" · ");
 }
 
 export function adminTextLabel(value: string | null | undefined): string {

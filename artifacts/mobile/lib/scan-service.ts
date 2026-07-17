@@ -541,6 +541,10 @@ export async function runAiScan(input: ScanInput): Promise<ScanResult> {
             typeof raw.estimatedPrice === "number" ? raw.estimatedPrice : null,
           unitEstimatedPrice:
             typeof raw.unitEstimatedPrice === "number" ? raw.unitEstimatedPrice : null,
+          estimatedCurrency: typeof raw.estimatedCurrency === "string" ? raw.estimatedCurrency : null,
+          valuationMarket: typeof raw.valuationMarket === "string" ? raw.valuationMarket : null,
+          estimatedAt: typeof raw.estimatedAt === "string" ? raw.estimatedAt : null,
+          pricingSupportTier: raw.pricingSupportTier === "verified" || raw.pricingSupportTier === "preview" || raw.pricingSupportTier === "limited" ? raw.pricingSupportTier : undefined,
           brandMaker:
             typeof raw.brand_guess === "string" ? raw.brand_guess : null,
           modelSeries: null,

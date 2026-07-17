@@ -32,7 +32,7 @@ test("unrecognised category does not overwrite existing category", () => {
   assert.deepEqual(update, {});
 });
 
-test("replacement price writes the unit value without multiplying quantity", () => {
+test("replacement price maintains unit and grouped total semantics", () => {
   const update = buildVoiceItemUpdatePayload({
     quantity: 3,
     unit_estimated_price: 239,
@@ -43,7 +43,7 @@ test("replacement price writes the unit value without multiplying quantity", () 
 
   assert.equal(update.quantity, 3);
   assert.equal(update.unit_estimated_price, 239);
-  assert.equal(update.estimated_price, 239);
+  assert.equal(update.estimated_price, 717);
   assert.equal(update.price_source_type, "user_entered");
   assert.equal(update.valuation_basis, "manual");
 });
@@ -53,6 +53,12 @@ test("quantity-only update preserves valuation source", () => {
   assert.deepEqual(update, { quantity: 4 });
   assert.equal("price_source_type" in update, false);
   assert.equal("valuation_basis" in update, false);
+});
+
+test("quantity-only update recalculates total when the current unit value is known", () => {
+  const update = buildVoiceItemUpdatePayload({ quantity: 4 }, { quantity: 2, unit_estimated_price: 125, estimated_price: 250 });
+  assert.equal(update.unit_estimated_price, undefined);
+  assert.equal(update.estimated_price, 500);
 });
 
 test("original price does not change replacement valuation", () => {
@@ -65,8 +71,12 @@ test("original price does not change replacement valuation", () => {
 test("rejects invalid required and numeric values", () => {
   assert.throws(() => buildVoiceItemUpdatePayload({ name: "  " }), /cannot be empty/);
   assert.throws(() => buildVoiceItemUpdatePayload({ quantity: 0 }), /whole number/);
-  assert.throws(
-    () => buildVoiceItemUpdatePayload({ unit_estimated_price: -1 }),
-    /zero or more/,
-  );
+  assert.deepEqual(buildVoiceItemUpdatePayload({ unit_estimated_price: -1 }), {
+    unit_estimated_price: null,
+    estimated_price: null,
+  });
+  assert.deepEqual(buildVoiceItemUpdatePayload({ unit_estimated_price: 0 }), {
+    unit_estimated_price: null,
+    estimated_price: null,
+  });
 });

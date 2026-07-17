@@ -29,6 +29,7 @@ import { useAuth } from "@/context/AuthContext";
 import { useColors } from "@/hooks/useColors";
 import { formatCurrencyFull } from "@/lib/inventory-mappers";
 import { buildItemInsertPayload } from "@/lib/item-insert-helpers";
+import { parseReplacementPriceInput, resolveReviewedValueCurrency, resolveValueMarket, supportedCurrencyCode } from "@/lib/replacement-value";
 import { stageRecentItemBatch } from "@/lib/recent-items";
 import { formatUploadFailure, uploadItemPhoto } from "@/lib/photo-upload";
 import { supabase } from "@/lib/supabase";
@@ -73,7 +74,7 @@ function FormField({
   );
 }
 
-function parseMoneyDraft(value: string): number | null {
+function parseOriginalMoneyDraft(value: string): number | null {
   const cleaned = value.replace(/[^0-9.]/g, "").trim();
   if (!cleaned) return null;
   const parsed = Number.parseFloat(cleaned);
@@ -153,6 +154,8 @@ export default function AddItemScreen() {
   const [voiceTargetField, setVoiceTargetField] = useState<VoiceItemField | undefined>();
   const [voicePriceSourceType, setVoicePriceSourceType] = useState<string | undefined>();
   const [voiceValuationBasis, setVoiceValuationBasis] = useState<string | undefined>();
+  const [voiceEstimatedCurrency, setVoiceEstimatedCurrency] = useState<string | null>(null);
+  const [voiceOriginalCurrency, setVoiceOriginalCurrency] = useState<string | null>(null);
   const [photoUri, setPhotoUri] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -193,14 +196,16 @@ export default function AddItemScreen() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("inventory_files")
-        .select("id, name, user_id")
+        .select("id, name, user_id, country_code, currency_code")
         .eq("id", selectedFileId)
         .single();
       if (error) throw error;
-      return data as Pick<InventoryFile, "id" | "name" | "user_id">;
+      return data as Pick<InventoryFile, "id" | "name" | "user_id" | "country_code" | "currency_code">;
     },
     enabled: !!session && !!selectedFileId,
   });
+  const replacementCurrency = resolveReviewedValueCurrency(voiceEstimatedCurrency, null, selectedFile?.currency_code);
+  const purchaseCurrency = resolveReviewedValueCurrency(voiceOriginalCurrency, null, selectedFile?.currency_code);
 
   const pickPhoto = async () => {
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -256,11 +261,15 @@ export default function AddItemScreen() {
   };
 
   const applyVoicePatchToDraft = (patch: VoiceItemPatch) => {
+    const reviewedReplacementCurrency = supportedCurrencyCode(patch.estimated_currency);
+    const reviewedPurchaseCurrency = supportedCurrencyCode(patch.original_purchase_currency);
     const has = (key: keyof VoiceItemPatch) => Object.prototype.hasOwnProperty.call(patch, key);
     const canFill = (field: VoiceItemField, currentValue: string) =>
       voiceTargetField === field || !currentValue.trim();
     const canFillPrice = (field: VoiceItemField, currentValue: string) =>
-      voiceTargetField === field || parseMoneyDraft(currentValue) == null;
+      voiceTargetField === field || (field === "replacement_price"
+        ? parseReplacementPriceInput(currentValue).value == null
+        : parseOriginalMoneyDraft(currentValue) == null);
 
     if (has("name") && canFill("name", name)) setName(patch.name ?? "");
     if (has("category") && canFill("category", category)) setCategory(patch.category ?? "");
@@ -273,6 +282,7 @@ export default function AddItemScreen() {
     if (has("original_purchase_price") && canFillPrice("original_purchase_price", originalPurchasePrice)) {
       const originalPrice = patch.original_purchase_price;
       setOriginalPurchasePrice(originalPrice == null ? "" : String(originalPrice));
+      if (reviewedPurchaseCurrency) setVoiceOriginalCurrency(reviewedPurchaseCurrency);
 
       // On a new item, a single spoken price is useful as the initial item value
       // as well as purchase history. A separately extracted replacement price
@@ -284,6 +294,7 @@ export default function AddItemScreen() {
         canFillPrice("replacement_price", estimatedPrice)
       ) {
         setEstimatedPrice(String(originalPrice));
+        if (reviewedPurchaseCurrency) setVoiceEstimatedCurrency(reviewedPurchaseCurrency);
         setVoicePriceSourceType("user_entered");
         setVoiceValuationBasis("manual");
       }
@@ -292,6 +303,7 @@ export default function AddItemScreen() {
     if ((has("unit_estimated_price") || has("estimated_price")) && canFillPrice("replacement_price", estimatedPrice)) {
       const price = patch.unit_estimated_price ?? patch.estimated_price;
       setEstimatedPrice(price == null ? "" : String(price));
+      if (reviewedReplacementCurrency) setVoiceEstimatedCurrency(reviewedReplacementCurrency);
       setVoicePriceSourceType(patch.price_source_type ?? "user_entered");
       setVoiceValuationBasis(patch.valuation_basis ?? "manual");
     }
@@ -313,12 +325,21 @@ export default function AddItemScreen() {
       setErrorMsg("Please choose a property.");
       return;
     }
+    if (!selectedFile) {
+      setErrorMsg("Property market details are still loading. Please try again.");
+      return;
+    }
     if (!selectedRoomId) {
       setErrorMsg("Please choose a room.");
       return;
     }
     if (!session?.user.id) {
       setErrorMsg("Not signed in — please sign in again.");
+      return;
+    }
+    const replacementPrice = parseReplacementPriceInput(estimatedPrice);
+    if (replacementPrice.status === "invalid") {
+      setErrorMsg("Enter a valid replacement price.");
       return;
     }
 
@@ -336,8 +357,8 @@ export default function AddItemScreen() {
       }
     }
 
-    const price = parseMoneyDraft(estimatedPrice);
-    const originalPrice = parseMoneyDraft(originalPurchasePrice);
+    const price = replacementPrice.value;
+    const originalPrice = parseOriginalMoneyDraft(originalPurchasePrice);
     const qty = parseInt(quantity, 10) || 1;
     const destRoomName =
       rooms?.find((r) => r.id === selectedRoomId)?.name ?? roomName ?? null;
@@ -351,6 +372,8 @@ export default function AddItemScreen() {
       category: category || null,
       estimatedPrice: price,
       unitEstimatedPrice: price,
+      estimatedCurrency: replacementCurrency,
+      valuationMarket: resolveValueMarket(replacementCurrency, null, null, selectedFile?.currency_code, selectedFile?.country_code),
       quantity: qty,
       notes,
       brandMaker,
@@ -358,8 +381,11 @@ export default function AddItemScreen() {
       purchaseSource,
       purchaseYearApprox,
       originalPurchasePrice: originalPrice,
-      priceSourceType: voicePriceSourceType,
-      valuationBasis: voiceValuationBasis,
+      originalPurchaseCurrency: purchaseCurrency,
+      priceSourceType:
+        price == null ? null : (voicePriceSourceType ?? "user_entered"),
+      valuationBasis:
+        price == null ? null : (voiceValuationBasis ?? "manual"),
       imageUrl: uploadedPhotoUrl,
       photoUrl: uploadedPhotoUrl,
     });
@@ -687,7 +713,7 @@ export default function AddItemScreen() {
 
             <View style={{ flexDirection: "row", gap: 12 }}>
               <View style={{ flex: 2 }}>
-                <FormField label="Each price ($)" colors={colors} action={<VoiceFieldButton label="each price" onPress={() => openVoice("replacement_price")} />}>
+                <FormField label={`Each price (${replacementCurrency})`} colors={colors} action={<VoiceFieldButton label="each price" onPress={() => openVoice("replacement_price")} />}>
                   <StyledInput
                     value={estimatedPrice}
                     onChangeText={setEstimatedPrice}
@@ -711,8 +737,9 @@ export default function AddItemScreen() {
                 <Text style={[styles.linkedTotalLabel, { color: colors.mutedForeground }]}>Total price</Text>
                 <Text style={[styles.linkedTotalValue, { color: colors.foreground }]}>
                   {formatCurrencyFull(
-                    (Number.parseFloat(estimatedPrice.replace(/[^0-9.]/g, "")) || 0) *
+                    (parseReplacementPriceInput(estimatedPrice).value ?? 0) *
                       (Number.parseInt(quantity, 10) || 1),
+                    replacementCurrency,
                   )}
                 </Text>
               </View>
@@ -751,7 +778,7 @@ export default function AddItemScreen() {
                     </FormField>
                   </View>
                   <View style={{ flex: 1 }}>
-                    <FormField label="Original price ($)" colors={colors} action={<VoiceFieldButton label="original purchase price" onPress={() => openVoice("original_purchase_price")} />}>
+                    <FormField label={`Original price (${purchaseCurrency})`} colors={colors} action={<VoiceFieldButton label="original purchase price" onPress={() => openVoice("original_purchase_price")} />}>
                       <StyledInput value={originalPurchasePrice} onChangeText={setOriginalPurchasePrice} placeholder="0" keyboardType="decimal-pad" colors={colors} />
                     </FormField>
                   </View>
@@ -967,13 +994,15 @@ export default function AddItemScreen() {
           category,
           description,
           quantity: Number.parseInt(quantity, 10) || 1,
-          estimated_price: parseMoneyDraft(estimatedPrice),
-          unit_estimated_price: parseMoneyDraft(estimatedPrice),
+          estimated_price: parseReplacementPriceInput(estimatedPrice).value,
+          unit_estimated_price: parseReplacementPriceInput(estimatedPrice).value,
+          estimated_currency: replacementCurrency,
           brand_maker: brandMaker,
           model_series: modelSeries,
           purchase_source: purchaseSource,
           purchase_year_approx: purchaseYearApprox,
-          original_purchase_price: parseMoneyDraft(originalPurchasePrice),
+          original_purchase_price: parseOriginalMoneyDraft(originalPurchasePrice),
+          original_purchase_currency: purchaseCurrency,
           notes,
         }}
         context={{ currentName: name, currentCategory: category, currentDescription: description }}

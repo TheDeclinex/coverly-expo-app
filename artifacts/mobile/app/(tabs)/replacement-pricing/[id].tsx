@@ -37,9 +37,11 @@ import {
   searchReplacementPrices,
   type ReplacementPriceFilter,
   type ReplacementPriceResult,
+  type ReplacementSearchContext,
 } from "@/lib/replacement-pricing";
 import { normalizeLimitError, type NormalizedLimitError } from "@/lib/limit-errors";
 import { supabase } from "@/lib/supabase";
+import { formatMoney } from "@/lib/money";
 import type { InventoryItem } from "@/types";
 
 const FILTERS: Array<{ id: ReplacementPriceFilter; label: string }> = [
@@ -65,13 +67,9 @@ const SEARCH_PROCESS_TILES: LoadingTile[] = [
 const ACTIVE_TILE_INDEX = 2;
 const VOICE_EDIT_FALLBACK_MESSAGE = "Voice edit could not start. Please try again or type your changes manually.";
 
-function formatEstimate(value: number | null): string {
+function formatEstimate(value: number | null, currencyCode: string): string {
   if (value == null) return "No current estimate";
-  return value.toLocaleString("en-NZ", {
-    style: "currency",
-    currency: "NZD",
-    minimumFractionDigits: 2,
-  });
+  return formatMoney(value, currencyCode);
 }
 
 function ReplacementSearchLoadingPanel({
@@ -267,6 +265,7 @@ export default function ReplacementPricingScreen() {
 
   const [searchQuery, setSearchQuery] = useState("");
   const [results, setResults] = useState<ReplacementPriceResult[] | null>(null);
+  const [searchContext, setSearchContext] = useState<ReplacementSearchContext | null>(null);
   const [filter, setFilter] = useState<ReplacementPriceFilter>("all");
   const [searching, setSearching] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
@@ -315,12 +314,12 @@ export default function ReplacementPricingScreen() {
         description: item.description ?? undefined,
         category: item.category ?? undefined,
         brand: item.brand_maker ?? undefined,
-        country: "NZ",
         searchQuery: query.trim(),
         num: 10,
         itemId: item.id,
       });
       setResults(response.results);
+      setSearchContext(response.context);
     } catch (searchFailure) {
       const normalizedLimit = searchFailure instanceof ReplacementPriceSearchError
         ? normalizeLimitError({
@@ -517,15 +516,18 @@ export default function ReplacementPricingScreen() {
     await WebBrowser.openBrowserAsync(result.link);
   };
 
-  const handleUse = async (result: ReplacementPriceResult) => {
-    if (!item || result.price == null || result.price <= 0) return;
+  const saveListing = async (result: ReplacementPriceResult) => {
+    if (!item || result.price == null || result.price <= 0 || !result.currencyCode) return;
     setSelectingPosition(result.position);
     try {
       const { error: updateError } = await supabase
         .from("inventory_items")
         .update({
-          estimated_price: result.price,
+          estimated_price: result.price * Math.max(1, item.quantity ?? 1),
           unit_estimated_price: result.price,
+          estimated_currency: result.currencyCode,
+          valuation_market: searchContext?.countryCode ?? null,
+          estimated_at: new Date().toISOString(),
           price_source_type: "web_listing",
           valuation_basis: "replacement_listing",
           web_listing_url: result.link,
@@ -533,6 +535,9 @@ export default function ReplacementPricingScreen() {
           web_listing_price: result.price,
           web_listing_source: result.source,
           web_listing_match_type: result.matchType,
+          web_listing_currency: result.currencyCode,
+          web_listing_price_raw: result.priceRaw,
+          web_listing_fulfilment_type: result.fulfilmentType,
         })
         .eq("id", item.id)
         .select("id")
@@ -570,6 +575,17 @@ export default function ReplacementPricingScreen() {
     } finally {
       setSelectingPosition(null);
     }
+  };
+
+  const handleUse = (result: ReplacementPriceResult) => {
+    if (result.currencyCode && searchContext && result.currencyCode !== searchContext.currencyCode) {
+      Alert.alert("Use a foreign-currency listing?", `This listing is in ${result.currencyCode}, while the property uses ${searchContext.currencyCode}. Coverly will store the original amount without conversion and keep it separate in totals.`, [
+        { text: "Cancel", style: "cancel" },
+        { text: "Use listing", onPress: () => void saveListing(result) },
+      ]);
+      return;
+    }
+    void saveListing(result);
   };
 
   return (
@@ -631,7 +647,7 @@ export default function ReplacementPricingScreen() {
             <Text style={[styles.eyebrow, { color: colors.mutedForeground }]}>ITEM</Text>
             <Text style={[styles.itemName, { color: colors.foreground }]}>{item.name}</Text>
             <Text style={[styles.estimate, { color: colors.mutedForeground }]}>
-              Current per-item estimate: {formatEstimate(estimate)}
+              Current per-item estimate: {formatEstimate(estimate, item.estimated_currency ?? searchContext?.currencyCode ?? "NZD")}
               {(item.quantity ?? 1) > 1 ? ` · Quantity ${item.quantity}` : ""}
             </Text>
           </View>
@@ -766,6 +782,7 @@ export default function ReplacementPricingScreen() {
               <Text style={[styles.resultCount, { color: colors.mutedForeground }]}>
                 {filteredResults.length} of {results.length} listings
               </Text>
+              {searchContext ? <Text style={[styles.resultCount, { color: colors.mutedForeground }]}>Searching {searchContext.countryName} retailers · {searchContext.currencyCode}{searchContext.pricingSupportTier === "preview" ? " · Local pricing preview" : ""}</Text> : null}
 
               {filteredResults.length ? (
                 <View style={styles.results}>
@@ -794,7 +811,7 @@ export default function ReplacementPricingScreen() {
             <View style={[styles.empty, { backgroundColor: colors.card }]}>
               <Feather name="search" size={26} color={colors.primary} />
               <Text style={[styles.emptyTitle, { color: colors.foreground }]}>
-                Search NZ replacement listings
+                Search local replacement listings
               </Text>
               <Text style={[styles.emptyText, { color: colors.mutedForeground }]}>
                 Results may be comparable replacements rather than the exact original item.

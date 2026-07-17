@@ -27,7 +27,7 @@ export interface BarcodeMatchedProduct {
   model?: string;
   description?: string;
   images?: string[];
-  offers?: Array<{ merchant?: string; price?: string; link?: string }>;
+  offers?: Array<{ merchant?: string; price?: string; currencyCode?: string; retailerCountryCode?: string; link?: string }>;
 }
 
 export interface BarcodeVerifySuccess {
@@ -39,6 +39,7 @@ export interface BarcodeVerifySuccess {
   matchedProduct: BarcodeMatchedProduct | null;
   confidence: number;
   source: "gpt_vision" | "supplied";
+  context?: { countryCode: string; currencyCode: string };
 }
 
 export interface BarcodeVerifyFailure {

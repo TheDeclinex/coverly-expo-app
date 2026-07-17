@@ -68,11 +68,16 @@ serve(async (req) => {
     if (!name) {
       return jsonResponse({ error: 'name is required' }, 400);
     }
+    const countryCode = typeof body.country_code === 'string' ? body.country_code.trim().toUpperCase() : 'NZ';
+    if (!/^[A-Z]{2}$/.test(countryCode)) {
+      return jsonResponse({ error: 'INVALID_PROPERTY_COUNTRY', code: 'INVALID_PROPERTY_COUNTRY' }, 400);
+    }
 
     // The RPC owns allowance checks, locking, file-number allocation and insert.
     const { data, error: insertError } = await callerClient
       .rpc('create_my_property', {
         p_name: name,
+        p_country_code: countryCode,
         p_property_type: typeof body.property_type === 'string' ? body.property_type : null,
         p_contents_sum_insured: typeof body.contents_sum_insured === 'number' ? body.contents_sum_insured : null,
         p_insurer_name: typeof body.insurer_name === 'string' ? body.insurer_name : null,
@@ -83,11 +88,12 @@ serve(async (req) => {
 
     if (insertError) {
       const propertyLimit = insertError.message.includes('PROPERTY_LIMIT_REACHED');
+      const invalidCountry = insertError.message.includes('INVALID_PROPERTY_COUNTRY');
       return jsonResponse({
-        error: propertyLimit ? 'PROPERTY_LIMIT_REACHED' : 'Could not create property',
-        code: propertyLimit ? 'PROPERTY_LIMIT_REACHED' : insertError.code,
+        error: propertyLimit ? 'PROPERTY_LIMIT_REACHED' : invalidCountry ? 'INVALID_PROPERTY_COUNTRY' : 'Could not create property',
+        code: propertyLimit ? 'PROPERTY_LIMIT_REACHED' : invalidCountry ? 'INVALID_PROPERTY_COUNTRY' : insertError.code,
         details: propertyLimit ? insertError.details : undefined,
-      }, propertyLimit ? 409 : 500);
+      }, propertyLimit ? 409 : invalidCountry ? 400 : 500);
     }
 
     return jsonResponse({ data });

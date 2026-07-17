@@ -51,6 +51,9 @@ export interface ItemFormData {
   category?: string | null;
   estimatedPrice?: number | null;
   unitEstimatedPrice?: number | null;
+  estimatedCurrency?: string | null;
+  valuationMarket?: string | null;
+  estimatedAt?: string | null;
   quantity?: number | null;
   /** Accepts a display label ("high"/"medium"/"low") or a numeric value 0–1. Converted to numeric before saving. */
   confidence?: string | number | null;
@@ -65,6 +68,7 @@ export interface ItemFormData {
   conditionLabel?: string | null;
   purchaseSource?: string | null;
   originalPurchasePrice?: number | null;
+  originalPurchaseCurrency?: string | null;
   purchaseYearApprox?: string | null;
   /**
    * AI-detected visual pin for this item in the source photo.
@@ -138,6 +142,8 @@ function generateNewItemSortOrder(): number {
 }
 
 export function buildItemInsertPayload(form: ItemFormData): InventoryItem {
+  const quantity = Math.max(1, Math.trunc(form.quantity ?? 1));
+  const unitPrice = normaliseUnitPrice(form.unitEstimatedPrice ?? form.estimatedPrice);
   return {
     id: generateItemId(),
     sort_order: generateNewItemSortOrder(),
@@ -148,9 +154,12 @@ export function buildItemInsertPayload(form: ItemFormData): InventoryItem {
     description: form.description?.trim() || null,
     notes: form.notes?.trim() || null,
     category: form.category?.trim() || null,
-    estimated_price: form.estimatedPrice ?? null,
-    unit_estimated_price: form.unitEstimatedPrice ?? null,
-    quantity: form.quantity ?? 1,
+    estimated_price: unitPrice == null ? null : unitPrice * quantity,
+    unit_estimated_price: unitPrice,
+    estimated_currency: unitPrice == null ? null : form.estimatedCurrency ?? null,
+    valuation_market: unitPrice == null ? null : form.valuationMarket ?? null,
+    estimated_at: unitPrice == null ? null : form.estimatedAt ?? new Date().toISOString(),
+    quantity,
     quantity_estimate: null,
     valuation_basis: form.valuationBasis ?? null,
     price_source_type: form.priceSourceType ?? "estimated_gpt",
@@ -162,6 +171,7 @@ export function buildItemInsertPayload(form: ItemFormData): InventoryItem {
     condition_label: form.conditionLabel ?? null,
     purchase_source: form.purchaseSource ?? null,
     original_purchase_price: form.originalPurchasePrice ?? null,
+    original_purchase_currency: form.originalPurchasePrice == null ? null : form.originalPurchaseCurrency ?? null,
     purchase_year_approx: form.purchaseYearApprox ?? null,
     image_pin: buildImagePin(form),
     attachments: null,
@@ -186,6 +196,8 @@ export function buildItemUpdatePayload(
     ? (form.photos?.[0]?.url ?? form.imageUrl ?? form.photoUrl ?? null)
     : undefined;
 
+  const quantity = Math.max(1, Math.trunc(form.quantity ?? 1));
+  const unitPrice = normaliseUnitPrice(form.unitEstimatedPrice ?? form.estimatedPrice);
   return {
     room_id: form.roomId || null,
     room: form.roomName?.trim() || null,
@@ -193,9 +205,12 @@ export function buildItemUpdatePayload(
     description: form.description?.trim() || null,
     ...(form.notes !== undefined ? { notes: form.notes?.trim() || null } : {}),
     category: form.category?.trim() || null,
-    estimated_price: form.estimatedPrice ?? null,
-    unit_estimated_price: form.unitEstimatedPrice ?? null,
-    quantity: form.quantity ?? 1,
+    estimated_price: unitPrice == null ? null : unitPrice * quantity,
+    unit_estimated_price: unitPrice,
+    quantity,
+    ...(form.estimatedCurrency !== undefined ? { estimated_currency: unitPrice == null ? null : form.estimatedCurrency } : {}),
+    ...(form.valuationMarket !== undefined ? { valuation_market: unitPrice == null ? null : form.valuationMarket } : {}),
+    ...(form.estimatedAt !== undefined ? { estimated_at: unitPrice == null ? null : form.estimatedAt } : {}),
     ...(form.valuationBasis !== undefined ? { valuation_basis: form.valuationBasis ?? null } : {}),
     ...(form.priceSourceType !== undefined ? { price_source_type: form.priceSourceType ?? null } : {}),
     ...(photosProvided ? {
@@ -208,6 +223,11 @@ export function buildItemUpdatePayload(
     ...(form.conditionLabel !== undefined ? { condition_label: form.conditionLabel ?? null } : {}),
     ...(form.purchaseSource !== undefined ? { purchase_source: form.purchaseSource ?? null } : {}),
     ...(form.originalPurchasePrice !== undefined ? { original_purchase_price: form.originalPurchasePrice ?? null } : {}),
+    ...(form.originalPurchaseCurrency !== undefined ? { original_purchase_currency: form.originalPurchasePrice == null ? null : form.originalPurchaseCurrency } : {}),
     ...(form.purchaseYearApprox !== undefined ? { purchase_year_approx: form.purchaseYearApprox ?? null } : {}),
   };
+}
+
+function normaliseUnitPrice(value: number | null | undefined): number | null {
+  return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : null;
 }

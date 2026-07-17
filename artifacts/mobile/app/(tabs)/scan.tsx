@@ -46,6 +46,7 @@ import {
   validateScanInput,
 } from "@/lib/scan-service";
 import { normalizeLimitError, type NormalizedLimitError } from "@/lib/limit-errors";
+import { buildManualScanValuePatch } from "@/lib/replacement-value";
 import {
   clearScanPhotoUploadCache,
   formatUploadFailure,
@@ -714,10 +715,10 @@ export default function ScanScreen() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("inventory_files")
-        .select("id, name")
+        .select("id, name, country_code, currency_code")
         .order("last_modified", { ascending: false });
       if (error) throw error;
-      return (data ?? []) as Pick<InventoryFile, "id" | "name">[];
+      return (data ?? []) as Pick<InventoryFile, "id" | "name" | "country_code" | "currency_code">[];
     },
     enabled: !!session,
   });
@@ -736,6 +737,7 @@ export default function ScanScreen() {
     },
     enabled: !!session && !!selectedFileId,
   });
+  const selectedProperty = properties?.find((property) => property.id === selectedFileId) ?? null;
 
   useEffect(() => {
     if (paramFileId || selectedFileId || !properties || properties.length !== 1) return;
@@ -1193,6 +1195,9 @@ export default function ScanScreen() {
       category: item.category,
       estimatedPrice: item.estimatedPrice,
       unitEstimatedPrice: item.unitEstimatedPrice,
+      estimatedCurrency: item.estimatedCurrency,
+      valuationMarket: item.valuationMarket,
+      estimatedAt: item.estimatedAt,
       quantity: item.quantity,
       imageUrl: uploadedPhotoUrl ?? item.imageUrl,
       photoUrl: uploadedPhotoUrl ?? item.photoUrl,
@@ -1512,24 +1517,20 @@ export default function ScanScreen() {
   const updateDetectedQuantity = (index: number, value: string) => {
     const parsed = Number.parseInt(value.replace(/[^0-9]/g, ""), 10);
     if (!Number.isInteger(parsed) || parsed < 1) return;
-    updateDetectedItem(index, { quantity: parsed });
+    setDetectedItems((current) => current.map((item, itemIndex) => itemIndex === index
+      ? { ...item, quantity: parsed, estimatedPrice: item.unitEstimatedPrice == null ? item.estimatedPrice : item.unitEstimatedPrice * parsed }
+      : item));
   };
 
   const updateDetectedPrice = (index: number, value: string) => {
-    const cleaned = value.replace(/[^0-9.]/g, "").trim();
-    if (!cleaned) {
-      updateDetectedItem(index, { estimatedPrice: null, unitEstimatedPrice: null });
-      return;
-    }
-    const parsed = Number.parseFloat(cleaned);
-    if (!Number.isFinite(parsed) || parsed < 0) return;
-    const rounded = Math.round(parsed * 100) / 100;
-    updateDetectedItem(index, {
-      estimatedPrice: rounded,
-      unitEstimatedPrice: rounded,
-      priceSourceType: "user_entered",
-      valuationBasis: "manual",
+    const item = detectedItems[index];
+    if (!item) return;
+    const result = buildManualScanValuePatch(value, item.quantity, {
+      countryCode: selectedProperty?.country_code,
+      currencyCode: selectedProperty?.currency_code,
     });
+    if (result.status === "invalid") return;
+    updateDetectedItem(index, result.patch);
   };
 
   const handleSaveItem = async (item: ScanDetectedItem, index: number) => {
@@ -2073,6 +2074,12 @@ export default function ScanScreen() {
                     </Text>
                   </View>
                 )}
+                {detectedItems.some((detected) => detected.pricingSupportTier === "preview") ? (
+                  <View style={[revStyles.failureBanner, { backgroundColor: colors.accent, borderColor: colors.border }]}>
+                    <Feather name="info" size={14} color={colors.primary} />
+                    <Text style={{ fontSize: 12, color: colors.foreground, flex: 1 }}>Local pricing support is in preview. Review estimates before relying on them.</Text>
+                  </View>
+                ) : null}
               </View>
             }
             renderItem={({ item, index }) => {
@@ -2273,7 +2280,7 @@ export default function ScanScreen() {
                     </View>
                     {item.estimatedPrice != null ? (
                       <Text style={[revStyles.price, { color: colors.foreground }]}>
-                        {formatCurrency((item.unitEstimatedPrice ?? item.estimatedPrice) * (item.quantity ?? 1))}
+                        {formatCurrency((item.unitEstimatedPrice ?? item.estimatedPrice) * (item.quantity ?? 1), item.estimatedCurrency ?? "NZD")}
                       </Text>
                     ) : null}
                   </View>

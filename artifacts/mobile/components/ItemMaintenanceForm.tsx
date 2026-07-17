@@ -1,5 +1,5 @@
 import { Feather } from "@expo/vector-icons";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import React from "react";
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 
@@ -14,6 +14,7 @@ import { useColors } from "@/hooks/useColors";
 import { formatCurrencyFull, getItemPhotos, getItemTotalValue } from "@/lib/inventory-mappers";
 import { buildItemUpdatePayload } from "@/lib/item-insert-helpers";
 import { formatUploadFailure, uploadItemPhoto } from "@/lib/photo-upload";
+import { parseReplacementPriceInput, resolveReviewedValueCurrency, resolveStoredValueCurrency, resolveValueMarket, supportedCurrencyCode } from "@/lib/replacement-value";
 import { supabase } from "@/lib/supabase";
 import type { InventoryItem, InventoryRoom } from "@/types";
 import type { VoiceItemField, VoiceItemPatch } from "@/types/voice";
@@ -35,7 +36,7 @@ const fromItem = (item: InventoryItem): Draft => ({
   originalPrice: String(item.original_purchase_price ?? ""), notes: item.notes ?? "", roomId: item.room_id ?? "",
 });
 
-const money = (value: string) => {
+const parseOriginalMoney = (value: string) => {
   const cleaned = value.replace(/[^0-9.]/g, "").trim();
   if (!cleaned) return null;
   const parsed = Number.parseFloat(cleaned);
@@ -72,8 +73,25 @@ export const ItemMaintenanceForm = React.forwardRef<ItemMaintenanceFormHandle, {
   const [savedFlash, setSavedFlash] = React.useState(false);
   const savedFlashTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const [error, setError] = React.useState<string | null>(null);
+  const [voiceEstimatedCurrency, setVoiceEstimatedCurrency] = React.useState<string | null>(null);
+  const [voiceOriginalCurrency, setVoiceOriginalCurrency] = React.useState<string | null>(null);
+  const { data: propertyMarket } = useQuery({
+    queryKey: ["property-market", item.file_id],
+    queryFn: async () => {
+      const { data, error } = await supabase.from("inventory_files").select("country_code,currency_code").eq("id", item.file_id).single();
+      if (error) throw error;
+      return data as { country_code: string; currency_code: string };
+    },
+  });
+  const storedReplacementCurrency = resolveStoredValueCurrency(item.estimated_currency, propertyMarket?.currency_code);
+  const storedPurchaseCurrency = resolveStoredValueCurrency(item.original_purchase_currency, propertyMarket?.currency_code);
+  const replacementCurrency = resolveReviewedValueCurrency(voiceEstimatedCurrency, item.estimated_currency, propertyMarket?.currency_code);
+  const purchaseCurrency = resolveReviewedValueCurrency(voiceOriginalCurrency, item.original_purchase_currency, propertyMarket?.currency_code);
   const hydratedItemId = React.useRef(item.id);
-  const dirty = photosModified || JSON.stringify(draft) !== JSON.stringify(fromItem(item));
+  const dirty = photosModified
+    || JSON.stringify(draft) !== JSON.stringify(fromItem(item))
+    || replacementCurrency !== storedReplacementCurrency
+    || purchaseCurrency !== storedPurchaseCurrency;
 
   React.useEffect(() => { onDirtyChange?.(dirty); }, [dirty, onDirtyChange]);
   React.useEffect(() => {
@@ -90,6 +108,8 @@ export const ItemMaintenanceForm = React.forwardRef<ItemMaintenanceFormHandle, {
     setPhotos(getItemPhotos(item));
     setPhotosModified(false);
     setDetailsOpen(true);
+    setVoiceEstimatedCurrency(null);
+    setVoiceOriginalCurrency(null);
   }, [item]);
 
   const set = React.useCallback(<K extends keyof Draft>(key: K, value: Draft[K]) => {
@@ -98,6 +118,10 @@ export const ItemMaintenanceForm = React.forwardRef<ItemMaintenanceFormHandle, {
   }, []);
 
   const applyVoice = React.useCallback((patch: VoiceItemPatch) => {
+    const reviewedReplacementCurrency = supportedCurrencyCode(patch.estimated_currency);
+    const reviewedPurchaseCurrency = supportedCurrencyCode(patch.original_purchase_currency);
+    if (reviewedReplacementCurrency) setVoiceEstimatedCurrency(reviewedReplacementCurrency);
+    if (reviewedPurchaseCurrency) setVoiceOriginalCurrency(reviewedPurchaseCurrency);
     setDraft((current) => ({
       ...current,
       ...(patch.name !== undefined ? { name: patch.name ?? "" } : {}),
@@ -120,9 +144,11 @@ export const ItemMaintenanceForm = React.forwardRef<ItemMaintenanceFormHandle, {
     if (saving) return;
     if (!draft.name.trim()) return setError("Item name is required.");
     if (!draft.roomId) return setError("Please select a room.");
-    const parsedPrice = money(draft.price);
-    const parsedOriginal = money(draft.originalPrice);
-    if (draft.price.trim() && parsedPrice === null) return setError("Enter a valid price.");
+    const replacementPrice = parseReplacementPriceInput(draft.price);
+    const parsedPrice = replacementPrice.value;
+    const parsedOriginal = parseOriginalMoney(draft.originalPrice);
+    if (replacementPrice.status === "invalid") return setError("Enter a valid price.");
+    if (parsedPrice != null && !item.estimated_currency && !propertyMarket) return setError("Property market details are still loading. Please try again.");
     if (draft.originalPrice.trim() && parsedOriginal === null) return setError("Enter a valid original price.");
     setSaving(true); setError(null);
     try {
@@ -136,7 +162,10 @@ export const ItemMaintenanceForm = React.forwardRef<ItemMaintenanceFormHandle, {
         uploaded.push({ url: result.path, caption: photo.caption });
       }
       const destination = rooms.find((room) => room.id === draft.roomId);
-      const priceChanged = parsedPrice !== (item.unit_estimated_price ?? item.estimated_price ?? null);
+      const priceChanged = parsedPrice !== (item.unit_estimated_price ?? item.estimated_price ?? null)
+        || replacementCurrency !== storedReplacementCurrency;
+      const purchaseChanged = parsedOriginal !== item.original_purchase_price
+        || purchaseCurrency !== storedPurchaseCurrency;
       const updates = buildItemUpdatePayload({
         roomId: draft.roomId, roomName: destination?.name ?? null, name: draft.name,
         description: draft.description, category: draft.category, estimatedPrice: parsedPrice,
@@ -145,6 +174,8 @@ export const ItemMaintenanceForm = React.forwardRef<ItemMaintenanceFormHandle, {
         purchaseSource: draft.purchaseSource, purchaseYearApprox: draft.purchaseYear,
         originalPurchasePrice: parsedOriginal, notes: draft.notes,
         ...(priceChanged ? { priceSourceType: "user_entered", valuationBasis: "manual" } : {}),
+        ...(priceChanged ? { estimatedCurrency: replacementCurrency, valuationMarket: resolveValueMarket(replacementCurrency, item.estimated_currency, item.valuation_market, propertyMarket?.currency_code, propertyMarket?.country_code), estimatedAt: parsedPrice == null ? null : new Date().toISOString() } : {}),
+        ...(purchaseChanged ? { originalPurchaseCurrency: purchaseCurrency } : {}),
         photos: photosModified ? uploaded : undefined,
       });
       const { data, error: updateError } = await supabase.from("inventory_items").update(updates).eq("id", item.id).select("*").single();
@@ -165,14 +196,14 @@ export const ItemMaintenanceForm = React.forwardRef<ItemMaintenanceFormHandle, {
       showToast("Item updated");
     } catch (failure) { setError(failure instanceof Error ? failure.message : "Could not save changes."); }
     finally { setSaving(false); }
-  }, [draft, item, photos, photosModified, queryClient, rooms, saving, session?.user.id, showToast]);
+  }, [draft, item, photos, photosModified, propertyMarket?.country_code, propertyMarket?.currency_code, purchaseCurrency, queryClient, replacementCurrency, rooms, saving, session?.user.id, showToast, storedPurchaseCurrency, storedReplacementCurrency]);
 
   React.useImperativeHandle(ref, () => ({ save: () => { void save(); } }), [save]);
 
   const openVoice = React.useCallback((target?: VoiceItemField) => { setVoiceTarget(target); setVoiceOpen(true); }, []);
 
   const input = (key: keyof Draft, multiline = false, placeholder?: string) => <TextInput value={draft[key]} onChangeText={(value) => set(key, value)} placeholder={placeholder} placeholderTextColor={colors.mutedForeground} multiline={multiline} keyboardType={key === "price" || key === "originalPrice" ? "decimal-pad" : "default"} style={[styles.input, multiline && styles.multiline, { color: colors.foreground, borderColor: colors.border, backgroundColor: colors.card }]} />;
-  const parsedDraftPrice = money(draft.price);
+  const parsedDraftPrice = parseReplacementPriceInput(draft.price).value;
   const draftQuantity = Number.parseInt(draft.quantity, 10) || 1;
   const recordedTotal = draft.price.trim() && parsedDraftPrice !== null
     ? getItemTotalValue({ ...item, estimated_price: parsedDraftPrice, unit_estimated_price: parsedDraftPrice, quantity: draftQuantity })
@@ -195,9 +226,9 @@ export const ItemMaintenanceForm = React.forwardRef<ItemMaintenanceFormHandle, {
     <View style={styles.section}>
       <Text style={[styles.sectionTitle, { color: colors.mutedForeground }]}>VALUE</Text>
       <View style={[styles.valueCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
-        <View style={styles.row}><View style={styles.grow}><Field label="Each price ($)">{input("price")}</Field></View><View style={styles.qty}><Field label="Quantity"><QuantityStepper value={draft.quantity} onChange={(value) => set("quantity", value)} /></Field></View></View>
+        <View style={styles.row}><View style={styles.grow}><Field label={`Each price (${replacementCurrency})`}>{input("price")}</Field></View><View style={styles.qty}><Field label="Quantity"><QuantityStepper value={draft.quantity} onChange={(value) => set("quantity", value)} /></Field></View></View>
         <View style={[styles.valueSummary, { borderTopColor: colors.border }]}>
-          <View><Text style={[styles.valueLabel, { color: colors.mutedForeground }]}>Recorded total</Text><Text style={[styles.valueTotal, { color: colors.foreground }]}>{recordedTotal === null ? "—" : formatCurrencyFull(recordedTotal)}</Text></View>
+          <View><Text style={[styles.valueLabel, { color: colors.mutedForeground }]}>Recorded total</Text><Text style={[styles.valueTotal, { color: colors.foreground }]}>{recordedTotal === null ? "—" : formatCurrencyFull(recordedTotal, replacementCurrency)}</Text></View>
           {displayedValueSource ? <Pressable disabled={!onOpenValueSource} onPress={onOpenValueSource} style={styles.valueSource}><Text style={[styles.valueLabel, { color: colors.mutedForeground }]}>Value source</Text><Text style={[styles.valueSourceText, { color: onOpenValueSource ? colors.primary : colors.foreground }]}>{displayedValueSource}{onOpenValueSource ? " ↗" : ""}</Text></Pressable> : null}
         </View>
         {item.quantity_estimate ? <View style={styles.estimateRow}><Text style={[styles.valueLabel, { color: colors.mutedForeground }]}>Quantity estimate</Text><Text style={[styles.estimateValue, { color: colors.foreground }]}>{item.quantity_estimate}</Text></View> : null}
@@ -210,10 +241,10 @@ export const ItemMaintenanceForm = React.forwardRef<ItemMaintenanceFormHandle, {
     </View>
 
     <View style={styles.section}><Pressable accessibilityState={{ expanded: detailsOpen }} onPress={() => setDetailsOpen((value) => !value)} style={[styles.detailsHeader, { backgroundColor: colors.accent, borderColor: colors.border }]}><View style={[styles.icon, { backgroundColor: colors.card }]}><Feather name="package" size={17} color={colors.primary} /></View><View style={styles.grow}><Text style={[styles.detailsTitle, { color: colors.foreground }]}>Product & purchase details</Text><Text style={[styles.detailsSub, { color: colors.mutedForeground }]}>Brand, model, condition and purchase history</Text></View><Feather name={detailsOpen ? "chevron-up" : "chevron-down"} size={20} color={colors.primary} /></Pressable>
-      {detailsOpen ? <View style={[styles.detailsBody, { borderColor: colors.border, backgroundColor: colors.card }]}><Field label="Brand / Maker" action={<VoiceFieldButton label="brand or maker" onPress={() => openVoice("brand_maker")} />}>{input("brandMaker", false, "e.g. Samsung")}</Field><Field label="Model / Series" action={<VoiceFieldButton label="model or series" onPress={() => openVoice("model_series")} />}>{input("modelSeries", false, "e.g. QN90B")}</Field><Field label="Condition">{input("conditionLabel", false, "e.g. Excellent")}</Field><Field label="Purchased from" action={<VoiceFieldButton label="purchase source" onPress={() => openVoice("purchase_source")} />}>{input("purchaseSource", false, "e.g. Harvey Norman")}</Field><Field label="Purchase year">{input("purchaseYear", false, "e.g. 2022")}</Field><Field label="Original price ($)">{input("originalPrice", false, "e.g. 399")}</Field><Field label="Notes" action={<VoiceFieldButton label="notes" onPress={() => openVoice("notes")} />}>{input("notes", true, "Optional notes")}</Field>{barcodeAction}</View> : null}
+      {detailsOpen ? <View style={[styles.detailsBody, { borderColor: colors.border, backgroundColor: colors.card }]}><Field label="Brand / Maker" action={<VoiceFieldButton label="brand or maker" onPress={() => openVoice("brand_maker")} />}>{input("brandMaker", false, "e.g. Samsung")}</Field><Field label="Model / Series" action={<VoiceFieldButton label="model or series" onPress={() => openVoice("model_series")} />}>{input("modelSeries", false, "e.g. QN90B")}</Field><Field label="Condition">{input("conditionLabel", false, "e.g. Excellent")}</Field><Field label="Purchased from" action={<VoiceFieldButton label="purchase source" onPress={() => openVoice("purchase_source")} />}>{input("purchaseSource", false, "e.g. Harvey Norman")}</Field><Field label="Purchase year">{input("purchaseYear", false, "e.g. 2022")}</Field><Field label={`Original price (${purchaseCurrency})`}>{input("originalPrice", false, "e.g. 399")}</Field><Field label="Notes" action={<VoiceFieldButton label="notes" onPress={() => openVoice("notes")} />}>{input("notes", true, "Optional notes")}</Field>{barcodeAction}</View> : null}
     </View>
     {error ? <Text style={[styles.error, { color: colors.destructive }]}>{error}</Text> : null}
-    <VoiceInputSheet visible={voiceOpen} title={voiceTarget ? "Fill field with voice" : "Fill item with voice"} targetField={voiceTarget} currentValues={{ name: draft.name, description: draft.description, category: draft.category, quantity: Number.parseInt(draft.quantity, 10) || 1, estimated_price: money(draft.price), unit_estimated_price: money(draft.price), brand_maker: draft.brandMaker, model_series: draft.modelSeries, purchase_source: draft.purchaseSource, purchase_year_approx: draft.purchaseYear, original_purchase_price: money(draft.originalPrice), notes: draft.notes }} context={{ itemId: item.id, currentName: draft.name, currentCategory: draft.category, currentDescription: draft.description }} onClose={() => setVoiceOpen(false)} onApply={applyVoice} />
+    <VoiceInputSheet visible={voiceOpen} title={voiceTarget ? "Fill field with voice" : "Fill item with voice"} targetField={voiceTarget} currentValues={{ name: draft.name, description: draft.description, category: draft.category, quantity: Number.parseInt(draft.quantity, 10) || 1, estimated_price: parseReplacementPriceInput(draft.price).value, unit_estimated_price: parseReplacementPriceInput(draft.price).value, estimated_currency: replacementCurrency, brand_maker: draft.brandMaker, model_series: draft.modelSeries, purchase_source: draft.purchaseSource, purchase_year_approx: draft.purchaseYear, original_purchase_price: parseOriginalMoney(draft.originalPrice), original_purchase_currency: purchaseCurrency, notes: draft.notes }} context={{ itemId: item.id, currentName: draft.name, currentCategory: draft.category, currentDescription: draft.description }} onClose={() => setVoiceOpen(false)} onApply={applyVoice} />
   </View>;
 });
 

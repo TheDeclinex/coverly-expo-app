@@ -6,7 +6,10 @@ import { fileURLToPath } from "node:url";
 
 const testDirectory = dirname(fileURLToPath(import.meta.url));
 const migration = readFileSync(resolve(testDirectory, "../../../../supabase/migrations/20260717_property_limits_by_plan.sql"), "utf8");
+const marketMigration = readFileSync(resolve(testDirectory, "../../../../supabase/migrations/20260717_global_market_foundation.sql"), "utf8");
 const edgeFunction = readFileSync(resolve(testDirectory, "../../../../supabase/functions/create-property/index.ts"), "utf8");
+const propertyService = readFileSync(resolve(testDirectory, "../property-service.ts"), "utf8");
+const adminService = readFileSync(resolve(testDirectory, "../admin-service.ts"), "utf8");
 
 test("migration preserves the six-argument RPC and applies the shared allowance", () => {
   assert.match(migration, /CREATE OR REPLACE FUNCTION public\.create_my_property\([\s\S]*p_policy_number text[\s\S]*p_property_cover_image_url text/);
@@ -31,4 +34,21 @@ test("tester and admin signals retain full access while Plus remains limited", (
 test("legacy Edge Function delegates to the authoritative RPC", () => {
   assert.match(edgeFunction, /\.rpc\('create_my_property'/);
   assert.doesNotMatch(edgeFunction, /SUPABASE_SERVICE_ROLE_KEY|\.from\('inventory_files'\)\s*\.insert/);
+});
+
+test("old and country-aware property RPCs remain unambiguous and server-derived", () => {
+  assert.match(marketMigration, /ALTER FUNCTION public\.create_my_property\(text,text,text,numeric,text,text,text\)/);
+  assert.match(marketMigration, /ALTER COLUMN country_code SET DEFAULT 'NZ'[\s\S]*ALTER COLUMN currency_code SET DEFAULT 'NZD'/);
+  assert.match(marketMigration, /NEW\.currency_code := v_currency/);
+  assert.match(marketMigration, /BEFORE INSERT OR UPDATE OF country_code, currency_code/);
+  assert.match(propertyService, /p_country_code: input\.countryCode/);
+  assert.match(edgeFunction, /p_country_code: countryCode/);
+  assert.doesNotMatch(marketMigration, /p_country_code text DEFAULT/);
+});
+
+test("Admin file callers use named fields and the RPC keeps its security assertion", () => {
+  assert.match(marketMigration, /CREATE FUNCTION public\.admin_list_user_files[\s\S]*PERFORM public\.assert_current_user_admin\(\)/);
+  assert.match(adminService, /currency_code: string \| null/);
+  assert.match(adminService, /inventory_totals\?: Record<string, number>/);
+  assert.match(adminService, /rpcValue<AdminUserFile\[\]>\("admin_list_user_files"/);
 });

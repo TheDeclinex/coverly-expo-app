@@ -57,6 +57,10 @@ export interface ScanDetectedItem {
   category?: string | null;
   estimatedPrice?: number | null;
   unitEstimatedPrice?: number | null;
+  estimatedCurrency?: string | null;
+  valuationMarket?: string | null;
+  estimatedAt?: string | null;
+  pricingSupportTier?: "verified" | "preview" | "limited";
   quantity?: number | null;
   brandMaker?: string | null;
   modelSeries?: string | null;

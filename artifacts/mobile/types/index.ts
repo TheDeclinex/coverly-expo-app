@@ -13,6 +13,8 @@ export interface InventoryFile {
   property_cover_image_url: string | null;
   created_date: string | null;
   last_modified: string | null;
+  country_code: string;
+  currency_code: string;
 }
 
 export interface InventoryRoom {
@@ -45,6 +47,9 @@ export interface InventoryItem {
   confidence: number | null;
   estimated_price: number | null;
   unit_estimated_price: number | null;
+  estimated_currency?: string | null;
+  valuation_market?: string | null;
+  estimated_at?: string | null;
   quantity: number | null;
   quantity_estimate: string | null;
   valuation_basis: string | null;
@@ -54,6 +59,9 @@ export interface InventoryItem {
   web_listing_price?: number | null;
   web_listing_source?: string | null;
   web_listing_match_type?: string | null;
+  web_listing_currency?: string | null;
+  web_listing_price_raw?: string | null;
+  web_listing_fulfilment_type?: "local" | "overseas" | "unknown" | null;
   description: string | null;
   image_url: string | null;
   photo_url: string | null;
@@ -65,6 +73,7 @@ export interface InventoryItem {
   condition_label: string | null;
   purchase_source: string | null;
   original_purchase_price: number | null;
+  original_purchase_currency?: string | null;
   purchase_year_approx: string | null;
   image_pin: unknown | null;
   attachments: ItemPhoto[] | null;

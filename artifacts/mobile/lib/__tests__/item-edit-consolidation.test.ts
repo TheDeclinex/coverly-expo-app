@@ -14,7 +14,7 @@ const photoSource = source("../../components/DraggablePhotoStrip.tsx");
 test("Item Detail mounts the single complete maintenance form", () => {
   assert.ok(detailSource.includes("<ItemMaintenanceForm"));
   assert.ok(detailSource.includes("ref={maintenanceFormRef}"));
-  for (const label of ["Name", "Description", "Category", "Each price ($)", "Quantity", "Brand / Maker", "Model / Series", "Condition", "Purchased from", "Purchase year", "Original price ($)", "Notes", "ROOM", "PHOTOS"]) {
+  for (const label of ["Name", "Description", "Category", "Each price (", "Quantity", "Brand / Maker", "Model / Series", "Condition", "Purchased from", "Purchase year", "Original price (", "Notes", "ROOM", "PHOTOS"]) {
     assert.ok(formSource.includes(label), `Missing ${label}`);
   }
   assert.ok(formSource.includes("<DraggablePhotoStrip"));
@@ -64,7 +64,7 @@ test("Value is consolidated before product details, evidence, and delete", () =>
   const deleteIndex = detailSource.lastIndexOf('<Section title="DELETE ITEM"');
   assert.ok(valueIndex < productIndex);
   assert.ok(evidenceIndex < deleteIndex);
-  for (const label of ["Each price ($)", "Quantity", "Recorded total", "Value source", "Review replacement price"]) {
+  for (const label of ["Each price (", "Quantity", "Recorded total", "Value source", "Review replacement price"]) {
     assert.ok(formSource.includes(label), `Missing consolidated value label ${label}`);
   }
   assert.equal(detailSource.includes("VALUATION CONTEXT"), false);

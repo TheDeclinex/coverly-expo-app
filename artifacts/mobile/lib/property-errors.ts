@@ -4,6 +4,8 @@ const UNSUPPORTED_PROPERTY_TYPE_MESSAGE =
 export type PropertyCreationErrorCode =
   | "PROPERTY_LIMIT_REACHED"
   | "PROPERTY_ALLOWANCE_UNAVAILABLE"
+  | "INVALID_PROPERTY_COUNTRY"
+  | "CONTENTS_COVER_REQUIRED"
   | "PROPERTY_CREATION_FAILED";
 
 export class PropertyCreationError extends Error {
@@ -65,6 +67,12 @@ export function normalizePropertyCreationError(error: unknown): PropertyCreation
       "PROPERTY_ALLOWANCE_UNAVAILABLE",
       "We couldn't check your plan. Check your connection and try again.",
     );
+  }
+  if (/INVALID_PROPERTY_COUNTRY/i.test(message)) {
+    return new PropertyCreationError("INVALID_PROPERTY_COUNTRY", "Choose a valid property country or region.");
+  }
+  if (/CONTENTS_COVER_REQUIRED|Contents cover amount is required/i.test(message)) {
+    return new PropertyCreationError("CONTENTS_COVER_REQUIRED", "Add a valid contents cover amount.");
   }
   return new PropertyCreationError("PROPERTY_CREATION_FAILED", formatPropertySaveError(error));
 }

@@ -1,12 +1,12 @@
-import type { InventoryFile, InventoryItem, InventoryRoom } from "@/types";
-import { getCategoryLegendEntry } from "@/constants/categoryColors";
+import type { InventoryFile, InventoryItem, InventoryRoom } from "../types/index.ts";
+import { getCategoryLegendEntry } from "../constants/categoryColors.ts";
 import {
   getItemTotalValue,
   hasPhoto,
   hasValue,
   needsReview,
-} from "./inventory-mappers";
-import { calculateCoverageInsight } from "./coverage";
+} from "./inventory-mappers.ts";
+import { calculateCoverageInsight } from "./coverage.ts";
 
 export interface RoomStat {
   room: InventoryRoom;
@@ -28,6 +28,8 @@ export interface PropertyStats {
   itemsNeedingReview: number;
   photoPercent: number;
   valuePercent: number;
+  totalsByCurrency: Record<string, number>;
+  hasMixedCurrencies: boolean;
 }
 
 export function calcPropertyStats(
@@ -35,10 +37,13 @@ export function calcPropertyStats(
   rooms: InventoryRoom[],
   items: InventoryItem[]
 ): PropertyStats {
-  const totalValue = items.reduce(
-    (sum, item) => sum + getItemTotalValue(item),
-    0
-  );
+  const totalsByCurrency = items.reduce<Record<string, number>>((totals, item) => {
+    const code = item.estimated_currency || property.currency_code || "NZD";
+    totals[code] = (totals[code] ?? 0) + getItemTotalValue(item);
+    return totals;
+  }, {});
+  const primaryItems = items.filter((item) => (item.estimated_currency || property.currency_code || "NZD") === property.currency_code);
+  const totalValue = totalsByCurrency[property.currency_code] ?? 0;
   const itemCount = items.length;
   const roomCount = rooms.length;
 
@@ -50,7 +55,7 @@ export function calcPropertyStats(
 
   const roomStats: RoomStat[] = rooms
     .map((room) => {
-      const roomItems = items.filter((i) => i.room_id === room.id);
+      const roomItems = primaryItems.filter((i) => i.room_id === room.id);
       const categoryMap = new Map<string, number>();
       for (const item of roomItems) {
         const category = getCategoryLegendEntry(item.category);
@@ -75,7 +80,7 @@ export function calcPropertyStats(
     })
     .sort((a, b) => b.totalValue - a.totalValue);
 
-  const topItems = [...items]
+  const topItems = [...primaryItems]
     .sort((a, b) => getItemTotalValue(b) - getItemTotalValue(a))
     .slice(0, 5);
 
@@ -96,6 +101,8 @@ export function calcPropertyStats(
     itemsNeedingReview,
     photoPercent: itemCount > 0 ? (itemsWithPhotos / itemCount) * 100 : 0,
     valuePercent: itemCount > 0 ? (itemsWithValues / itemCount) * 100 : 0,
+    totalsByCurrency,
+    hasMixedCurrencies: Object.keys(totalsByCurrency).length > 1,
   };
 }
 
@@ -104,25 +111,38 @@ export interface PortfolioStats {
   totalRecordedCover: number;
   totalInventoryValue: number;
   totalItems: number;
+  inventoryTotalsByCurrency: Record<string, number>;
+  coverTotalsByCurrency: Record<string, number>;
+  hasMultipleCurrencies: boolean;
 }
 
 export function calcPortfolioStats(
   properties: InventoryFile[],
   items: InventoryItem[]
 ): PortfolioStats {
-  const totalRecordedCover = properties.reduce(
-    (sum, p) => sum + (p.contents_sum_insured ?? 0),
-    0
-  );
-  const totalInventoryValue = items.reduce(
-    (sum, i) => sum + getItemTotalValue(i),
-    0
-  );
+  const propertyCurrency = new Map(properties.map((property) => [property.id, property.currency_code || "NZD"]));
+  const coverTotalsByCurrency = properties.reduce<Record<string, number>>((totals, property) => {
+    const code = property.currency_code || "NZD";
+    totals[code] = (totals[code] ?? 0) + (property.contents_sum_insured ?? 0);
+    return totals;
+  }, {});
+  const inventoryTotalsByCurrency = items.reduce<Record<string, number>>((totals, item) => {
+    const code = item.estimated_currency || propertyCurrency.get(item.file_id) || "NZD";
+    totals[code] = (totals[code] ?? 0) + getItemTotalValue(item);
+    return totals;
+  }, {});
+  const inventoryEntries = Object.entries(inventoryTotalsByCurrency);
+  const coverEntries = Object.entries(coverTotalsByCurrency);
+  const totalRecordedCover = coverEntries.length === 1 ? coverEntries[0][1] : 0;
+  const totalInventoryValue = inventoryEntries.length === 1 ? inventoryEntries[0][1] : 0;
   return {
     propertyCount: properties.length,
     totalRecordedCover,
     totalInventoryValue,
     totalItems: items.length,
+    inventoryTotalsByCurrency,
+    coverTotalsByCurrency,
+    hasMultipleCurrencies: new Set([...Object.keys(inventoryTotalsByCurrency), ...Object.keys(coverTotalsByCurrency)]).size > 1,
   };
 }
 

@@ -29,6 +29,8 @@ export interface VoiceItemValues {
   notes?: string | null;
   price_source_type?: string | null;
   valuation_basis?: string | null;
+  estimated_currency?: string | null;
+  original_purchase_currency?: string | null;
 }
 
 export type VoiceItemPatch = Partial<VoiceItemValues>;

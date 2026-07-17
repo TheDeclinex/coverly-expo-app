@@ -11,6 +11,7 @@ import {
 
 import { useColors } from "@/hooks/useColors";
 import type { ReplacementPriceResult } from "@/lib/replacement-pricing";
+import { formatMoney } from "@/lib/money";
 
 interface ReplacementListingCardProps {
   result: ReplacementPriceResult;
@@ -27,11 +28,7 @@ const MATCH_LABELS: Record<ReplacementPriceResult["matchType"], string> = {
 
 function formatPrice(result: ReplacementPriceResult): string {
   if (result.price != null) {
-    return result.price.toLocaleString("en-NZ", {
-      style: "currency",
-      currency: "NZD",
-      minimumFractionDigits: 2,
-    });
+    return result.currencyCode ? formatMoney(result.price, result.currencyCode) : result.priceRaw || String(result.price);
   }
   return result.priceRaw || "Price unavailable";
 }
@@ -43,8 +40,11 @@ export function ReplacementListingCard({
   onUse,
 }: ReplacementListingCardProps) {
   const colors = useColors();
-  const canUse = result.price != null && result.price > 0;
+  const canUse = result.price != null && result.price > 0 && result.currencyCode != null;
   const canOpen = /^https?:\/\//i.test(result.link);
+  const warning = result.currencyCode == null && result.price != null
+    ? "Currency unconfirmed. Open the listing and review the raw retailer price."
+    : result.warnings[0] ?? null;
 
   return (
     <View
@@ -86,12 +86,19 @@ export function ReplacementListingCard({
           <Text style={[styles.price, { color: colors.foreground }]}>
             {formatPrice(result)}
           </Text>
+          <Text style={[styles.source, { color: result.fulfilmentType === "local" ? colors.primary : colors.mutedForeground }]}>{result.fulfilmentType === "local" ? "Local retailer" : result.fulfilmentType === "overseas" ? "Overseas listing" : "Retailer location unconfirmed"}</Text>
         </View>
       </View>
 
       {result.snippet ? (
         <Text style={[styles.snippet, { color: colors.mutedForeground }]} numberOfLines={2}>
           {result.snippet}
+        </Text>
+      ) : null}
+
+      {warning ? (
+        <Text style={[styles.snippet, { color: colors.warning }]} numberOfLines={2}>
+          {warning}
         </Text>
       ) : null}
 
@@ -128,7 +135,7 @@ export function ReplacementListingCard({
             <Feather name="check" size={15} color={colors.primaryForeground} />
           )}
           <Text style={[styles.primaryText, { color: colors.primaryForeground }]}>
-            {canUse ? "Use this listing" : "Price unavailable"}
+            {canUse ? "Use this listing" : result.price != null ? "Currency unconfirmed" : "Price unavailable"}
           </Text>
         </Pressable>
       </View>

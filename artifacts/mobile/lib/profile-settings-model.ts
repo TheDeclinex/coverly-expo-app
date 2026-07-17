@@ -1,13 +1,7 @@
 export const COMPLETED_ONBOARDING_STATUS = "completed";
 export const DEFAULT_COUNTRY_CODE = "NZ";
 
-export const COUNTRY_OPTIONS = [
-  { code: "NZ", label: "New Zealand" },
-  { code: "AU", label: "Australia" },
-  { code: "GB", label: "United Kingdom" },
-  { code: "US", label: "United States" },
-  { code: "CA", label: "Canada" },
-] as const;
+export { COUNTRY_OPTIONS } from "../constants/market-config.ts";
 
 export interface ProfileSettings {
   id: string;
