@@ -126,6 +126,7 @@ test("country selector renders names as primary labels and codes as metadata", (
   assert.match(countrySelectSource, />\{market\.countryName\}<\/Text>/);
   assert.match(countrySelectSource, />\{item\.label\}<\/Text>/);
   assert.match(countrySelectSource, /\{item\.code\} · \{item\.currencyCode\}/);
+  assert.doesNotMatch(countrySelectSource, /Verified pricing|Manual inventory/);
   assert.doesNotMatch(countrySelectSource, /styles\.name[^\n]+>\{item\.code\}<\/Text>/);
 });
 

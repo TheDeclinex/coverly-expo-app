@@ -40,6 +40,7 @@ import {
   type ReplacementSearchContext,
 } from "@/lib/replacement-pricing";
 import { normalizeLimitError, type NormalizedLimitError } from "@/lib/limit-errors";
+import { resolveReplacementListingCurrency } from "@/lib/replacement-listing-policy";
 import { supabase } from "@/lib/supabase";
 import { formatMoney } from "@/lib/money";
 import type { InventoryItem } from "@/types";
@@ -516,8 +517,8 @@ export default function ReplacementPricingScreen() {
     await WebBrowser.openBrowserAsync(result.link);
   };
 
-  const saveListing = async (result: ReplacementPriceResult) => {
-    if (!item || result.price == null || result.price <= 0 || !result.currencyCode) return;
+  const saveListing = async (result: ReplacementPriceResult, currencyCode: string) => {
+    if (!item || result.price == null || result.price <= 0) return;
     setSelectingPosition(result.position);
     try {
       const { error: updateError } = await supabase
@@ -525,7 +526,7 @@ export default function ReplacementPricingScreen() {
         .update({
           estimated_price: result.price * Math.max(1, item.quantity ?? 1),
           unit_estimated_price: result.price,
-          estimated_currency: result.currencyCode,
+          estimated_currency: currencyCode,
           valuation_market: searchContext?.countryCode ?? null,
           estimated_at: new Date().toISOString(),
           price_source_type: "web_listing",
@@ -535,7 +536,7 @@ export default function ReplacementPricingScreen() {
           web_listing_price: result.price,
           web_listing_source: result.source,
           web_listing_match_type: result.matchType,
-          web_listing_currency: result.currencyCode,
+          web_listing_currency: currencyCode,
           web_listing_price_raw: result.priceRaw,
           web_listing_fulfilment_type: result.fulfilmentType,
         })
@@ -578,14 +579,17 @@ export default function ReplacementPricingScreen() {
   };
 
   const handleUse = (result: ReplacementPriceResult) => {
-    if (result.currencyCode && searchContext && result.currencyCode !== searchContext.currencyCode) {
-      Alert.alert("Use a foreign-currency listing?", `This listing is in ${result.currencyCode}, while the property uses ${searchContext.currencyCode}. Coverly will store the original amount without conversion and keep it separate in totals.`, [
+    const currencyDecision = resolveReplacementListingCurrency(result, searchContext?.currencyCode);
+    const currencyCode = currencyDecision.currencyCode;
+    if (!currencyDecision.canUse || !currencyCode) return;
+    if (currencyDecision.requiresForeignCurrencyConfirmation && searchContext) {
+      Alert.alert("Use a foreign-currency listing?", `This listing is in ${currencyCode}, while the property uses ${searchContext.currencyCode}. Coverly will store the original amount without conversion and keep it separate in totals.`, [
         { text: "Cancel", style: "cancel" },
-        { text: "Use listing", onPress: () => void saveListing(result) },
+        { text: "Use listing", onPress: () => void saveListing(result, currencyCode) },
       ]);
       return;
     }
-    void saveListing(result);
+    void saveListing(result, currencyCode);
   };
 
   return (

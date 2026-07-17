@@ -336,7 +336,6 @@ export default function AddPropertyScreen() {
 
       <FormField label="Property country" required colors={colors}>
         <CountrySelect value={countryCode} onChange={(value) => { setCountryCode(value); clearError(); }} />
-        <Text style={[styles.helperText, { color: colors.mutedForeground }]}>Coverly uses the property country to estimate replacement values and search local retailers.</Text>
       </FormField>
 
       <FormField label="Insurance contents cover" required hint={moneyDisplayToken(market.currencyCode)} colors={colors}>

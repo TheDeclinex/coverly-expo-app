@@ -51,6 +51,7 @@ test("screen money displays use semantic summary, value, and listing formatters"
   const room = source("artifacts/mobile/app/(tabs)/room/[id].tsx");
   const scan = source("artifacts/mobile/app/(tabs)/scan.tsx");
   const listings = source("artifacts/mobile/components/ReplacementListingCard.tsx");
+  const listingPolicy = source("artifacts/mobile/lib/replacement-listing-policy.ts");
   const history = source("artifacts/mobile/app/(tabs)/claim-packs.tsx");
 
   assert.match(home, /formatCurrency\(inventoryValue/);
@@ -59,8 +60,18 @@ test("screen money displays use semantic summary, value, and listing formatters"
   assert.match(room, /formatCurrencyTotals\(roomSummary\.totalsByCurrency/);
   assert.match(room, /formatCurrency\(category\.value, resolvedPropertyCurrency\)/);
   assert.match(scan, /formatCurrencyFull\(\(item\.unitEstimatedPrice/);
-  assert.match(listings, /precision: "listing"/);
+  assert.match(listings, /formatReplacementListingPrice\(result, contextCurrency\)/);
+  assert.match(listingPolicy, /precision: "listing"/);
   assert.match(history, /formal: true, precision: "summary"/);
+});
+
+test("replacement cards use search currency fallback without weakening foreign listing protection", () => {
+  const card = source("artifacts/mobile/components/ReplacementListingCard.tsx");
+  const screen = source("artifacts/mobile/app/(tabs)/replacement-pricing/[id].tsx");
+  assert.match(card, /const canUse = currencyDecision\.canUse/);
+  assert.doesNotMatch(card, /result\.currencyCode != null/);
+  assert.match(screen, /requiresForeignCurrencyConfirmation/);
+  assert.match(screen, /saveListing\(result, currencyCode\)/);
 });
 
 test("Edge price paths use strict finite helpers and preserve metering code", () => {

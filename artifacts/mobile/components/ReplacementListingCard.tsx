@@ -11,7 +11,7 @@ import {
 
 import { useColors } from "@/hooks/useColors";
 import type { ReplacementPriceResult } from "@/lib/replacement-pricing";
-import { formatMoney } from "@/lib/money";
+import { formatReplacementListingPrice, resolveReplacementListingCurrency } from "@/lib/replacement-listing-policy";
 
 interface ReplacementListingCardProps {
   result: ReplacementPriceResult;
@@ -27,13 +27,6 @@ const MATCH_LABELS: Record<ReplacementPriceResult["matchType"], string> = {
   similar_item: "Similar item",
 };
 
-function formatPrice(result: ReplacementPriceResult, contextCurrency?: string | null): string {
-  if (result.price != null) {
-    return result.currencyCode ? formatMoney(result.price, result.currencyCode, { contextCurrency, precision: "listing" }) : result.priceRaw || String(result.price);
-  }
-  return result.priceRaw || "Price unavailable";
-}
-
 export function ReplacementListingCard({
   result,
   contextCurrency,
@@ -42,11 +35,10 @@ export function ReplacementListingCard({
   onUse,
 }: ReplacementListingCardProps) {
   const colors = useColors();
-  const canUse = result.price != null && result.price > 0 && result.currencyCode != null;
+  const currencyDecision = resolveReplacementListingCurrency(result, contextCurrency);
+  const canUse = currencyDecision.canUse;
   const canOpen = /^https?:\/\//i.test(result.link);
-  const warning = result.currencyCode == null && result.price != null
-    ? "Currency unconfirmed. Open the listing and review the raw retailer price."
-    : result.warnings[0] ?? null;
+  const warning = currencyDecision.warning;
 
   return (
     <View
@@ -86,7 +78,7 @@ export function ReplacementListingCard({
             {result.source}
           </Text>
           <Text style={[styles.price, { color: colors.foreground }]}>
-            {formatPrice(result, contextCurrency)}
+            {formatReplacementListingPrice(result, contextCurrency)}
           </Text>
           <Text style={[styles.source, { color: result.fulfilmentType === "local" ? colors.primary : colors.mutedForeground }]}>{result.fulfilmentType === "local" ? "Local retailer" : result.fulfilmentType === "overseas" ? "Overseas listing" : "Retailer location unconfirmed"}</Text>
         </View>
