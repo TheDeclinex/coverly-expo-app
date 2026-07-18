@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 
 import {
   applyAiTextUpdate,
@@ -13,8 +14,12 @@ import {
   type ReplacementRefinementDraft,
 } from "../replacement-refinement-model.ts";
 import { formatMoneyInputValue } from "../money.ts";
+import { composeReplacementSearchTerm, containsReplacementSearchPhrase } from "../replacement-search-terms.ts";
+import { readRefinementFunctionFailure, replacementRefinementFailureMessage } from "../replacement-refinement-errors.ts";
 import {
   APPROVED_REPLACEMENT_REFINEMENT_MODEL,
+  classifyOpenAiRefinementFailure,
+  extractReplacementRefinementOutputText,
   isSupportedRefinementRewrite,
   resolveReplacementRefinementModel,
   validateAiRefinementCandidate,
@@ -23,6 +28,7 @@ import {
   applyAuthoritativeReplacementPriceRange,
   isAuthoritativeReplacementPriceRangeActive,
 } from "../../../../supabase/functions/replacement-price-search/refinement-results.ts";
+import { buildV2RefinementSearchTerms } from "../../../../supabase/functions/replacement-price-search/refinement-query.ts";
 
 const draft = (overrides: Partial<ReplacementRefinementDraft> = {}): ReplacementRefinementDraft => ({
   searchTerm: "Sony OLED television",
@@ -60,6 +66,27 @@ test("original, working, and submitted drafts can remain independent", () => {
   assert.equal(submitted.model, "Bravia");
 });
 
+test("search-term composition removes whole-phrase brand duplication without rewriting item wording", () => {
+  assert.equal(composeReplacementSearchTerm({
+    name: "Sony Black Sony flat-screen television",
+    brand: "Sony",
+    model: "",
+  }), "Sony Black flat-screen television");
+  assert.equal(composeReplacementSearchTerm({ name: "Black Sony flat-screen television", brand: "Sony" }), "Black Sony flat-screen television");
+  assert.equal(composeReplacementSearchTerm({ name: "Television", brand: "Sony", model: "X90J-A" }), "Sony X90J-A Television");
+  assert.equal(composeReplacementSearchTerm({ name: "Sony X90J-A television", brand: "Sony", model: "X90J-A" }), "Sony X90J-A television");
+  assert.equal(containsReplacementSearchPhrase("SONY, black television", "Sony"), true);
+  assert.equal(containsReplacementSearchPhrase("Sonya television", "Sony"), false);
+  assert.equal(buildV2RefinementSearchTerms(
+    "Black Sony flat-screen television",
+    ["Sony", "X90J-A", "65 inch", "Sony"],
+  ), "Black Sony flat-screen television X90J-A 65 inch");
+  assert.equal(buildV2RefinementSearchTerms(
+    "Sony Black Sony flat-screen television",
+    ["Sony"],
+  ), "Sony Black flat-screen television");
+});
+
 test("AI text update preserves price and chip state and provides an exact undo snapshot", () => {
   const selected = toggleRefinementChip(draft({ minimumPrice: "2000", maximumPrice: "3500" }), {
     id: "chip:oled",
@@ -78,6 +105,17 @@ test("AI text update preserves price and chip state and provides an exact undo s
   assert.equal(applied.draft.maximumPrice, "3500");
   assert.equal(applied.draft.chipContributions.length, 1);
   assert.deepEqual(applied.undoDraft, selected);
+});
+
+test("AI and manual primary terms remove only repeated exact brand or model phrases", () => {
+  const applied = applyAiTextUpdate(draft(), {
+    searchTerm: "Sony black Sony television Bravia Bravia",
+    brand: "Sony",
+    model: "Bravia",
+    additionalDetails: "OLED",
+  });
+  assert.equal(applied.draft.searchTerm, "Sony black television Bravia");
+  assert.equal(effectiveRefinementFieldValue(draft({ searchTerm: "Sony black Sony television" }), "searchTerm"), "Sony black television");
 });
 
 test("chip provenance is separate from manual content and removal removes only that contribution", () => {
@@ -162,11 +200,37 @@ test("AI guard accepts organization but rejects unsupported product facts", () =
   assert.equal(isSupportedRefinementRewrite("blue television", "black television"), false);
 });
 
+test("Responses output parsing skips reasoning items and client errors stay calm", () => {
+  const envelope = {
+    output: [
+      { type: "reasoning", content: [] },
+      { type: "message", content: [{ type: "output_text", text: "{\"searchTerm\":\"Sony TV\"}" }] },
+    ],
+  };
+  assert.equal(extractReplacementRefinementOutputText(envelope), "{\"searchTerm\":\"Sony TV\"}");
+  assert.equal(extractReplacementRefinementOutputText({ output: [{ type: "reasoning" }] }), null);
+  assert.equal(classifyOpenAiRefinementFailure(429, {}), "AI_RATE_LIMITED");
+  assert.equal(classifyOpenAiRefinementFailure(400, { error: { code: "model_not_found" } }), "AI_MODEL_UNAVAILABLE");
+  assert.match(replacementRefinementFailureMessage(502, "AI_REQUEST_FAILED"), /temporarily unavailable/i);
+  assert.doesNotMatch(replacementRefinementFailureMessage(502, "AI_REQUEST_FAILED"), /non-2xx|edge function/i);
+});
+
+test("mobile extracts structured Edge failure support fields without exposing raw transport copy", async () => {
+  const parsed = await readRefinementFunctionFailure({
+    message: "Edge Function returned a non-2xx status code",
+    context: new Response(JSON.stringify({ code: "AI_MODEL_UNAVAILABLE", requestId: "request-123" }), { status: 502 }),
+  });
+  assert.equal(parsed.status, 502);
+  assert.equal(parsed.failure?.code, "AI_MODEL_UNAVAILABLE");
+  assert.equal(parsed.failure?.requestId, "request-123");
+  assert.doesNotMatch(replacementRefinementFailureMessage(parsed.status, parsed.failure?.code), /non-2xx/i);
+});
+
 test("screen contract preserves old results, separates refined billing retry, and embeds voice", () => {
-  const screen = readFileSync(new URL("../../app/(tabs)/replacement-pricing/[id].tsx", import.meta.url), "utf8");
-  const sheet = readFileSync(new URL("../../components/ReplacementSearchRefinementSheet.tsx", import.meta.url), "utf8");
-  const transport = readFileSync(new URL("../replacement-pricing.ts", import.meta.url), "utf8");
-  const edge = readFileSync(new URL("../../../../supabase/functions/replacement-price-search/index.ts", import.meta.url), "utf8");
+  const screen = readFileSync(fileURLToPath(new URL("../../app/(tabs)/replacement-pricing/[id].tsx", import.meta.url).href), "utf8");
+  const sheet = readFileSync(fileURLToPath(new URL("../../components/ReplacementSearchRefinementSheet.tsx", import.meta.url).href), "utf8");
+  const transport = readFileSync(fileURLToPath(new URL("../replacement-pricing.ts", import.meta.url).href), "utf8");
+  const edge = readFileSync(fileURLToPath(new URL("../../../../supabase/functions/replacement-price-search/index.ts", import.meta.url).href), "utf8");
   assert.match(screen, /results \? \(/);
   assert.match(screen, /opacity: refinedSearching \? 0\.56/);
   assert.match(screen, /Try again/);

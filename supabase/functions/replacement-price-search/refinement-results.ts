@@ -1,7 +1,17 @@
 export interface RefinementPricedResult {
   price: number | null;
   currencyCode: string | null;
+  priceRaw?: string;
 }
+
+export type ReplacementRangeCandidateReason =
+  | 'inside_range'
+  | 'below_range'
+  | 'above_range'
+  | 'foreign_currency'
+  | 'unknown_currency'
+  | 'invalid_price'
+  | 'unpriced';
 
 export function hasReplacementPriceRange(minimumPrice?: number, maximumPrice?: number): boolean {
   return minimumPrice != null || maximumPrice != null;
@@ -23,11 +33,25 @@ export function applyAuthoritativeReplacementPriceRange<T extends RefinementPric
   limit: number,
 ): T[] {
   if (!hasReplacementPriceRange(minimumPrice, maximumPrice)) return results.slice(0, limit);
-  return results.filter((result) => {
-    if (result.price == null || !Number.isFinite(result.price) || result.price <= 0) return false;
-    if (result.currencyCode !== propertyCurrencyCode) return false;
-    if (minimumPrice != null && result.price < minimumPrice) return false;
-    if (maximumPrice != null && result.price > maximumPrice) return false;
-    return true;
-  }).slice(0, limit);
+  return results.filter((result) => classifyReplacementRangeCandidate(
+    result,
+    propertyCurrencyCode,
+    minimumPrice,
+    maximumPrice,
+  ) === 'inside_range').slice(0, limit);
+}
+
+export function classifyReplacementRangeCandidate(
+  result: RefinementPricedResult,
+  propertyCurrencyCode: string,
+  minimumPrice?: number,
+  maximumPrice?: number,
+): ReplacementRangeCandidateReason {
+  if (result.price == null) return result.priceRaw?.trim() ? 'invalid_price' : 'unpriced';
+  if (!Number.isFinite(result.price) || result.price <= 0) return 'invalid_price';
+  if (result.currencyCode == null) return 'unknown_currency';
+  if (result.currencyCode !== propertyCurrencyCode) return 'foreign_currency';
+  if (minimumPrice != null && result.price < minimumPrice) return 'below_range';
+  if (maximumPrice != null && result.price > maximumPrice) return 'above_range';
+  return 'inside_range';
 }

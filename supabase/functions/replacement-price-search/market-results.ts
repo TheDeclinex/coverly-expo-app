@@ -5,6 +5,16 @@ export interface MarketPriceResultLike {
   currencyCode: string | null;
 }
 
+export interface ProviderShoppingResultEvidence {
+  price?: unknown;
+  link?: unknown;
+  source?: unknown;
+  country?: unknown;
+  countryCode?: unknown;
+  currency?: unknown;
+  currencyCode?: unknown;
+}
+
 const COMPLETE_PROVIDER_NUMBER = /^(?:\d+|\d+\.\d+|\d{1,3}(?:,\d{3})+(?:\.\d+)?)$/;
 
 /** Extracts one complete positive provider price token while retaining descriptive text support. */
@@ -35,6 +45,17 @@ export const KNOWN_RETAILER_COUNTRY_BY_DOMAIN = {
   'cultura.com': 'FR',
 } as const satisfies Record<string, ConfiguredCountryCode>;
 
+/** Exact retailer labels that identify one primary configured market. */
+export const KNOWN_RETAILER_COUNTRY_BY_SOURCE = {
+  'noel leeming': 'NZ',
+  'smiths city': 'NZ',
+  'heathcotes': 'NZ',
+  'the warehouse': 'NZ',
+  'the good guys': 'AU',
+  'best buy': 'US',
+  'canadian tire': 'CA',
+} as const satisfies Record<string, ConfiguredCountryCode>;
+
 const EXPLICIT_DOLLAR_PREFIXES: Array<[RegExp, string]> = [
   [/\bNZ\s?\$/i, 'NZD'], [/\bAU\s?\$|\bA\$/i, 'AUD'],
   [/\bUS\s?\$/i, 'USD'], [/\bCA\s?\$|\bC\$/i, 'CAD'],
@@ -43,17 +64,71 @@ const EXPLICIT_DOLLAR_PREFIXES: Array<[RegExp, string]> = [
 
 export function countryCodeFromRetailerLink(link: string): string | null {
   try {
-    const host = new URL(link).hostname.toLowerCase().replace(/\.$/, '');
+    const url = new URL(link);
+    const host = url.hostname.toLowerCase().replace(/\.$/, '');
     for (const [domain, countryCode] of Object.entries(KNOWN_RETAILER_COUNTRY_BY_DOMAIN)) {
       if (host === domain || host.endsWith(`.${domain}`)) return countryCode;
     }
     if (host.endsWith('.uk')) return 'GB';
     const suffix = host.match(/\.([a-z]{2})$/)?.[1];
     const countryCode = suffix?.toUpperCase();
-    return countryCode && CONFIGURED_COUNTRIES.has(countryCode) ? countryCode : null;
+    if (countryCode && CONFIGURED_COUNTRIES.has(countryCode)) return countryCode;
+    for (const key of ['country', 'countryCode', 'country_code']) {
+      const explicitCountry = url.searchParams.get(key)?.trim().toUpperCase();
+      if (explicitCountry && CONFIGURED_COUNTRIES.has(explicitCountry)) return explicitCountry;
+    }
+    return null;
   } catch {
     return null;
   }
+}
+
+export function countryCodeFromRetailerSource(source: string): string | null {
+  const normalized = source.trim().toLocaleLowerCase('en').replace(/\s+/g, ' ');
+  if (!normalized) return null;
+  const known = KNOWN_RETAILER_COUNTRY_BY_SOURCE[normalized as keyof typeof KNOWN_RETAILER_COUNTRY_BY_SOURCE];
+  if (known) return known;
+  if (/\b(?:new zealand|aotearoa)\b/i.test(normalized)) return 'NZ';
+  if (/\baustralia\b/i.test(normalized)) return 'AU';
+  if (/\bcanada\b/i.test(normalized)) return 'CA';
+  if (/\bunited states\b/i.test(normalized)) return 'US';
+  return null;
+}
+
+function configuredCode(value: unknown, configured: Set<string>): string | null {
+  if (typeof value !== 'string') return null;
+  const normalized = value.trim().toUpperCase();
+  return configured.has(normalized) ? normalized : null;
+}
+
+function currencyCodeFromRetailerLink(link: string): string | null {
+  try {
+    const url = new URL(link);
+    for (const key of ['currency', 'currencyCode', 'currency_code']) {
+      const currencyCode = configuredCode(url.searchParams.get(key), CONFIGURED_CURRENCIES);
+      if (currencyCode) return currencyCode;
+    }
+  } catch {
+    // An invalid link supplies no evidence.
+  }
+  return null;
+}
+
+export function providerShoppingResultEvidence(result: ProviderShoppingResultEvidence): {
+  retailerCountryCode: string | null;
+  providerCurrencyCode: string | null;
+} {
+  const link = typeof result.link === 'string' ? result.link : '';
+  const source = typeof result.source === 'string' ? result.source : '';
+  return {
+    retailerCountryCode: configuredCode(result.countryCode, CONFIGURED_COUNTRIES)
+      ?? configuredCode(result.country, CONFIGURED_COUNTRIES)
+      ?? countryCodeFromRetailerLink(link)
+      ?? countryCodeFromRetailerSource(source),
+    providerCurrencyCode: configuredCode(result.currencyCode, CONFIGURED_CURRENCIES)
+      ?? configuredCode(result.currency, CONFIGURED_CURRENCIES)
+      ?? currencyCodeFromRetailerLink(link),
+  };
 }
 
 export interface RetailerMarketClassification {
@@ -66,8 +141,10 @@ export function classifyRetailerMarket(
   link: string,
   currencyCode: string | null,
   market: MarketConfig,
+  retailerCountryCodeEvidence?: string | null,
 ): RetailerMarketClassification {
-  const retailerCountryCode = countryCodeFromRetailerLink(link);
+  const retailerCountryCode = configuredCode(retailerCountryCodeEvidence, CONFIGURED_COUNTRIES)
+    ?? countryCodeFromRetailerLink(link);
   const localRetailerMarket = retailerCountryCode === market.countryCode;
   const foreignRetailerMarket = retailerCountryCode != null
     && retailerCountryCode !== market.countryCode;
@@ -110,8 +187,6 @@ export function detectResultCurrency(
   evidence?: { retailerLink?: string | null; retailerCountryCode?: string | null; providerCurrencyCode?: string | null },
 ): string | null {
   const upper = rawPriceText.toUpperCase();
-  const providerCurrency = evidence?.providerCurrencyCode?.trim().toUpperCase();
-  if (providerCurrency && CONFIGURED_CURRENCIES.has(providerCurrency)) return providerCurrency;
   const codeBefore = upper.match(/(?:^|[^A-Z])([A-Z]{3})\s*([$£€¥]?)\s*(?=\d)/)?.slice(1) as [string, string] | undefined;
   const codeAfter = upper.match(/\d(?:[\d,.]*\d)?\s+([A-Z]{3})(?:$|[^A-Z])/)?.[1];
   if (codeBefore && CONFIGURED_CURRENCIES.has(codeBefore[0]) && !AMBIGUOUS_WORD_CODES.has(codeBefore[0])) {
@@ -131,6 +206,8 @@ export function detectResultCurrency(
   if (/€/.test(rawPriceText)) return 'EUR';
   if (/CHF/i.test(rawPriceText)) return 'CHF';
   if (/[¥￥]/.test(rawPriceText)) return market.currencyCode === 'CNY' ? 'CNY' : 'JPY';
+  const providerCurrency = evidence?.providerCurrencyCode?.trim().toUpperCase();
+  if (providerCurrency && CONFIGURED_CURRENCIES.has(providerCurrency)) return providerCurrency;
   if (!/\$/.test(rawPriceText)) return null;
 
   const retailerCountryCode = evidence?.retailerCountryCode?.toUpperCase()

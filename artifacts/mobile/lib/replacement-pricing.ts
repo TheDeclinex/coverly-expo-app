@@ -1,6 +1,7 @@
 import { friendlyNetworkErrorMessage } from "@/lib/network-errors";
 import { anonKey, debugSupabaseUrl, supabase } from "@/lib/supabase";
 import type { InventoryItem } from "@/types";
+import { composeReplacementSearchTerm } from "./replacement-search-terms.ts";
 export { replacementVoiceTranscriptToQuery } from "./replacement-pricing-query.ts";
 
 export interface ReplacementPriceSearchRequest {
@@ -110,17 +111,11 @@ export function getItemUnitEstimate(item: InventoryItem): number | null {
 }
 
 export function buildReplacementSearchQuery(item: InventoryItem): string {
-  const terms = [item.brand_maker, item.model_series, item.name]
-    .map((value) => value?.trim())
-    .filter((value): value is string => Boolean(value));
-
-  const uniqueTerms = terms.filter(
-    (term, index) =>
-      terms.findIndex((candidate) => candidate.toLowerCase() === term.toLowerCase()) ===
-      index,
-  );
-
-  return uniqueTerms.join(" ").trim();
+  return composeReplacementSearchTerm({
+    name: item.name,
+    brand: item.brand_maker,
+    model: item.model_series,
+  });
 }
 
 export function filterReplacementResults(

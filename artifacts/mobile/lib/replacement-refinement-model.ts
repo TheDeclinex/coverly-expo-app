@@ -1,5 +1,6 @@
 import type { InventoryItem } from "@/types";
 import { currencyFractionDigits } from "./money.ts";
+import { composeReplacementSearchTerm, containsReplacementSearchPhrase, deduplicateReplacementSearchAttributes } from "./replacement-search-terms.ts";
 
 export type ReplacementRefinementTextField =
   | "searchTerm"
@@ -47,13 +48,8 @@ export function createOriginalReplacementRefinementDraft(
 ): ReplacementRefinementDraft {
   const brand = normalizeRefinementText(item.brand_maker);
   const model = normalizeRefinementText(item.model_series);
-  const name = normalizeRefinementText(item.name);
-  const terms = [brand, model, name].filter(Boolean);
-  const uniqueTerms = terms.filter(
-    (term, index) => terms.findIndex((candidate) => candidate.toLowerCase() === term.toLowerCase()) === index,
-  );
   return {
-    searchTerm: uniqueTerms.join(" "),
+    searchTerm: composeReplacementSearchTerm({ name: item.name, brand, model }),
     brand,
     model,
     additionalDetails: normalizeRefinementText(item.description),
@@ -80,7 +76,10 @@ export function applyAiTextUpdate(
     undoDraft: cloneReplacementRefinementDraft(draft),
     draft: {
       ...draft,
-      searchTerm: normalizeRefinementText(update.searchTerm),
+      searchTerm: deduplicateReplacementSearchAttributes(normalizeRefinementText(update.searchTerm), [
+        normalizeRefinementText(update.brand),
+        normalizeRefinementText(update.model),
+      ]),
       brand: normalizeRefinementText(update.brand),
       model: normalizeRefinementText(update.model),
       additionalDetails: normalizeRefinementText(update.additionalDetails),
@@ -89,8 +88,7 @@ export function applyAiTextUpdate(
 }
 
 function containsPhrase(haystack: string, needle: string): boolean {
-  return normalizeRefinementText(haystack).toLocaleLowerCase("en")
-    .includes(normalizeRefinementText(needle).toLocaleLowerCase("en"));
+  return containsReplacementSearchPhrase(haystack, needle);
 }
 
 export function effectiveRefinementFieldValue(
@@ -102,7 +100,10 @@ export function effectiveRefinementFieldValue(
     .filter((chip) => chip.field === field && !containsPhrase(manualValue, chip.value))
     .map((chip) => normalizeRefinementText(chip.value))
     .filter(Boolean);
-  return normalizeRefinementText([manualValue, ...contributions].filter(Boolean).join(" "));
+  const effective = normalizeRefinementText([manualValue, ...contributions].filter(Boolean).join(" "));
+  return field === "searchTerm"
+    ? deduplicateReplacementSearchAttributes(effective, [draft.brand, draft.model])
+    : effective;
 }
 
 export function toggleRefinementChip(

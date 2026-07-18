@@ -1,5 +1,13 @@
 import { friendlyNetworkErrorMessage } from "@/lib/network-errors";
-import { supabase } from "@/lib/supabase";
+import { anonKey, debugSupabaseUrl, supabase } from "@/lib/supabase";
+import {
+  refinementFailureCode,
+  replacementRefinementFailureMessage,
+} from "./replacement-refinement-errors.ts";
+import {
+  postRefinementWithCurrentSession,
+  RefinementSessionError,
+} from "./replacement-refinement-transport.ts";
 import type {
   ReplacementRefinementDraft,
   ReplacementRefinementTextField,
@@ -20,14 +28,23 @@ interface AiRefinementFunctionResponse {
     suggestedChips?: string[];
   };
   error?: string;
+  errorCode?: string;
+  code?: string;
+  message?: string;
+  requestId?: string;
 }
 
 export async function improveReplacementRefinementWithAi(
   itemId: string,
   draft: ReplacementRefinementDraft,
 ): Promise<AiReplacementRefinementResult> {
+  let invocation: { status: number; ok: boolean; data: AiRefinementFunctionResponse | null };
   try {
-    const { data, error } = await supabase.functions.invoke<AiRefinementFunctionResponse>(FUNCTION_NAME, {
+    invocation = await postRefinementWithCurrentSession<AiRefinementFunctionResponse>({
+      getSession: () => supabase.auth.getSession(),
+      fetcher: fetch,
+      functionUrl: `${debugSupabaseUrl.replace(/\/$/, "")}/functions/v1/${FUNCTION_NAME}`,
+      anonKey,
       body: {
         itemId,
         draft: {
@@ -38,10 +55,26 @@ export async function improveReplacementRefinementWithAi(
         },
       },
     });
-    if (error || !data?.success || !data.draft) {
-      throw new Error(data?.error || error?.message || "AI could not improve the search right now.");
+  } catch (error) {
+    if (error instanceof RefinementSessionError) {
+      throw new Error(replacementRefinementFailureMessage(undefined, error.code));
     }
-    return {
+    throw new Error(friendlyNetworkErrorMessage(error) ?? replacementRefinementFailureMessage());
+  }
+
+  const { data, status, ok } = invocation;
+  if (!ok || !data?.success || !data.draft) {
+    const code = refinementFailureCode(status, data);
+    if (__DEV__) {
+      console.warn("[replacement-refinement-ai] function failure", {
+        status,
+        code,
+        requestId: data?.requestId,
+      });
+    }
+    throw new Error(replacementRefinementFailureMessage(status, code));
+  }
+  return {
       draft: {
         searchTerm: data.draft.searchTerm ?? draft.searchTerm,
         brand: data.draft.brand ?? draft.brand,
@@ -50,8 +83,5 @@ export async function improveReplacementRefinementWithAi(
       },
       changedFields: Array.isArray(data.draft.changedFields) ? data.draft.changedFields : [],
       suggestedChips: Array.isArray(data.draft.suggestedChips) ? data.draft.suggestedChips : [],
-    };
-  } catch (error) {
-    throw new Error(friendlyNetworkErrorMessage(error) || (error instanceof Error ? error.message : "AI could not improve the search right now."));
-  }
+  };
 }

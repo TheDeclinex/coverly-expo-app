@@ -28,6 +28,38 @@ export function resolveReplacementRefinementModel(configuredModel?: string | nul
   return configuredModel?.trim() || APPROVED_REPLACEMENT_REFINEMENT_MODEL;
 }
 
+export function extractReplacementRefinementOutputText(envelope: unknown): string | null {
+  if (!envelope || typeof envelope !== "object") return null;
+  const output = (envelope as { output?: unknown }).output;
+  if (!Array.isArray(output)) return null;
+  for (const item of output) {
+    if (!item || typeof item !== "object" || (item as { type?: unknown }).type !== "message") continue;
+    const content = (item as { content?: unknown }).content;
+    if (!Array.isArray(content)) continue;
+    for (const part of content) {
+      if (part && typeof part === "object"
+        && (part as { type?: unknown }).type === "output_text"
+        && typeof (part as { text?: unknown }).text === "string") {
+        return (part as { text: string }).text;
+      }
+    }
+  }
+  return null;
+}
+
+export function classifyOpenAiRefinementFailure(status: number, payload: unknown): string {
+  const error = payload && typeof payload === "object" && "error" in payload
+    ? (payload as { error?: unknown }).error
+    : null;
+  const code = error && typeof error === "object" && typeof (error as { code?: unknown }).code === "string"
+    ? (error as { code: string }).code.toLowerCase()
+    : "";
+  if (status === 401 || status === 403) return "AI_AUTH_FAILED";
+  if (status === 429) return "AI_RATE_LIMITED";
+  if (status === 404 || code.includes("model")) return "AI_MODEL_UNAVAILABLE";
+  return "AI_REQUEST_FAILED";
+}
+
 const SAFE_EDITOR_WORDS = new Set([
   "a", "an", "and", "by", "for", "from", "in", "of", "on", "or", "the", "to", "with", "without",
   "replacement", "item", "product",

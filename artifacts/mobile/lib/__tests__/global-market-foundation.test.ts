@@ -52,7 +52,7 @@ test("legacy per-unit values and replacement query compatibility are explicit", 
   assert.equal(getItemTotalValue(legacy), 4500);
   assert.equal(getItemUnitPrice(legacy), 1500);
   const mobileSearch = source("artifacts/mobile/lib/replacement-pricing.ts");
-  assert.match(mobileSearch, /return uniqueTerms\.join\(" "\)\.trim\(\)/);
+  assert.match(mobileSearch, /return composeReplacementSearchTerm\(/);
   assert.doesNotMatch(mobileSearch, /join\(" "\).*NZ/);
 });
 

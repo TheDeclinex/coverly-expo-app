@@ -6,10 +6,13 @@ import {
   classifyRetailerMarket,
   confirmedPropertyCurrencyStats,
   countryCodeFromRetailerLink,
+  countryCodeFromRetailerSource,
   detectResultCurrency,
   KNOWN_RETAILER_COUNTRY_BY_DOMAIN,
   parseProviderPrice,
+  providerShoppingResultEvidence,
 } from "../../../../supabase/functions/replacement-price-search/market-results.ts";
+import { applyAuthoritativeReplacementPriceRange, classifyReplacementRangeCandidate } from "../../../../supabase/functions/replacement-price-search/refinement-results.ts";
 
 const priced = (price: number | null, currencyCode: string | null) => ({ price, currencyCode });
 
@@ -80,6 +83,63 @@ test("symbol-free price text does not invent a property currency", () => {
   const nz = resolveMarketConfig("NZ")!;
   assert.equal(detectResultCurrency("1,299", nz, { retailerCountryCode: "NZ" }), null);
   assert.equal(detectResultCurrency("From 1,299", nz, { retailerCountryCode: "NZ" }), null);
+});
+
+test("provider metadata and conservative retailer sources supply strong local-market evidence", () => {
+  assert.equal(countryCodeFromRetailerSource("Noel Leeming"), "NZ");
+  assert.equal(countryCodeFromRetailerSource("Harvey Norman New Zealand"), "NZ");
+  assert.equal(countryCodeFromRetailerSource("Unknown Shop"), null);
+  assert.deepEqual(providerShoppingResultEvidence({ countryCode: "NZ", currency: "NZD" }), {
+    retailerCountryCode: "NZ",
+    providerCurrencyCode: "NZD",
+  });
+  assert.deepEqual(providerShoppingResultEvidence({
+    source: "Unknown Shop",
+    link: "https://example.com/product?country=AU&currency=AUD",
+  }), { retailerCountryCode: "AU", providerCurrencyCode: "AUD" });
+});
+
+test("representative NZ provider candidates retain local in-range listings and explain every exclusion", () => {
+  const nz = resolveMarketConfig("NZ")!;
+  const raw = [
+    { id: "local-domain", price: "$900", link: "https://shop.example.co.nz/a", source: "Shop" },
+    { id: "local-source", price: "$1,299", link: "https://example.com/b", source: "Noel Leeming" },
+    { id: "local-metadata", price: "$2,999", link: "https://example.com/c", source: "Shop", countryCode: "NZ", currencyCode: "NZD" },
+    { id: "below", price: "$899", link: "https://shop.example.co.nz/d", source: "Shop" },
+    { id: "above", price: "$3,001", link: "https://shop.example.co.nz/e", source: "Shop" },
+    { id: "foreign", price: "US$1,100", link: "https://shop.example.co.nz/f", source: "Shop" },
+    { id: "unknown", price: "$1,500", link: "https://example.com/g", source: "Unknown Shop" },
+    { id: "invalid", price: "Call 0800 123 456", link: "https://shop.example.co.nz/h", source: "Shop" },
+    { id: "unpriced", price: "", link: "https://shop.example.co.nz/i", source: "Shop" },
+  ];
+  const classified = raw.map((candidate) => {
+    const evidence = providerShoppingResultEvidence(candidate);
+    return {
+      id: candidate.id,
+      priceRaw: candidate.price,
+      price: parseProviderPrice(candidate.price),
+      currencyCode: detectResultCurrency(candidate.price, nz, evidence),
+    };
+  });
+  assert.deepEqual(
+    applyAuthoritativeReplacementPriceRange(classified, "NZD", 900, 3000, 10).map((result) => result.id),
+    ["local-domain", "local-source", "local-metadata"],
+  );
+  assert.deepEqual(Object.fromEntries(classified.map((result) => [
+    result.id,
+    classifyReplacementRangeCandidate(result, "NZD", 900, 3000),
+  ])), {
+    "local-domain": "inside_range",
+    "local-source": "inside_range",
+    "local-metadata": "inside_range",
+    below: "below_range",
+    above: "above_range",
+    foreign: "foreign_currency",
+    unknown: "unknown_currency",
+    invalid: "invalid_price",
+    unpriced: "unpriced",
+  });
+  assert.equal(applyAuthoritativeReplacementPriceRange(classified, "NZD", undefined, undefined, 20).length, raw.length);
 });
 
 test("known French retailers on generic domains resolve conservatively to France", () => {

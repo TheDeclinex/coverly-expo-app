@@ -23,8 +23,9 @@
 import { serve } from 'https://deno.land/std@0.177.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.3';
 import { resolveMarketConfig, type MarketConfig } from '../_shared/market-config.ts';
-import { classifyRetailerMarket, confirmedPropertyCurrencyStats, detectResultCurrency, parseProviderPrice } from './market-results.ts';
-import { applyAuthoritativeReplacementPriceRange, isAuthoritativeReplacementPriceRangeActive } from './refinement-results.ts';
+import { classifyRetailerMarket, confirmedPropertyCurrencyStats, detectResultCurrency, parseProviderPrice, providerShoppingResultEvidence } from './market-results.ts';
+import { applyAuthoritativeReplacementPriceRange, classifyReplacementRangeCandidate, isAuthoritativeReplacementPriceRangeActive } from './refinement-results.ts';
+import { buildV2RefinementSearchTerms } from './refinement-query.ts';
 
 const EDGE_VERSION = 'v27.0.0-replacement-refinement-v2';
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL') ?? '';
@@ -222,9 +223,7 @@ function buildQuery(req: PriceSearchRequest, market: MarketConfig): string {
     ]
       .map((value) => typeof value === 'string' ? value.trim() : '')
       .filter((value): value is string => Boolean(value))
-      .filter((value, index, values) => values.findIndex((candidate) => candidate.toLowerCase() === value.toLowerCase()) === index)
-      .filter((value) => !searchTerm.toLowerCase().includes(value.toLowerCase()));
-    return `${[searchTerm, ...support].filter(Boolean).join(' ')} ${market.countryName}`.slice(0, MAX_QUERY_LEN);
+    return `${buildV2RefinementSearchTerms(searchTerm, support)} ${market.countryName}`.slice(0, MAX_QUERY_LEN);
   }
   if (req.searchQuery?.trim()) return `${req.searchQuery.trim()} ${market.countryName}`.slice(0, MAX_QUERY_LEN);
   const parts: string[] = [];
@@ -250,15 +249,20 @@ function assignMatchType(title: string, itemName: string, position: number): Pri
   return 'similar_item';
 }
 
-function classifyResult(link: string, currencyCode: string | null, market: MarketConfig): Pick<PriceSearchResult, 'retailerCountryCode' | 'fulfilmentType' | 'warnings'> {
-  return classifyRetailerMarket(link, currencyCode, market);
+function classifyResult(link: string, currencyCode: string | null, market: MarketConfig, retailerCountryCode?: string | null): Pick<PriceSearchResult, 'retailerCountryCode' | 'fulfilmentType' | 'warnings'> {
+  return classifyRetailerMarket(link, currencyCode, market, retailerCountryCode);
 }
 
 function mapShoppingResults(data: unknown, itemName: string, num: number, market: MarketConfig): PriceSearchResult[] {
   const shopping = (data as any)?.shopping ?? [];
   return (shopping as any[]).slice(0, num).map((r: any, idx: number) => {
-    const currencyCode = detectResultCurrency(r.price ?? '', market, { retailerLink: r.link ?? '' });
-    const classification = classifyResult(r.link ?? '', currencyCode, market);
+    const evidence = providerShoppingResultEvidence(r);
+    const currencyCode = detectResultCurrency(r.price ?? '', market, {
+      retailerLink: r.link ?? '',
+      retailerCountryCode: evidence.retailerCountryCode,
+      providerCurrencyCode: evidence.providerCurrencyCode,
+    });
+    const classification = classifyResult(r.link ?? '', currencyCode, market, evidence.retailerCountryCode);
     return ({
     title: r.title ?? 'Unknown product',
     source: r.source ?? 'Unknown retailer',
@@ -295,6 +299,7 @@ function mapOrganicResults(data: unknown, itemName: string, num: number, market:
 // ── Main handler ──────────────────────────────────────────────────────────────
 serve(async (req: Request) => {
   const origin = req.headers.get('origin');
+  const requestId = crypto.randomUUID();
 
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: CORS_HEADERS });
@@ -445,6 +450,7 @@ serve(async (req: Request) => {
   const context = { countryCode: market.countryCode, countryName: market.countryName, currencyCode: market.currencyCode, pricingSupportTier: market.pricingSupportTier, provider: 'serper', searchedAt: new Date().toISOString() };
 
   const diagnostics: Record<string, unknown> = {
+    requestId,
     edgeVersion: EDGE_VERSION,
     queryUsed,
     itemName,
@@ -568,6 +574,32 @@ serve(async (req: Request) => {
           diagnostics,
         }, 502, origin);
       }
+    }
+
+    if (rangeActive) {
+      const candidates = results.map((result) => ({
+        position: result.position,
+        source: result.source.slice(0, 80),
+        host: (() => { try { return new URL(result.link).hostname; } catch { return null; } })(),
+        priceRaw: result.priceRaw.slice(0, 80),
+        price: result.price,
+        currencyCode: result.currencyCode,
+        retailerCountryCode: result.retailerCountryCode,
+        reason: classifyReplacementRangeCandidate(result, market.currencyCode, minPrice, maxPrice),
+      }));
+      diagnostics.rangeCandidateReasonCounts = candidates.reduce<Record<string, number>>((counts, candidate) => {
+        counts[candidate.reason] = (counts[candidate.reason] ?? 0) + 1;
+        return counts;
+      }, {});
+      console.info(JSON.stringify({
+        source: 'replacement-price-search',
+        edgeVersion: EDGE_VERSION,
+        stage: 'range_candidate_classification',
+        requestId,
+        market: { countryCode: market.countryCode, currencyCode: market.currencyCode },
+        range: { minimumPrice: minPrice, maximumPrice: maxPrice },
+        candidates,
+      }));
     }
 
     results = rangeActive
