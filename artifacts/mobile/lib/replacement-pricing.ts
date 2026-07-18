@@ -16,6 +16,19 @@ export interface ReplacementPriceSearchRequest {
   num?: number;
   itemId?: string;
   usageIdempotencyKey?: string;
+  refinement?: {
+    version: 2;
+    searchTerm: string;
+    brand?: string;
+    model?: string;
+    additionalDetails?: string;
+    chipValues?: string[];
+  };
+}
+
+export interface ReplacementPriceSearchOptions {
+  automaticTransportRetry?: boolean;
+  signal?: AbortSignal;
 }
 
 export type ReplacementMatchType =
@@ -130,7 +143,7 @@ export function filterReplacementResults(
   });
 }
 
-function createReplacementPricingUsageKey(): string {
+export function createReplacementPricingUsageKey(): string {
   const randomUuid =
     typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
       ? crypto.randomUUID()
@@ -154,6 +167,8 @@ function safeRequestLogBody(body: ReplacementPriceSearchRequest): Record<string,
     brand: body.brand,
     searchQuery: body.searchQuery,
     num: body.num,
+    refinementVersion: body.refinement?.version,
+    refinementChipCount: body.refinement?.chipValues?.length ?? 0,
     hasUsageIdempotencyKey: !!body.usageIdempotencyKey,
   };
 }
@@ -171,6 +186,7 @@ function messageForFailure(
 
 export async function searchReplacementPrices(
   body: ReplacementPriceSearchRequest,
+  options: ReplacementPriceSearchOptions = {},
 ): Promise<ReplacementPriceSearchSuccess> {
   const requestBody: ReplacementPriceSearchRequest = {
     ...body,
@@ -198,23 +214,35 @@ export async function searchReplacementPrices(
   }
 
   const functionUrl = `${debugSupabaseUrl.replace(/\/$/, "")}/functions/v1/${REPLACEMENT_PRICE_FUNCTION_NAME}`;
-  let httpResponse: Response;
-  try {
-    httpResponse = await fetch(functionUrl, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      apikey: anonKey,
-      Authorization: `Bearer ${accessToken}`,
-    },
-    body: JSON.stringify(requestBody),
-    });
-  } catch (error) {
-    const friendlyMessage = friendlyNetworkErrorMessage(error);
-    if (friendlyMessage) {
-      throw new ReplacementPriceSearchError(friendlyMessage, { errorCode: "NETWORK_UNAVAILABLE" });
+  let httpResponse: Response | null = null;
+  const maximumAttempts = options.automaticTransportRetry ? 2 : 1;
+  for (let attempt = 0; attempt < maximumAttempts; attempt += 1) {
+    try {
+      httpResponse = await fetch(functionUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          apikey: anonKey,
+          Authorization: `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify(requestBody),
+        signal: options.signal,
+      });
+      break;
+    } catch (error) {
+      if (options.signal?.aborted) {
+        throw new ReplacementPriceSearchError("Replacement search cancelled.", { errorCode: "CANCELLED" });
+      }
+      const friendlyMessage = friendlyNetworkErrorMessage(error);
+      if (friendlyMessage && attempt + 1 < maximumAttempts) continue;
+      if (friendlyMessage) {
+        throw new ReplacementPriceSearchError(friendlyMessage, { errorCode: "NETWORK_UNAVAILABLE" });
+      }
+      throw error;
     }
-    throw error;
+  }
+  if (!httpResponse) {
+    throw new ReplacementPriceSearchError("Replacement search could not start.", { errorCode: "NETWORK_UNAVAILABLE" });
   }
 
   const responseText = await httpResponse.text();

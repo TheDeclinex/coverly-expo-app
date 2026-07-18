@@ -5,6 +5,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import React, { useMemo, useState } from "react";
 import {
   ActivityIndicator,
+  AccessibilityInfo,
   Alert,
   Animated,
   Easing,
@@ -22,6 +23,7 @@ import { ContextBackButton } from "@/components/ContextBackButton";
 import { LimitReachedModal } from "@/components/LimitReachedModal";
 import { LoadingState } from "@/components/LoadingState";
 import { ReplacementListingCard } from "@/components/ReplacementListingCard";
+import { ReplacementSearchRefinementSheet } from "@/components/ReplacementSearchRefinementSheet";
 import { useToast } from "@/components/Toast";
 import { useAuth } from "@/context/AuthContext";
 import { useEntitlements } from "@/context/EntitlementsContext";
@@ -44,6 +46,16 @@ import { replacementMarketPresentation } from "@/lib/replacement-market-presenta
 import { buildReplacementListingUpdate, resolveReplacementListingCurrency } from "@/lib/replacement-listing-policy";
 import { supabase } from "@/lib/supabase";
 import { formatMoney } from "@/lib/money";
+import {
+  buildCurrentSearchSummary,
+  cloneReplacementRefinementDraft,
+  createOriginalReplacementRefinementDraft,
+  effectiveRefinementFieldValue,
+  validateReplacementPriceRange,
+  type ParsedReplacementPriceRange,
+  type ReplacementRefinementDraft,
+} from "@/lib/replacement-refinement-model";
+import { resolveMarketConfig } from "@/constants/market-config";
 import type { InventoryFile, InventoryItem } from "@/types";
 
 const FILTERS: Array<{ id: ReplacementPriceFilter; label: string }> = [
@@ -76,12 +88,16 @@ function formatEstimate(value: number | null, currencyCode: string, contextCurre
 
 function ReplacementSearchLoadingPanel({
   colors,
+  title = "Searching replacement prices",
   subtitle,
   accessibilityLabel,
+  onCancel,
 }: {
   colors: ReturnType<typeof useColors>;
+  title?: string;
   subtitle: string;
   accessibilityLabel: string;
+  onCancel?: () => void;
 }) {
   const pulse = React.useRef(new Animated.Value(0)).current;
   const carousel = React.useRef(new Animated.Value(0)).current;
@@ -181,7 +197,7 @@ function ReplacementSearchLoadingPanel({
         </Animated.View>
         <View style={styles.loadingCopy}>
           <Text style={[styles.loadingTitle, { color: colors.foreground }]}>
-            Searching replacement prices
+            {title}
           </Text>
           <Text style={[styles.loadingSubtitle, { color: colors.mutedForeground }]}>
             {subtitle}
@@ -235,6 +251,11 @@ function ReplacementSearchLoadingPanel({
       <Text style={[styles.loadingFooter, { color: colors.mutedForeground }]}>
         Comparing listings, prices, and retailers...
       </Text>
+      {onCancel ? (
+        <Pressable accessibilityRole="button" onPress={onCancel} style={[styles.loadingCancel, { borderColor: colors.border }]}>
+          <Text style={[styles.loadingCancelText, { color: colors.foreground }]}>Cancel search</Text>
+        </Pressable>
+      ) : null}
     </Animated.View>
   );
 }
@@ -280,7 +301,27 @@ export default function ReplacementPricingScreen() {
   const [voiceNotice, setVoiceNotice] = useState<string | null>(null);
   const [limitModal, setLimitModal] = useState<NormalizedLimitError | null>(null);
   const [selectingPosition, setSelectingPosition] = useState<number | null>(null);
+  const [refinementVisible, setRefinementVisible] = useState(false);
+  const [originalRefinementDraft, setOriginalRefinementDraft] = useState<ReplacementRefinementDraft | null>(null);
+  const [workingRefinementDraft, setWorkingRefinementDraft] = useState<ReplacementRefinementDraft | null>(null);
+  const [lastSuccessfulRefinementDraft, setLastSuccessfulRefinementDraft] = useState<ReplacementRefinementDraft | null>(null);
+  const [currentSearchDraft, setCurrentSearchDraft] = useState<ReplacementRefinementDraft | null>(null);
+  const [refinedSearching, setRefinedSearching] = useState(false);
+  const [lastFailedRefinement, setLastFailedRefinement] = useState<{
+    draft: ReplacementRefinementDraft;
+    range: ParsedReplacementPriceRange;
+  } | null>(null);
+  const [reduceMotion, setReduceMotion] = useState(false);
   const autoSearchedItemId = React.useRef<string | null>(null);
+  const refinementSeededItemId = React.useRef<string | null>(null);
+  const activeSearchSequence = React.useRef(0);
+  const searchAttemptInFlight = React.useRef(false);
+  const refinedAbortController = React.useRef<AbortController | null>(null);
+  const screenMountedRef = React.useRef(true);
+  const initialVoiceSequence = React.useRef(0);
+  const resetVoiceRecordingRef = React.useRef(resetVoiceRecording);
+  resetVoiceRecordingRef.current = resetVoiceRecording;
+  const resultEntrance = React.useRef(new Animated.Value(1)).current;
 
   const {
     data: item,
@@ -326,6 +367,44 @@ export default function ReplacementPricingScreen() {
     () => replacementMarketPresentation(activeMarketContext),
     [activeMarketContext],
   );
+  const configuredMarket = useMemo(
+    () => resolveMarketConfig(activeMarketContext?.countryCode),
+    [activeMarketContext?.countryCode],
+  );
+  const currentSearchSummary = useMemo(
+    () => currentSearchDraft ? buildCurrentSearchSummary(currentSearchDraft) : null,
+    [currentSearchDraft],
+  );
+  const currentSearchPriceSummary = useMemo(() => {
+    if (!currentSearchDraft || !activeMarketContext?.currencyCode) return null;
+    const validation = validateReplacementPriceRange(
+      currentSearchDraft.minimumPrice,
+      currentSearchDraft.maximumPrice,
+      activeMarketContext.currencyCode,
+      configuredMarket?.locale,
+    );
+    const minimum = validation.parsed.minimumPrice;
+    const maximum = validation.parsed.maximumPrice;
+    if (minimum == null && maximum == null) return null;
+    if (minimum != null && maximum != null) {
+      return `${formatMoney(minimum, activeMarketContext.currencyCode, { contextCurrency: activeMarketContext.currencyCode, precision: "value" })}–${formatMoney(maximum, activeMarketContext.currencyCode, { contextCurrency: activeMarketContext.currencyCode, precision: "value" })}`;
+    }
+    return minimum != null
+      ? `From ${formatMoney(minimum, activeMarketContext.currencyCode, { contextCurrency: activeMarketContext.currencyCode, precision: "value" })}`
+      : `Up to ${formatMoney(maximum, activeMarketContext.currencyCode, { contextCurrency: activeMarketContext.currencyCode, precision: "value" })}`;
+  }, [activeMarketContext?.currencyCode, configuredMarket?.locale, currentSearchDraft]);
+
+  React.useEffect(() => {
+    let mounted = true;
+    void AccessibilityInfo.isReduceMotionEnabled().then((enabled) => {
+      if (mounted) setReduceMotion(enabled);
+    });
+    const subscription = AccessibilityInfo.addEventListener("reduceMotionChanged", setReduceMotion);
+    return () => {
+      mounted = false;
+      subscription.remove();
+    };
+  }, []);
 
   const estimate = item ? getItemUnitEstimate(item) : null;
   const filteredResults = useMemo(
@@ -333,28 +412,95 @@ export default function ReplacementPricingScreen() {
     [results, filter, estimate],
   );
 
-  const runSearch = React.useCallback(async (query: string) => {
+  const runSearch = React.useCallback(async (
+    query: string,
+    options: {
+      mode?: "initial" | "refined";
+      draft?: ReplacementRefinementDraft;
+      range?: ParsedReplacementPriceRange;
+      entitlementAlreadyChecked?: boolean;
+    } = {},
+  ) => {
     if (!item || !query.trim()) return;
-    if (!enforce("replacement_pricing")) return;
+    if (!options.entitlementAlreadyChecked && !enforce("replacement_pricing")) return;
+    if (searchAttemptInFlight.current) return;
+    searchAttemptInFlight.current = true;
+    const mode = options.mode ?? "initial";
+    const refinementDraft = mode === "refined" ? options.draft : undefined;
+    const isRefined = refinementDraft != null;
+    const sequence = activeSearchSequence.current + 1;
+    activeSearchSequence.current = sequence;
+    if (isRefined) {
+      refinedAbortController.current?.abort();
+      refinedAbortController.current = new AbortController();
+      setRefinedSearching(true);
+    }
     setSearching(true);
     setSearchError(null);
     setLimitModal(null);
-    setFilter("all");
     try {
       const response = await searchReplacementPrices({
         itemName: item.name,
         countryCode: propertyMarket?.country_code,
         currencyCode: propertyMarket?.currency_code,
-        description: item.description ?? undefined,
+        description: isRefined
+          ? effectiveRefinementFieldValue(refinementDraft, "additionalDetails") || undefined
+          : item.description ?? undefined,
         category: item.category ?? undefined,
-        brand: item.brand_maker ?? undefined,
+        brand: isRefined
+          ? effectiveRefinementFieldValue(refinementDraft, "brand") || undefined
+          : item.brand_maker ?? undefined,
+        minPrice: options.range?.minimumPrice,
+        maxPrice: options.range?.maximumPrice,
         searchQuery: query.trim(),
         num: 10,
         itemId: item.id,
+        refinement: isRefined ? {
+          version: 2,
+          searchTerm: refinementDraft.searchTerm.trim(),
+          brand: refinementDraft.brand.trim() || undefined,
+          model: refinementDraft.model.trim() || undefined,
+          additionalDetails: refinementDraft.additionalDetails.trim() || undefined,
+          chipValues: refinementDraft.chipContributions.map((chip) => chip.value),
+        } : undefined,
+      }, {
+        automaticTransportRetry: Boolean(isRefined),
+        signal: isRefined ? refinedAbortController.current?.signal : undefined,
       });
+      if (sequence !== activeSearchSequence.current) return;
+      setFilter("all");
       setResults(response.results);
       setSearchContext(response.context);
+      const successfulDraft = isRefined
+        ? cloneReplacementRefinementDraft(refinementDraft)
+        : {
+            ...createOriginalReplacementRefinementDraft(item),
+            searchTerm: query.trim(),
+          };
+      setCurrentSearchDraft(successfulDraft);
+      setLastSuccessfulRefinementDraft(cloneReplacementRefinementDraft(successfulDraft));
+      setWorkingRefinementDraft(cloneReplacementRefinementDraft(successfulDraft));
+      if (isRefined) setLastFailedRefinement(null);
+      if (!reduceMotion) {
+        resultEntrance.setValue(0);
+        Animated.timing(resultEntrance, {
+          toValue: 1,
+          duration: 200,
+          easing: Easing.out(Easing.quad),
+          useNativeDriver: true,
+        }).start();
+      } else {
+        resultEntrance.setValue(1);
+      }
     } catch (searchFailure) {
+      if (sequence !== activeSearchSequence.current) return;
+      if (searchFailure instanceof ReplacementPriceSearchError && searchFailure.errorCode === "CANCELLED") return;
+      if (isRefined) {
+        setLastFailedRefinement({
+          draft: cloneReplacementRefinementDraft(refinementDraft),
+          range: { ...options.range },
+        });
+      }
       const normalizedLimit = searchFailure instanceof ReplacementPriceSearchError
         ? normalizeLimitError({
             status: searchFailure.status,
@@ -363,7 +509,7 @@ export default function ReplacementPricingScreen() {
           })
         : null;
 
-      setResults(null);
+      if (!isRefined) setResults(null);
       if (normalizedLimit) {
         setLimitModal(normalizedLimit);
       } else {
@@ -373,18 +519,51 @@ export default function ReplacementPricingScreen() {
         setSearchError(searchFailure instanceof ReplacementPriceSearchError ? message : "Replacement price search failed. Your item value is unchanged.");
       }
     } finally {
-      setSearching(false);
+      if (sequence === activeSearchSequence.current) {
+        searchAttemptInFlight.current = false;
+        setSearching(false);
+        setRefinedSearching(false);
+        refinedAbortController.current = null;
+      }
     }
-  }, [item, enforce, propertyMarket]);
+  }, [item, enforce, propertyMarket, reduceMotion, resultEntrance]);
 
   const handleSearch = () => {
     void runSearch(searchQuery);
   };
 
+  const handleRunRefinedSearch = (
+    submittedDraft: ReplacementRefinementDraft,
+    range: ParsedReplacementPriceRange,
+  ) => {
+    if (!enforce("replacement_pricing")) return;
+    setWorkingRefinementDraft(cloneReplacementRefinementDraft(submittedDraft));
+    setRefinementVisible(false);
+    const query = effectiveRefinementFieldValue(submittedDraft, "searchTerm");
+    void runSearch(query, {
+      mode: "refined",
+      draft: submittedDraft,
+      range,
+      entitlementAlreadyChecked: true,
+    });
+  };
+
+  const cancelRefinedSearch = () => {
+    activeSearchSequence.current += 1;
+    searchAttemptInFlight.current = false;
+    refinedAbortController.current?.abort();
+    refinedAbortController.current = null;
+    setSearching(false);
+    setRefinedSearching(false);
+  };
+
   const stopAndTranscribeSearch = React.useCallback(async () => {
+    const requestId = initialVoiceSequence.current + 1;
+    initialVoiceSequence.current = requestId;
     setVoiceError(null);
     setVoiceNotice(null);
     const recording = await stopVoiceRecording();
+    if (!screenMountedRef.current || requestId !== initialVoiceSequence.current) return;
     if (!recording) {
       setVoiceError(VOICE_EDIT_FALLBACK_MESSAGE);
       return;
@@ -398,6 +577,7 @@ export default function ReplacementPricingScreen() {
         currentCategory: item?.category ?? undefined,
         currentDescription: searchQuery,
       });
+      if (!screenMountedRef.current || requestId !== initialVoiceSequence.current) return;
       const transcript = result.response?.success
         ? replacementVoiceTranscriptToQuery(result.response.transcript)
         : "";
@@ -407,9 +587,13 @@ export default function ReplacementPricingScreen() {
       }
       setSearchQuery(transcript);
     } catch {
-      setVoiceError(VOICE_EDIT_FALLBACK_MESSAGE);
+      if (screenMountedRef.current && requestId === initialVoiceSequence.current) {
+        setVoiceError(VOICE_EDIT_FALLBACK_MESSAGE);
+      }
     } finally {
-      setVoiceProcessing(false);
+      if (screenMountedRef.current && requestId === initialVoiceSequence.current) {
+        setVoiceProcessing(false);
+      }
       await resetVoiceRecording();
     }
   }, [item?.category, item?.name, resetVoiceRecording, searchQuery, stopVoiceRecording]);
@@ -422,27 +606,38 @@ export default function ReplacementPricingScreen() {
       await stopAndTranscribeSearch();
       return;
     }
+    const requestId = initialVoiceSequence.current + 1;
+    initialVoiceSequence.current = requestId;
     if (voicePermission !== "granted") {
       logVoiceDiagnostic("voice_permission_button_pressed");
       try {
         const granted = await requestVoicePermission();
+        if (!screenMountedRef.current || requestId !== initialVoiceSequence.current) return;
         if (granted) {
           setVoiceNotice("Microphone enabled. Tap the mic again to speak your search.");
         } else {
           setVoiceError(VOICE_EDIT_FALLBACK_MESSAGE);
         }
       } catch {
-        setVoiceError(VOICE_EDIT_FALLBACK_MESSAGE);
+        if (screenMountedRef.current && requestId === initialVoiceSequence.current) {
+          setVoiceError(VOICE_EDIT_FALLBACK_MESSAGE);
+        }
       }
       return;
     }
     try {
       const started = await startVoiceRecording();
+      if (!screenMountedRef.current || requestId !== initialVoiceSequence.current) {
+        if (started) await resetVoiceRecordingRef.current();
+        return;
+      }
       if (!started) {
         setVoiceError(VOICE_EDIT_FALLBACK_MESSAGE);
       }
     } catch {
-      setVoiceError(VOICE_EDIT_FALLBACK_MESSAGE);
+      if (screenMountedRef.current && requestId === initialVoiceSequence.current) {
+        setVoiceError(VOICE_EDIT_FALLBACK_MESSAGE);
+      }
     }
   }, [
     logVoiceDiagnostic,
@@ -461,9 +656,17 @@ export default function ReplacementPricingScreen() {
     if (voiceMaxDurationReached) void stopAndTranscribeSearch();
   }, [stopAndTranscribeSearch, voiceMaxDurationReached]);
 
-  React.useEffect(() => () => {
-    void resetVoiceRecording();
-  }, [resetVoiceRecording]);
+  React.useEffect(() => {
+    screenMountedRef.current = true;
+    return () => {
+      screenMountedRef.current = false;
+      initialVoiceSequence.current += 1;
+      activeSearchSequence.current += 1;
+      searchAttemptInFlight.current = false;
+      void resetVoiceRecordingRef.current();
+      refinedAbortController.current?.abort();
+    };
+  }, []);
 
   const returnRoomId = roomId ?? item?.room_id ?? "";
   const returnFileId = fileId ?? item?.file_id ?? "";
@@ -540,6 +743,14 @@ export default function ReplacementPricingScreen() {
   React.useEffect(() => {
     if (!item || propertyMarketPending || autoSearchedItemId.current === item.id) return;
     const suggestedQuery = buildReplacementSearchQuery(item);
+    if (refinementSeededItemId.current !== item.id) {
+      const originalDraft = createOriginalReplacementRefinementDraft(item);
+      refinementSeededItemId.current = item.id;
+      setOriginalRefinementDraft(originalDraft);
+      setWorkingRefinementDraft(cloneReplacementRefinementDraft(originalDraft));
+      setLastSuccessfulRefinementDraft(cloneReplacementRefinementDraft(originalDraft));
+      setCurrentSearchDraft(cloneReplacementRefinementDraft(originalDraft));
+    }
     autoSearchedItemId.current = item.id;
     setSearchQuery(suggestedQuery);
     void runSearch(suggestedQuery);
@@ -683,6 +894,39 @@ export default function ReplacementPricingScreen() {
             “Use this listing”.
           </Text>
 
+          {results !== null && currentSearchSummary && workingRefinementDraft ? (
+            <View
+              accessibilityLabel={[
+                "Current search",
+                currentSearchSummary.primary,
+                ...currentSearchSummary.details,
+                currentSearchPriceSummary,
+              ].filter(Boolean).join(". ")}
+              style={[styles.currentSearchCard, { backgroundColor: colors.card, borderColor: colors.border }]}
+            >
+              <View style={styles.currentSearchCopy}>
+                <Text style={[styles.currentSearchEyebrow, { color: colors.mutedForeground }]}>CURRENT SEARCH</Text>
+                <Text numberOfLines={2} style={[styles.currentSearchPrimary, { color: colors.foreground }]}>{currentSearchSummary.primary}</Text>
+                {currentSearchSummary.details.length ? (
+                  <Text numberOfLines={2} style={[styles.currentSearchDetails, { color: colors.mutedForeground }]}>{currentSearchSummary.details.join(" · ")}</Text>
+                ) : null}
+                {currentSearchPriceSummary ? <Text style={[styles.currentSearchPrice, { color: colors.foreground }]}>{currentSearchPriceSummary}</Text> : null}
+              </View>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Refine current search"
+                disabled={searching}
+                onPress={() => setRefinementVisible(true)}
+                style={({ pressed }) => [styles.refineButton, { backgroundColor: colors.primary, opacity: searching ? 0.45 : pressed ? 0.8 : 1 }]}
+              >
+                <Feather name="sliders" size={16} color={colors.primaryForeground} />
+                <Text style={[styles.refineButtonText, { color: colors.primaryForeground }]}>Refine</Text>
+              </Pressable>
+            </View>
+          ) : null}
+
+          {results === null ? (
+          <>
           <View style={styles.searchRow}>
             <View
               style={[
@@ -758,23 +1002,52 @@ export default function ReplacementPricingScreen() {
               {voiceError ?? voiceNotice ?? (voiceProcessing ? "Transcribing..." : "Listening... tap the mic to finish.")}
             </Text>
           ) : null}
+          </>
+          ) : null}
 
           {!searching && searchError ? (
             <View style={[styles.errorBox, { borderColor: colors.destructive }]}>
               <Feather name="alert-circle" size={17} color={colors.destructive} />
-              <Text style={[styles.errorText, { color: colors.destructive }]}>
-                {searchError}. Your item value is unchanged.
-              </Text>
+              <View style={styles.errorContent}>
+                <Text style={[styles.errorText, { color: colors.destructive }]}>
+                  {searchError}. Your item value is unchanged.
+                </Text>
+                {lastFailedRefinement ? (
+                  <View style={styles.errorActions}>
+                    <Pressable
+                      accessibilityRole="button"
+                      onPress={() => handleRunRefinedSearch(lastFailedRefinement.draft, lastFailedRefinement.range)}
+                      style={[styles.errorActionButton, { borderColor: colors.destructive }]}
+                    >
+                      <Text style={[styles.errorActionText, { color: colors.destructive }]}>Try again</Text>
+                    </Pressable>
+                    <Pressable
+                      accessibilityRole="button"
+                      onPress={() => {
+                        setWorkingRefinementDraft(cloneReplacementRefinementDraft(lastFailedRefinement.draft));
+                        setRefinementVisible(true);
+                      }}
+                      style={[styles.errorActionButton, { borderColor: colors.destructive }]}
+                    >
+                      <Text style={[styles.errorActionText, { color: colors.destructive }]}>Edit criteria</Text>
+                    </Pressable>
+                  </View>
+                ) : null}
+              </View>
             </View>
           ) : null}
 
           {searching ? (
             <ReplacementSearchLoadingPanel
               colors={colors}
+              title={refinedSearching ? "Starting a new retailer search" : "Searching replacement prices"}
               subtitle={marketPresentation.loadingSubtitle}
               accessibilityLabel={marketPresentation.searchAccessibilityLabel}
+              onCancel={refinedSearching ? cancelRefinedSearch : undefined}
             />
-          ) : results ? (
+          ) : null}
+
+          {results ? (
             <>
               <ScrollView
                 horizontal
@@ -787,14 +1060,14 @@ export default function ReplacementPricingScreen() {
                   return (
                     <Pressable
                       key={option.id}
-                      disabled={disabled}
+                      disabled={disabled || refinedSearching}
                       onPress={() => setFilter(option.id)}
                       style={[
                         styles.filterChip,
                         {
                           backgroundColor: active ? colors.primary : colors.card,
                           borderColor: active ? colors.primary : colors.border,
-                          opacity: disabled ? 0.45 : 1,
+                          opacity: disabled || refinedSearching ? 0.45 : 1,
                         },
                       ]}
                     >
@@ -817,25 +1090,40 @@ export default function ReplacementPricingScreen() {
               {searchContext ? <Text style={[styles.resultCount, { color: colors.mutedForeground }]}>{marketPresentation.resultContext}{searchContext.pricingSupportTier === "preview" ? " · Local pricing preview" : ""}</Text> : null}
 
               {filteredResults.length ? (
-                <View style={styles.results}>
+                <Animated.View
+                  style={[
+                    styles.results,
+                    {
+                      opacity: refinedSearching ? 0.56 : resultEntrance,
+                      transform: [{
+                        translateY: refinedSearching || reduceMotion
+                          ? 0
+                          : resultEntrance.interpolate({ inputRange: [0, 1], outputRange: [8, 0] }),
+                      }],
+                    },
+                  ]}
+                >
                   {filteredResults.map((result) => (
                     <ReplacementListingCard
                       key={`${result.position}-${result.link}-${result.title}`}
                       result={result}
                       contextCurrency={searchContext?.currencyCode}
                       selecting={selectingPosition === result.position}
+                      disabled={refinedSearching}
                       onOpen={() => handleOpen(result)}
                       onUse={() => handleUse(result)}
                     />
                   ))}
-                </View>
+                </Animated.View>
               ) : (
                 <View style={[styles.empty, { backgroundColor: colors.card }]}>
                   <Text style={[styles.emptyTitle, { color: colors.foreground }]}>
-                    No listings in this range
+                    {currentSearchPriceSummary ? "No products were found within your price range" : "No matching products found"}
                   </Text>
                   <Text style={[styles.emptyText, { color: colors.mutedForeground }]}>
-                    Try another filter or refine the search terms.
+                    {currentSearchPriceSummary
+                      ? "Adjust or clear the optional price range, then run another refined search."
+                      : "Try removing one detail or add a brand, model, size, or key feature."}
                   </Text>
                 </View>
               )}
@@ -852,6 +1140,28 @@ export default function ReplacementPricingScreen() {
             </View>
           ) : null}
         </ScrollView>
+      ) : null}
+      {item && originalRefinementDraft && workingRefinementDraft && lastSuccessfulRefinementDraft && configuredMarket ? (
+        <ReplacementSearchRefinementSheet
+          visible={refinementVisible}
+          item={item}
+          marketName={configuredMarket.countryName}
+          currencyCode={configuredMarket.currencyCode}
+          locale={configuredMarket.locale}
+          supportLabel={configuredMarket.pricingSupportTier === "verified"
+            ? null
+            : configuredMarket.pricingSupportTier === "preview"
+              ? "Local pricing preview"
+              : "Limited market"}
+          aiEnabled={configuredMarket.aiEstimatesEnabled}
+          draft={workingRefinementDraft}
+          originalDraft={originalRefinementDraft}
+          lastSuccessfulDraft={lastSuccessfulRefinementDraft}
+          submitting={searching}
+          onDraftChange={setWorkingRefinementDraft}
+          onClose={() => setRefinementVisible(false)}
+          onSubmit={handleRunRefinedSearch}
+        />
       ) : null}
       <LimitReachedModal
         visible={!!limitModal}
@@ -874,6 +1184,14 @@ const styles = StyleSheet.create({
   itemName: { fontSize: 20, lineHeight: 26, fontFamily: "Inter_700Bold" },
   estimate: { fontSize: 12, lineHeight: 18, fontFamily: "Inter_400Regular" },
   helper: { fontSize: 13, lineHeight: 20, fontFamily: "Inter_400Regular" },
+  currentSearchCard: { borderWidth: 1, borderRadius: 12, padding: 14, flexDirection: "row", alignItems: "center", gap: 12 },
+  currentSearchCopy: { flex: 1, gap: 3 },
+  currentSearchEyebrow: { fontSize: 9, letterSpacing: 0.75, fontFamily: "Inter_600SemiBold" },
+  currentSearchPrimary: { fontSize: 16, lineHeight: 22, fontFamily: "Inter_700Bold" },
+  currentSearchDetails: { fontSize: 12, lineHeight: 17, fontFamily: "Inter_400Regular" },
+  currentSearchPrice: { fontSize: 12, lineHeight: 17, fontFamily: "Inter_600SemiBold" },
+  refineButton: { minHeight: 48, borderRadius: 12, paddingHorizontal: 13, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 7 },
+  refineButtonText: { fontSize: 13, fontFamily: "Inter_700Bold" },
   searchRow: { flexDirection: "row", gap: 8 },
   searchInputWrap: {
     flex: 1,
@@ -921,7 +1239,11 @@ const styles = StyleSheet.create({
     alignItems: "flex-start",
     gap: 8,
   },
-  errorText: { flex: 1, fontSize: 12, lineHeight: 18, fontFamily: "Inter_400Regular" },
+  errorContent: { flex: 1, gap: 9 },
+  errorText: { fontSize: 12, lineHeight: 18, fontFamily: "Inter_400Regular" },
+  errorActions: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
+  errorActionButton: { minHeight: 40, borderWidth: 1, borderRadius: 9, paddingHorizontal: 12, alignItems: "center", justifyContent: "center" },
+  errorActionText: { fontSize: 12, fontFamily: "Inter_600SemiBold" },
   filters: { gap: 8, paddingVertical: 2 },
   filterChip: {
     borderWidth: 1,
@@ -993,6 +1315,8 @@ const styles = StyleSheet.create({
     fontFamily: "Inter_400Regular",
     textAlign: "center",
   },
+  loadingCancel: { minHeight: 44, borderWidth: 1, borderRadius: 10, alignItems: "center", justifyContent: "center" },
+  loadingCancelText: { fontSize: 12, fontFamily: "Inter_600SemiBold" },
   empty: { borderRadius: 12, padding: 24, alignItems: "center", gap: 8 },
   emptyTitle: { fontSize: 15, fontFamily: "Inter_600SemiBold", textAlign: "center" },
   emptyText: {

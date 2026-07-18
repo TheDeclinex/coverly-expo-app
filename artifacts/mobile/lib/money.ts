@@ -29,7 +29,8 @@ function normalizeMoneySpacing(value: string): string {
   return value.replace(/\u00a0/g, " ");
 }
 
-function defaultCurrencyFractionDigits(currency: string, locale: string): { minimum: number; maximum: number } {
+export function currencyFractionDigits(currencyCode: string, locale = "en"): { minimum: number; maximum: number } {
+  const currency = currencyCode.trim().toUpperCase();
   const fallback = currency === "JPY" || currency === "KRW" ? 0 : 2;
   try {
     const resolved = new Intl.NumberFormat(locale, { style: "currency", currency }).resolvedOptions();
@@ -42,6 +43,22 @@ function defaultCurrencyFractionDigits(currency: string, locale: string): { mini
   }
 }
 
+export function formatMoneyInputValue(
+  amount: number,
+  currencyCode: string,
+  locale = "en",
+): string {
+  if (!Number.isFinite(amount)) return "";
+  const currency = currencyCode.trim().toUpperCase();
+  if (!isCurrencyCode(currency)) return "";
+  const digits = currencyFractionDigits(currency, locale);
+  return new Intl.NumberFormat(locale, {
+    useGrouping: true,
+    minimumFractionDigits: Number.isInteger(amount) ? 0 : digits.minimum,
+    maximumFractionDigits: digits.maximum,
+  }).format(amount);
+}
+
 function fractionDigitOptions(
   amount: number,
   currency: string,
@@ -52,7 +69,7 @@ function fractionDigitOptions(
     return { minimumFractionDigits: 0, maximumFractionDigits: 0 };
   }
 
-  const defaults = defaultCurrencyFractionDigits(currency, locale);
+  const defaults = currencyFractionDigits(currency, locale);
   if (precision === "formal") {
     return {
       minimumFractionDigits: defaults.minimum,

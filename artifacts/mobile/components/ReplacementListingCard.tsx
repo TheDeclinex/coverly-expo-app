@@ -17,6 +17,7 @@ interface ReplacementListingCardProps {
   result: ReplacementPriceResult;
   contextCurrency?: string | null;
   selecting: boolean;
+  disabled?: boolean;
   onOpen: () => void;
   onUse: () => void;
 }
@@ -31,13 +32,14 @@ export function ReplacementListingCard({
   result,
   contextCurrency,
   selecting,
+  disabled = false,
   onOpen,
   onUse,
 }: ReplacementListingCardProps) {
   const colors = useColors();
   const currencyDecision = resolveReplacementListingCurrency(result, contextCurrency);
   const canUse = currencyDecision.canUse;
-  const canOpen = /^https?:\/\//i.test(result.link);
+  const canOpen = /^https?:\/\//i.test(result.link) && !disabled;
   const warning = currencyDecision.warning;
   const fulfilmentLabel = replacementListingFulfilmentLabel(result.fulfilmentType);
 
@@ -121,13 +123,13 @@ export function ReplacementListingCard({
         </Pressable>
 
         <Pressable
-          disabled={!canUse || selecting}
+          disabled={!canUse || selecting || disabled}
           onPress={onUse}
           style={({ pressed }) => [
             styles.primaryButton,
             {
               backgroundColor: colors.primary,
-              opacity: !canUse || selecting ? 0.5 : pressed ? 0.8 : 1,
+              opacity: !canUse || selecting || disabled ? 0.5 : pressed ? 0.8 : 1,
             },
           ]}
         >

@@ -56,6 +56,32 @@ test("bare dollar requires retailer-market evidence", () => {
   assert.equal(detectResultCurrency("Now $54.99", nz, { retailerLink: "https://example.com/item" }), null);
 });
 
+test("bare local dollar symbols resolve only with matching NZ, AU, US, or CA retailer evidence", () => {
+  for (const [countryCode, currencyCode] of [
+    ["NZ", "NZD"],
+    ["AU", "AUD"],
+    ["US", "USD"],
+    ["CA", "CAD"],
+  ] as const) {
+    const market = resolveMarketConfig(countryCode)!;
+    assert.equal(detectResultCurrency("$1,299", market), null);
+    assert.equal(
+      detectResultCurrency("$1,299", market, { retailerCountryCode: countryCode }),
+      currencyCode,
+    );
+    assert.equal(
+      detectResultCurrency("$1,299", market, { retailerCountryCode: countryCode === "NZ" ? "AU" : "NZ" }),
+      null,
+    );
+  }
+});
+
+test("symbol-free price text does not invent a property currency", () => {
+  const nz = resolveMarketConfig("NZ")!;
+  assert.equal(detectResultCurrency("1,299", nz, { retailerCountryCode: "NZ" }), null);
+  assert.equal(detectResultCurrency("From 1,299", nz, { retailerCountryCode: "NZ" }), null);
+});
+
 test("known French retailers on generic domains resolve conservatively to France", () => {
   assert.deepEqual(KNOWN_RETAILER_COUNTRY_BY_DOMAIN, {
     "boulanger.com": "FR",

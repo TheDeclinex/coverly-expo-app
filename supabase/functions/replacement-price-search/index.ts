@@ -24,8 +24,9 @@ import { serve } from 'https://deno.land/std@0.177.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.3';
 import { resolveMarketConfig, type MarketConfig } from '../_shared/market-config.ts';
 import { classifyRetailerMarket, confirmedPropertyCurrencyStats, detectResultCurrency, parseProviderPrice } from './market-results.ts';
+import { applyAuthoritativeReplacementPriceRange, isAuthoritativeReplacementPriceRangeActive } from './refinement-results.ts';
 
-const EDGE_VERSION = 'v26.4.0-global-search-preview';
+const EDGE_VERSION = 'v27.0.0-replacement-refinement-v2';
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL') ?? '';
 const SUPABASE_ANON_KEY = Deno.env.get('SUPABASE_ANON_KEY') ?? '';
 const SERPER_TIMEOUT_MS = 15_000;
@@ -65,6 +66,14 @@ interface PriceSearchRequest {
   num?: number;
   itemId?: string;
   usageIdempotencyKey?: string;
+  refinement?: {
+    version: 2;
+    searchTerm: string;
+    brand?: string;
+    model?: string;
+    additionalDetails?: string;
+    chipValues?: string[];
+  };
 }
 
 interface PriceSearchResult {
@@ -203,6 +212,20 @@ async function fetchWithTimeout(
 }
 
 function buildQuery(req: PriceSearchRequest, market: MarketConfig): string {
+  if (req.refinement?.version === 2) {
+    const searchTerm = typeof req.refinement.searchTerm === 'string' ? req.refinement.searchTerm.trim() : '';
+    const support = [
+      req.refinement.brand,
+      req.refinement.model,
+      req.refinement.additionalDetails,
+      ...(Array.isArray(req.refinement.chipValues) ? req.refinement.chipValues : []),
+    ]
+      .map((value) => typeof value === 'string' ? value.trim() : '')
+      .filter((value): value is string => Boolean(value))
+      .filter((value, index, values) => values.findIndex((candidate) => candidate.toLowerCase() === value.toLowerCase()) === index)
+      .filter((value) => !searchTerm.toLowerCase().includes(value.toLowerCase()));
+    return `${[searchTerm, ...support].filter(Boolean).join(' ')} ${market.countryName}`.slice(0, MAX_QUERY_LEN);
+  }
   if (req.searchQuery?.trim()) return `${req.searchQuery.trim()} ${market.countryName}`.slice(0, MAX_QUERY_LEN);
   const parts: string[] = [];
   if (req.brand) parts.push(req.brand);
@@ -367,8 +390,29 @@ serve(async (req: Request) => {
   itemName = itemName.slice(0, MAX_ITEM_NAME_LEN);
 
   const num = Math.min(Math.max(1, body.num ?? 5), 10);
-  const minPrice = typeof body.minPrice === 'number' && body.minPrice >= 0 ? body.minPrice : undefined;
-  const maxPrice = typeof body.maxPrice === 'number' && body.maxPrice > 0 ? body.maxPrice : undefined;
+  const minPrice = typeof body.minPrice === 'number' && Number.isFinite(body.minPrice) && body.minPrice >= 0
+    ? body.minPrice
+    : undefined;
+  const maxPrice = typeof body.maxPrice === 'number'
+    && Number.isFinite(body.maxPrice)
+    && (body.maxPrice > 0 || (body.refinement?.version === 2 && body.maxPrice === 0))
+    ? body.maxPrice
+    : undefined;
+  if (body.refinement?.version === 2
+    && (typeof body.refinement.searchTerm !== 'string' || !body.refinement.searchTerm.trim())) {
+    return jsonResponse({
+      success: false,
+      errorCode: 'SEARCH_TERM_REQUIRED',
+      error: 'Add a Search Term before running a refined search.',
+    }, 400, origin);
+  }
+  if (minPrice != null && maxPrice != null && minPrice > maxPrice) {
+    return jsonResponse({
+      success: false,
+      errorCode: 'INVALID_PRICE_RANGE',
+      error: 'Minimum price cannot be greater than maximum price.',
+    }, 400, origin);
+  }
 
   const usageIdempotencyKey = normaliseUsageIdempotencyKey(body.usageIdempotencyKey);
   if (!usageIdempotencyKey) {
@@ -396,6 +440,8 @@ serve(async (req: Request) => {
 
   const baseQuery = buildQuery({ ...body, itemName }, market);
   const queryUsed = buildRangedQuery(baseQuery, market.currencyCode, minPrice, maxPrice);
+  const rangeActive = isAuthoritativeReplacementPriceRangeActive(body.refinement?.version, minPrice, maxPrice);
+  const providerNum = rangeActive ? Math.min(num * 2, 20) : num;
   const context = { countryCode: market.countryCode, countryName: market.countryName, currencyCode: market.currencyCode, pricingSupportTier: market.pricingSupportTier, provider: 'serper', searchedAt: new Date().toISOString() };
 
   const diagnostics: Record<string, unknown> = {
@@ -408,6 +454,9 @@ serve(async (req: Request) => {
     searchQueryPresent: !!searchQueryFallback,
     categoryPresent: !!body.category,
     num,
+    providerNum,
+    refinementVersion: body.refinement?.version,
+    rangeActive,
     userId,
     requestOrigin: origin,
   };
@@ -454,7 +503,7 @@ serve(async (req: Request) => {
     const shopRes = await fetchWithTimeout(SERPER_SHOPPING_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-API-KEY': serperKey },
-      body: JSON.stringify({ q: queryUsed, gl: market.serperGl, hl: market.serperHl, num }),
+      body: JSON.stringify({ q: queryUsed, gl: market.serperGl, hl: market.serperHl, num: providerNum }),
     }, SERPER_TIMEOUT_MS);
 
     diagnostics.shoppingStatus = shopRes.status;
@@ -481,11 +530,11 @@ serve(async (req: Request) => {
         diagnostics,
       }, 502, origin);
     }
-    let results = mapShoppingResults(shopData, itemName, num, market);
+    let results = mapShoppingResults(shopData, itemName, providerNum, market);
     diagnostics.shoppingResultCount = results.length;
 
     // Organic fallback if no priced results
-    if (results.filter(r => r.price != null && r.price > 0).length === 0) {
+    if (!rangeActive && results.filter(r => r.price != null && r.price > 0).length === 0) {
       diagnostics.organicFallback = true;
       const orgRes = await fetchWithTimeout(SERPER_ORGANIC_URL, {
         method: 'POST',
@@ -520,6 +569,11 @@ serve(async (req: Request) => {
         }, 502, origin);
       }
     }
+
+    results = rangeActive
+      ? applyAuthoritativeReplacementPriceRange(results, market.currencyCode, minPrice, maxPrice, num)
+      : results.slice(0, num);
+    diagnostics.resultCountAfterRangeAndLimit = results.length;
 
     const prices = results.map(r => r.price).filter((p): p is number => p != null && p > 0);
     const stats = confirmedPropertyCurrencyStats(results, market.currencyCode);

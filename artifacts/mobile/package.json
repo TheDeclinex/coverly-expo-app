@@ -10,6 +10,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test:voice": "node --experimental-strip-types --test lib/__tests__/voice-item-mapper.test.ts lib/__tests__/item-update-preservation.test.ts lib/__tests__/voice-item-update.test.ts",
     "test:profile": "node --experimental-strip-types --test lib/__tests__/profile-settings-model.test.ts",
+    "test:replacement-refinement": "node --experimental-strip-types --test lib/__tests__/replacement-refinement-v2.test.ts",
     "test:property-limits": "node --experimental-strip-types --test lib/__tests__/property-allowance.test.ts lib/__tests__/property-errors.test.ts lib/__tests__/property-limits-contract.test.ts lib/__tests__/billing-entitlements.test.ts lib/__tests__/upgrade-model.test.ts lib/__tests__/limit-errors.test.ts lib/__tests__/production-readiness-screen-contract.test.ts"
   },
   "devDependencies": {
@@ -65,6 +66,7 @@
     "@supabase/supabase-js": "^2.107.0",
     "expo-audio": "~1.1.1",
     "expo-image-manipulator": "~14.0.8",
+    "expo-network": "~8.0.8",
     "expo-video-thumbnails": "~10.0.8",
     "react-native-purchases": "^9.0.0",
     "react-native-url-polyfill": "^3.0.0"
