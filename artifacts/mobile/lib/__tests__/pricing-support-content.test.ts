@@ -26,11 +26,11 @@ test("pricing support tiers use the approved short descriptions", () => {
   );
   assert.equal(
     getPricingSupportContent("limited").shortDescription,
-    "AI item recognition is available, but values must be entered manually and retailer search is unavailable.",
+    "AI item recognition and best-effort local retailer search are available; replacement values can still be entered manually.",
   );
 });
 
-test("market classifications and pricing feature flags remain unchanged", () => {
+test("market classifications and AI feature flags remain unchanged while retailer search is global", () => {
   assert.deepEqual(
     MARKET_CONFIGS.filter((market) => market.pricingSupportTier === "verified").map((market) => market.countryCode).sort(),
     ["AU", "CA", "GB", "NZ", "US"],
@@ -47,7 +47,9 @@ test("market classifications and pricing feature flags remain unchanged", () => 
   }
   const limited = resolveMarketConfig("AQ")!;
   assert.equal(limited.aiEstimatesEnabled, false);
-  assert.equal(limited.replacementSearchEnabled, false);
+  assert.equal(limited.replacementSearchEnabled, true);
+  assert.ok(MARKET_CONFIGS.every((market) => market.replacementSearchEnabled));
+  assert.ok(MARKET_CONFIGS.filter((market) => market.pricingSupportTier === "limited").every((market) => !market.aiEstimatesEnabled));
 });
 
 test("country selector uses shared support content and removes misleading labels", () => {

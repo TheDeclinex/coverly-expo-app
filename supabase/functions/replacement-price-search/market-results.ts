@@ -23,8 +23,17 @@ const DOLLAR_CURRENCIES = new Set([
   'JMD', 'KYD', 'LRD', 'MXN', 'NAD', 'NZD', 'SBD', 'SGD', 'SRD', 'TTD',
   'TWD', 'USD', 'XCD', 'ZWL',
 ]);
+const CONFIGURED_COUNTRIES = new Set<string>(COUNTRY_CURRENCY_PAIRS.map(([countryCode]) => countryCode));
 const CONFIGURED_CURRENCIES = new Set<string>(COUNTRY_CURRENCY_PAIRS.map(([, currencyCode]) => currencyCode));
 const AMBIGUOUS_WORD_CODES = new Set(['ALL', 'TRY']);
+type ConfiguredCountryCode = (typeof COUNTRY_CURRENCY_PAIRS)[number][0];
+
+/** Generic-domain retailers whose primary operating market is sufficiently clear. */
+export const KNOWN_RETAILER_COUNTRY_BY_DOMAIN = {
+  'boulanger.com': 'FR',
+  'cdiscount.com': 'FR',
+  'cultura.com': 'FR',
+} as const satisfies Record<string, ConfiguredCountryCode>;
 
 const EXPLICIT_DOLLAR_PREFIXES: Array<[RegExp, string]> = [
   [/\bNZ\s?\$/i, 'NZD'], [/\bAU\s?\$|\bA\$/i, 'AUD'],
@@ -34,13 +43,65 @@ const EXPLICIT_DOLLAR_PREFIXES: Array<[RegExp, string]> = [
 
 export function countryCodeFromRetailerLink(link: string): string | null {
   try {
-    const host = new URL(link).hostname.toLowerCase();
+    const host = new URL(link).hostname.toLowerCase().replace(/\.$/, '');
+    for (const [domain, countryCode] of Object.entries(KNOWN_RETAILER_COUNTRY_BY_DOMAIN)) {
+      if (host === domain || host.endsWith(`.${domain}`)) return countryCode;
+    }
     if (host.endsWith('.uk')) return 'GB';
     const suffix = host.match(/\.([a-z]{2})$/)?.[1];
-    return suffix?.toUpperCase() ?? null;
+    const countryCode = suffix?.toUpperCase();
+    return countryCode && CONFIGURED_COUNTRIES.has(countryCode) ? countryCode : null;
   } catch {
     return null;
   }
+}
+
+export interface RetailerMarketClassification {
+  retailerCountryCode: string | null;
+  fulfilmentType: 'local' | 'overseas' | 'unknown';
+  warnings: string[];
+}
+
+export function classifyRetailerMarket(
+  link: string,
+  currencyCode: string | null,
+  market: MarketConfig,
+): RetailerMarketClassification {
+  const retailerCountryCode = countryCodeFromRetailerLink(link);
+  const localRetailerMarket = retailerCountryCode === market.countryCode;
+  const foreignRetailerMarket = retailerCountryCode != null
+    && retailerCountryCode !== market.countryCode;
+  const foreignCurrency = currencyCode != null && currencyCode !== market.currencyCode;
+
+  if (foreignCurrency) {
+    return {
+      retailerCountryCode,
+      fulfilmentType: 'overseas',
+      warnings: [`Listed in ${currencyCode}, not ${market.currencyCode}. No conversion is applied.`],
+    };
+  }
+  if (foreignRetailerMarket) {
+    return {
+      retailerCountryCode,
+      fulfilmentType: 'overseas',
+      warnings: [`Retailer market ${retailerCountryCode} differs from the property market ${market.countryCode}.`],
+    };
+  }
+  if (localRetailerMarket && currencyCode === market.currencyCode) {
+    return { retailerCountryCode: market.countryCode, fulfilmentType: 'local', warnings: [] };
+  }
+  if (localRetailerMarket) {
+    return {
+      retailerCountryCode: market.countryCode,
+      fulfilmentType: 'local',
+      warnings: ['The listing currency could not be confirmed. Review the raw retailer price before using it.'],
+    };
+  }
+  return {
+    retailerCountryCode: null,
+    fulfilmentType: 'unknown',
+    warnings: ['Retailer location could not be confirmed.'],
+  };
 }
 
 export function detectResultCurrency(

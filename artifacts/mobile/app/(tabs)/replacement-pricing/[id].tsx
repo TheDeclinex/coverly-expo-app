@@ -343,6 +343,8 @@ export default function ReplacementPricingScreen() {
     try {
       const response = await searchReplacementPrices({
         itemName: item.name,
+        countryCode: propertyMarket?.country_code,
+        currencyCode: propertyMarket?.currency_code,
         description: item.description ?? undefined,
         category: item.category ?? undefined,
         brand: item.brand_maker ?? undefined,
@@ -373,7 +375,7 @@ export default function ReplacementPricingScreen() {
     } finally {
       setSearching(false);
     }
-  }, [item, enforce]);
+  }, [item, enforce, propertyMarket]);
 
   const handleSearch = () => {
     void runSearch(searchQuery);

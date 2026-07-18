@@ -88,6 +88,13 @@ test("forward migration contains all markets, backfills, server derivation, and 
   assert.match(migration, /locale = v\.locale/);
   assert.doesNotMatch(migration, /locale = values\.locale/);
   assert.doesNotMatch(migration, /inventory_item_valuations|current_valuation_id/);
+
+  const searchMigration = source("supabase/migrations/20260718_enable_global_replacement_search.sql");
+  assert.match(searchMigration, /replacement_search_enabled = true/);
+  assert.match(searchMigration, /serper_gl = lower\(country_code\)/);
+  assert.match(searchMigration, /WHERE country_code = 'BG'/);
+  assert.match(searchMigration, /search_language = 'bg'/);
+  assert.doesNotMatch(searchMigration, /ai_estimates_enabled/);
 });
 
 test("manual deployment guide includes preflight, RPC, and rollout checks", () => {
@@ -115,9 +122,30 @@ test("pricing Edge Functions use authoritative property markets and preserve the
   assert.match(model, /gpt-5\.6-luna/);
   assert.match(search, /from\('inventory_items'\).*id,file_id/);
   assert.match(search, /gl: market\.serperGl, hl: market\.serperHl/);
+  assert.match(search, /from\('inventory_files'\).*country_code,currency_code/);
+  assert.match(search, /requestedCountryCode[\s\S]*property\.country_code/);
+  const screen = source("artifacts/mobile/app/(tabs)/replacement-pricing/[id].tsx");
+  assert.match(screen, /countryCode: propertyMarket\?\.country_code/);
+  assert.match(screen, /currencyCode: propertyMarket\?\.currency_code/);
+  assert.doesNotMatch(search, /pricingSupportTier\s*[!=]==?\s*['"]limited['"]/);
   assert.doesNotMatch(search, /gl: 'nz', hl: 'en'/);
   assert.match(search, /priceRaw/);
   assert.match(search, /fulfilmentType/);
+});
+
+test("replacement search entry points and refined searches are not support-tier gated", () => {
+  const screen = source("artifacts/mobile/app/(tabs)/replacement-pricing/[id].tsx");
+  const item = source("artifacts/mobile/app/(tabs)/item/[id].tsx");
+  const room = source("artifacts/mobile/app/(tabs)/room/[id].tsx");
+  const claim = source("artifacts/mobile/app/(tabs)/claim-pack/[fileId].tsx");
+
+  assert.match(screen, /const runSearch = React\.useCallback/);
+  assert.match(screen, /const handleSearch = \(\) => \{\s*void runSearch\(searchQuery\)/);
+  assert.match(screen, /void runSearch\(suggestedQuery\)/);
+  assert.doesNotMatch(screen, /replacementSearchEnabled/);
+  assert.match(item, /onReviewReplacementPrice=\{handleReplacementPricing\}/);
+  assert.match(room, />Find replacement price<\/Text>/);
+  assert.match(claim, /onRunPriceSearch=\{openPriceSearch\}/);
 });
 
 test("new claim packs preserve currency metadata and mixed-currency subtotals", () => {

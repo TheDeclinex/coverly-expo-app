@@ -30,8 +30,8 @@ function parseSqlMarketSeed(): Map<string, ComparableMarket> {
     assert.match(currencyCode, /^[A-Z]{3}$/);
     markets.set(countryCode, {
       countryCode, currencyCode, locale: `en-${countryCode}`, searchLanguage: "en",
-      serperGl: null, serperHl: "en", pricingSupportTier: "limited",
-      aiEstimatesEnabled: false, replacementSearchEnabled: false, materialItemThreshold: null,
+      serperGl: countryCode.toLowerCase(), serperHl: "en", pricingSupportTier: "limited",
+      aiEstimatesEnabled: false, replacementSearchEnabled: true, materialItemThreshold: null,
     });
   }
 
@@ -144,16 +144,24 @@ test("verified markets use approved currency and Serper localisation", () => {
   }
 });
 
-test("preview samples are explicit and limited markets fail pricing safely", () => {
+test("preview samples are explicit and limited markets keep AI safeguards while enabling search", () => {
   for (const [country, currency] of [["DE","EUR"],["IE","EUR"],["JP","JPY"],["ZA","ZAR"],["SG","SGD"],["IN","INR"],["BR","BRL"],["SE","SEK"],["CH","CHF"],["KR","KRW"]]) {
     const market = resolveMarketConfig(country)!;
     assert.equal(market.currencyCode, currency);
     assert.equal(market.pricingSupportTier, "preview");
   }
-  const limited = resolveMarketConfig("AQ")!;
+  const limited = resolveMarketConfig("BG")!;
   assert.equal(limited.pricingSupportTier, "limited");
+  assert.equal(limited.currencyCode, "BGN");
+  assert.equal(limited.locale, "bg-BG");
+  assert.equal(limited.searchLanguage, "bg");
+  assert.equal(limited.serperHl, "bg");
   assert.equal(limited.aiEstimatesEnabled, false);
-  assert.equal(limited.replacementSearchEnabled, false);
-  assert.equal(limited.serperGl, null);
+  assert.equal(limited.replacementSearchEnabled, true);
+  assert.equal(limited.serperGl, "bg");
+  for (const market of MARKET_CONFIGS) {
+    assert.equal(market.replacementSearchEnabled, true, market.countryCode);
+    assert.equal(market.serperGl, market.countryCode.toLowerCase(), market.countryCode);
+  }
   assert.equal(resolveMarketConfig("ZZ"), null);
 });

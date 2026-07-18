@@ -5,6 +5,8 @@ export { replacementVoiceTranscriptToQuery } from "./replacement-pricing-query.t
 
 export interface ReplacementPriceSearchRequest {
   itemName: string;
+  countryCode?: string;
+  currencyCode?: string;
   description?: string;
   category?: string;
   brand?: string;
@@ -145,6 +147,8 @@ function safeRequestLogBody(body: ReplacementPriceSearchRequest): Record<string,
     functionName: REPLACEMENT_PRICE_FUNCTION_NAME,
     itemId: body.itemId,
     itemName: body.itemName,
+    countryCode: body.countryCode,
+    currencyCode: body.currencyCode,
     descriptionPresent: !!body.description,
     category: body.category,
     brand: body.brand,

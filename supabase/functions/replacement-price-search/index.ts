@@ -23,9 +23,9 @@
 import { serve } from 'https://deno.land/std@0.177.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.3';
 import { resolveMarketConfig, type MarketConfig } from '../_shared/market-config.ts';
-import { confirmedPropertyCurrencyStats, countryCodeFromRetailerLink, detectResultCurrency, parseProviderPrice } from './market-results.ts';
+import { classifyRetailerMarket, confirmedPropertyCurrencyStats, detectResultCurrency, parseProviderPrice } from './market-results.ts';
 
-const EDGE_VERSION = 'v26.3.0';
+const EDGE_VERSION = 'v26.4.0-global-search-preview';
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL') ?? '';
 const SUPABASE_ANON_KEY = Deno.env.get('SUPABASE_ANON_KEY') ?? '';
 const SERPER_TIMEOUT_MS = 15_000;
@@ -53,6 +53,8 @@ const MAX_ITEM_NAME_LEN = 200;
 
 interface PriceSearchRequest {
   itemName: string;
+  countryCode?: string;
+  currencyCode?: string;
   description?: string;
   category?: string;
   brand?: string;
@@ -226,13 +228,7 @@ function assignMatchType(title: string, itemName: string, position: number): Pri
 }
 
 function classifyResult(link: string, currencyCode: string | null, market: MarketConfig): Pick<PriceSearchResult, 'retailerCountryCode' | 'fulfilmentType' | 'warnings'> {
-  const retailerCountryCode = countryCodeFromRetailerLink(link);
-  const localDomain = retailerCountryCode === market.countryCode;
-  const foreignCurrency = currencyCode != null && currencyCode !== market.currencyCode;
-  if (localDomain && currencyCode === market.currencyCode) return { retailerCountryCode: market.countryCode, fulfilmentType: 'local', warnings: [] };
-  if (foreignCurrency) return { retailerCountryCode: null, fulfilmentType: 'overseas', warnings: [`Listed in ${currencyCode}, not ${market.currencyCode}. No conversion is applied.`] };
-  if (localDomain) return { retailerCountryCode: market.countryCode, fulfilmentType: 'local', warnings: ['The listing currency could not be confirmed. Review the raw retailer price before using it.'] };
-  return { retailerCountryCode: null, fulfilmentType: 'unknown', warnings: ['Retailer location could not be confirmed.'] };
+  return classifyRetailerMarket(link, currencyCode, market);
 }
 
 function mapShoppingResults(data: unknown, itemName: string, num: number, market: MarketConfig): PriceSearchResult[] {
@@ -388,9 +384,15 @@ serve(async (req: Request) => {
   if (itemError || !item) return jsonResponse({ success: false, errorCode: 'ITEM_NOT_FOUND', error: 'The item could not be accessed.' }, 404, origin);
   const { data: property, error: propertyError } = await userClient!.from('inventory_files').select('id,country_code,currency_code').eq('id', item.file_id).single();
   if (propertyError || !property) return jsonResponse({ success: false, errorCode: 'PROPERTY_NOT_FOUND', error: 'The item property could not be accessed.' }, 404, origin);
+  const requestedCountryCode = typeof body.countryCode === 'string' ? body.countryCode.trim().toUpperCase() : null;
+  const requestedCurrencyCode = typeof body.currencyCode === 'string' ? body.currencyCode.trim().toUpperCase() : null;
+  if ((requestedCountryCode && requestedCountryCode !== property.country_code)
+    || (requestedCurrencyCode && requestedCurrencyCode !== property.currency_code)) {
+    return jsonResponse({ success: false, errorCode: 'INVALID_PROPERTY_MARKET', error: 'The requested market does not match the item property.' }, 409, origin);
+  }
   const market = resolveMarketConfig(property.country_code);
   if (!market || market.currencyCode !== property.currency_code) return jsonResponse({ success: false, errorCode: 'INVALID_PROPERTY_MARKET', error: 'The property market configuration needs review.' }, 409, origin);
-  if (!market.replacementSearchEnabled || !market.serperGl) return jsonResponse({ success: false, errorCode: 'PRICING_MARKET_LIMITED', error: `Reliable local retailer search is not available for ${market.countryName} yet. You can still enter a value manually.` }, 422, origin);
+  if (!market.replacementSearchEnabled || !market.serperGl) return jsonResponse({ success: false, errorCode: 'PRICING_SEARCH_UNAVAILABLE', error: `Retailer search cannot be attempted for ${market.countryName}. You can still enter a value manually.` }, 422, origin);
 
   const baseQuery = buildQuery({ ...body, itemName }, market);
   const queryUsed = buildRangedQuery(baseQuery, market.currencyCode, minPrice, maxPrice);

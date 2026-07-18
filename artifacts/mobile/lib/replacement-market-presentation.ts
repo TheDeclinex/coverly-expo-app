@@ -24,9 +24,9 @@ type MarketWording = {
   retailerAdjective: string;
 };
 
-// Replacement search is enabled only for verified and preview markets. Keeping
-// their English attributive forms here avoids country-specific branches in JSX
-// and gives every enabled market grammatically useful copy.
+// Preserve polished English attributive forms for the markets that have them.
+// Every other configured country uses its canonical country name rather than
+// requiring a hard-coded wording entry before retailer search can be offered.
 const MARKET_WORDING: Record<string, MarketWording> = {
   AT: { listingAdjective: "Austrian", retailerAdjective: "Austrian" },
   AU: { listingAdjective: "Australian", retailerAdjective: "Australian" },
@@ -71,7 +71,7 @@ export function replacementMarketPresentation(
     && (suppliedCurrency == null || suppliedCurrency === market.currencyCode);
   const wording = marketMatchesCurrency ? MARKET_WORDING[market.countryCode] : null;
 
-  if (!marketMatchesCurrency || !market || !wording) {
+  if (!marketMatchesCurrency || !market) {
     const suppliedName = input?.countryName?.trim() || null;
     const resultContext = `Searching retailers${currencyCode ? ` · ${currencyCode}` : ""}`;
     return {
@@ -84,6 +84,22 @@ export function replacementMarketPresentation(
       loadingSubtitle: "Checking current listings for similar items...",
       resultContext,
       searchAccessibilityLabel: "Search replacement listings",
+    };
+  }
+
+  if (!wording) {
+    const countryName = input?.countryName?.trim() || market.countryName;
+    const retailerLabel = `retailers in ${countryName}`;
+    return {
+      countryCode: market.countryCode,
+      countryName,
+      currencyCode,
+      listingAdjective: null,
+      retailerLabel,
+      introLead: `Find comparable listings in ${countryName}.`,
+      loadingSubtitle: `Checking current listings in ${countryName} for similar items...`,
+      resultContext: `Searching ${retailerLabel}${currencyCode ? ` · ${currencyCode}` : ""}`,
+      searchAccessibilityLabel: `Search replacement listings in ${countryName}`,
     };
   }
 

@@ -11,7 +11,7 @@ import {
 
 import { useColors } from "@/hooks/useColors";
 import type { ReplacementPriceResult } from "@/lib/replacement-pricing";
-import { formatReplacementListingPrice, resolveReplacementListingCurrency } from "@/lib/replacement-listing-policy";
+import { formatReplacementListingPrice, replacementListingFulfilmentLabel, resolveReplacementListingCurrency } from "@/lib/replacement-listing-policy";
 
 interface ReplacementListingCardProps {
   result: ReplacementPriceResult;
@@ -39,6 +39,7 @@ export function ReplacementListingCard({
   const canUse = currencyDecision.canUse;
   const canOpen = /^https?:\/\//i.test(result.link);
   const warning = currencyDecision.warning;
+  const fulfilmentLabel = replacementListingFulfilmentLabel(result.fulfilmentType);
 
   return (
     <View
@@ -80,7 +81,14 @@ export function ReplacementListingCard({
           <Text style={[styles.price, { color: colors.foreground }]}>
             {formatReplacementListingPrice(result, contextCurrency)}
           </Text>
-          <Text style={[styles.source, { color: result.fulfilmentType === "local" ? colors.primary : colors.mutedForeground }]}>{result.fulfilmentType === "local" ? "Local retailer" : result.fulfilmentType === "overseas" ? "Overseas listing" : "Retailer location unconfirmed"}</Text>
+          {fulfilmentLabel ? (
+            <Text
+              accessibilityLabel={fulfilmentLabel}
+              style={[styles.source, { color: colors.mutedForeground }]}
+            >
+              {fulfilmentLabel}
+            </Text>
+          ) : null}
         </View>
       </View>
 

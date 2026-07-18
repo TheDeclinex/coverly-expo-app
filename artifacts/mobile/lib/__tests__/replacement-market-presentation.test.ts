@@ -33,6 +33,15 @@ test("does not use a country's wording when legacy currency context conflicts", 
   assert.equal(copy.countryCode, null);
 });
 
+test("uses canonical country copy for a best-effort Bulgarian search", () => {
+  const copy = replacementMarketPresentation({ countryCode: "BG", currencyCode: "BGN" });
+  assert.equal(copy.countryName, "Bulgaria");
+  assert.equal(copy.introLead, "Find comparable listings in Bulgaria.");
+  assert.equal(copy.loadingSubtitle, "Checking current listings in Bulgaria for similar items...");
+  assert.equal(copy.resultContext, "Searching retailers in Bulgaria · BGN");
+  assert.equal(copy.searchAccessibilityLabel, "Search replacement listings in Bulgaria");
+});
+
 test("all enabled replacement markets have centralized attributive wording", () => {
   for (const countryCode of [
     "AT", "AU", "BE", "BR", "CA", "CH", "DE", "DK", "ES", "FI", "FR", "GB", "IE",

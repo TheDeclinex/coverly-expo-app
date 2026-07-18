@@ -107,6 +107,12 @@ export function formatReplacementListingPrice(
   return result.priceRaw || (result.price != null ? String(result.price) : "Price unavailable");
 }
 
+export function replacementListingFulfilmentLabel(
+  fulfilmentType: ReplacementPriceResult["fulfilmentType"],
+): string | null {
+  return fulfilmentType === "overseas" ? "Overseas listing" : null;
+}
+
 export function buildReplacementListingUpdate(
   result: ReplacementPriceResult,
   currencyCode: string,

@@ -8,9 +8,9 @@ The Edge Function registry is `supabase/functions/_shared/market-config.ts`. The
 
 - Verified: NZ, AU, US, CA, GB.
 - Preview: AT, BE, BR, CH, DE, DK, ES, FI, FR, IE, IN, IT, JP, KR, MX, NL, NO, PT, SE, SG, ZA.
-- Limited: every other listed ISO country/territory. Manual inventory and object recognition work, while AI prices stay null and retailer search returns a clear limited-coverage response.
+- Limited: every other listed ISO country/territory. Manual inventory, object recognition, and best-effort local retailer search work, while AI-generated replacement estimates stay disabled.
 
-Unusual or multi-currency territories use a documented default in the committed dataset and remain limited unless explicitly promoted. A future property currency override can be added without changing the property/item/claim schema.
+Unusual or multi-currency territories use a documented default in the committed dataset and remain limited unless explicitly promoted. Retailer search and AI-generated estimates are separate capabilities: every configured country receives its lower-case ISO code as the provider `gl`, while limited-tier markets keep AI estimates disabled. Configured search languages are used where available (including Bulgarian for BG), with English as the safe fallback. A future property currency override can be added without changing the property/item/claim schema.
 
 ## Monetary invariants and compatibility
 
@@ -51,7 +51,7 @@ Deployment order:
 
 1. Review these fixes and the final diff.
 2. Commit and push only after review approval.
-3. Open the target Supabase project's SQL Editor, copy the complete contents of `supabase/migrations/20260717_global_market_foundation.sql`, and run it as one script. The file contains `BEGIN`, `COMMIT`, and `NOTIFY pgrst, 'reload schema';`.
+3. Open the target Supabase project's SQL Editor and apply the pending forward migrations in order. Existing global-market deployments need `supabase/migrations/20260718_enable_global_replacement_search.sql`; fresh environments should also retain the updated `20260717_global_market_foundation.sql` seed. Each file contains its own transaction and schema reload notification.
 4. If a manual reload is needed after the transaction, run:
 
 ```sql

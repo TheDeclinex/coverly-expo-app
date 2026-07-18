@@ -30,10 +30,16 @@ INSERT INTO public.pricing_markets (
   country_code, currency_code, locale, search_language, serper_gl, serper_hl,
   pricing_support_tier, ai_estimates_enabled, replacement_search_enabled, material_item_threshold
 )
-SELECT country_code, currency_code, 'en-' || country_code, 'en', NULL, 'en',
-       'limited', false, false, NULL
+SELECT country_code, currency_code, 'en-' || country_code, 'en', lower(country_code), 'en',
+       'limited', false, true, NULL
 FROM pairs
 ON CONFLICT (country_code) DO UPDATE SET currency_code = EXCLUDED.currency_code;
+
+-- Retailer search is a best-effort capability for every valid configured
+-- country. AI-generated estimates remain separately gated by support tier.
+UPDATE public.pricing_markets
+SET replacement_search_enabled = true,
+    serper_gl = lower(country_code);
 
 UPDATE public.pricing_markets
 SET pricing_support_tier = 'preview', ai_estimates_enabled = true,
@@ -42,7 +48,7 @@ WHERE country_code = ANY (ARRAY['AT','BE','BR','CH','DE','DK','ES','FI','FR','IE
 
 UPDATE public.pricing_markets SET locale = v.locale, search_language = v.lang, serper_hl = v.lang
 FROM (VALUES
-  ('AT','de-AT','de'),('BE','nl-BE','nl'),('BR','pt-BR','pt'),('CH','de-CH','de'),
+  ('AT','de-AT','de'),('BE','nl-BE','nl'),('BG','bg-BG','bg'),('BR','pt-BR','pt'),('CH','de-CH','de'),
   ('DE','de-DE','de'),('DK','da-DK','da'),('ES','es-ES','es'),('FI','fi-FI','fi'),
   ('FR','fr-FR','fr'),('IE','en-IE','en'),('IN','en-IN','en'),('IT','it-IT','it'),
   ('JP','ja-JP','ja'),('KR','ko-KR','ko'),('MX','es-MX','es'),('NL','nl-NL','nl'),

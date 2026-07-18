@@ -19,8 +19,8 @@ const PRICING_SUPPORT_CONTENT = {
   },
   limited: {
     label: "Manual pricing",
-    shortDescription: "AI item recognition is available, but values must be entered manually and retailer search is unavailable.",
-    expandedDescription: "Coverly can still identify, name, describe, categorise and count items from photos or video. Automatic replacement-value estimates and local retailer price searches are not currently available for this market.",
+    shortDescription: "AI item recognition and best-effort local retailer search are available; replacement values can still be entered manually.",
+    expandedDescription: "Coverly can identify, name, describe, categorise and count items from photos or video, and can attempt local retailer price searches for this market. Automatic AI replacement-value estimates are not currently available, so search results and manually entered values should be reviewed.",
   },
 } satisfies Record<PricingSupportTier, PricingSupportContent>;
 

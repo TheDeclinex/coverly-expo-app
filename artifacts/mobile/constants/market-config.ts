@@ -28,12 +28,12 @@ const PREVIEW = new Set([
 ]);
 const LOCALE_BY_COUNTRY: Record<string, string> = {
   NZ:"en-NZ", AU:"en-AU", US:"en-US", CA:"en-CA", GB:"en-GB",
-  AT:"de-AT", BE:"nl-BE", BR:"pt-BR", CH:"de-CH", DE:"de-DE", DK:"da-DK", ES:"es-ES",
+  AT:"de-AT", BE:"nl-BE", BG:"bg-BG", BR:"pt-BR", CH:"de-CH", DE:"de-DE", DK:"da-DK", ES:"es-ES",
   FI:"fi-FI", FR:"fr-FR", IE:"en-IE", IN:"en-IN", IT:"it-IT", JP:"ja-JP", KR:"ko-KR",
   MX:"es-MX", NL:"nl-NL", NO:"nb-NO", PT:"pt-PT", SE:"sv-SE", SG:"en-SG", ZA:"en-ZA",
 };
 const SEARCH_LANGUAGE_BY_COUNTRY: Record<string, string> = {
-  AT:"de", BE:"nl", BR:"pt", CH:"de", DE:"de", DK:"da", ES:"es", FI:"fi", FR:"fr", IT:"it",
+  AT:"de", BE:"nl", BG:"bg", BR:"pt", CH:"de", DE:"de", DK:"da", ES:"es", FI:"fi", FR:"fr", IT:"it",
   JP:"ja", KR:"ko", MX:"es", NL:"nl", NO:"no", PT:"pt", SE:"sv",
 };
 const VERIFIED_THRESHOLDS: Record<string, number> = { NZ:500, AU:500, US:400, CA:500, GB:300 };
@@ -49,7 +49,7 @@ export function resolveMarketConfig(value: unknown): MarketConfig | null {
   if (!countryCode) return null;
   const currencyCode = currencyByCountry.get(countryCode)!;
   const pricingSupportTier: PricingSupportTier = VERIFIED.has(countryCode) ? "verified" : PREVIEW.has(countryCode) ? "preview" : "limited";
-  const pricingEnabled = pricingSupportTier !== "limited";
+  const aiEstimatesEnabled = pricingSupportTier !== "limited";
   const locale = LOCALE_BY_COUNTRY[countryCode] ?? `en-${countryCode}`;
   const searchLanguage = SEARCH_LANGUAGE_BY_COUNTRY[countryCode] ?? "en";
   return {
@@ -58,11 +58,11 @@ export function resolveMarketConfig(value: unknown): MarketConfig | null {
     currencyCode,
     locale,
     searchLanguage,
-    serperGl: pricingEnabled ? countryCode.toLowerCase() : null,
+    serperGl: countryCode.toLowerCase(),
     serperHl: searchLanguage,
     pricingSupportTier,
-    aiEstimatesEnabled: pricingEnabled,
-    replacementSearchEnabled: pricingEnabled,
+    aiEstimatesEnabled,
+    replacementSearchEnabled: true,
     materialItemThreshold: VERIFIED_THRESHOLDS[countryCode] ?? null,
   };
 }
