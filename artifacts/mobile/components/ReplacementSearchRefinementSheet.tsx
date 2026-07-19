@@ -63,7 +63,7 @@ function mappedVoiceValue(
   extraction: VoiceExtractionResult | null,
   transcript: string,
 ): string {
-  if (target === "searchTerm") return normalizeRefinementText(extraction?.display_name || transcript);
+  if (target === "searchTerm") return normalizeRefinementText(extraction?.name || extraction?.display_name || transcript);
   if (target === "brand") {
     return normalizeRefinementText(extraction?.brand || extraction?.make || extraction?.maker_artist_brand || transcript);
   }
@@ -79,7 +79,7 @@ function combinedVoiceDraft(
   if (!extraction) return { ...current, searchTerm: normalizeRefinementText(transcript) };
   return {
     ...current,
-    searchTerm: normalizeRefinementText(extraction.display_name || transcript) || current.searchTerm,
+    searchTerm: normalizeRefinementText(extraction.name || extraction.display_name || transcript) || current.searchTerm,
     brand: normalizeRefinementText(extraction.brand || extraction.make || extraction.maker_artist_brand) || current.brand,
     model: normalizeRefinementText(extraction.model || extraction.model_title) || current.model,
     additionalDetails: normalizeRefinementText(extraction.description) || current.additionalDetails,

@@ -36,7 +36,10 @@ export interface VoiceItemValues {
 export type VoiceItemPatch = Partial<VoiceItemValues>;
 
 export interface VoiceExtractionResult {
-  display_name: string | null;
+  name: string | null;
+  product_type: string | null;
+  /** Backwards compatibility for responses from the pre-canonical Edge Function. */
+  display_name?: string | null;
   description: string | null;
   category: string | null;
   brand: string | null;

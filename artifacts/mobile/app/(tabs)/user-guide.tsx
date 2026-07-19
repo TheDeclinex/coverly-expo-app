@@ -1,6 +1,6 @@
 import { Feather } from "@expo/vector-icons";
-import { Stack } from "expo-router";
-import React, { useMemo, useState } from "react";
+import { Stack, useFocusEffect } from "expo-router";
+import React, { useState } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
@@ -17,15 +17,14 @@ type FeatherName = React.ComponentProps<typeof Feather>["name"];
 export default function UserGuideScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
-  const initialOpenSections = useMemo(
-    () =>
-      userGuideSections.reduce<Record<string, boolean>>((acc, section, index) => {
-        acc[section.id] = index < 2;
-        return acc;
-      }, {}),
-    [],
+  const [openSections, setOpenSections] = useState<Record<string, boolean>>({});
+
+  useFocusEffect(
+    React.useCallback(() => {
+      setOpenSections({});
+      return () => setOpenSections({});
+    }, []),
   );
-  const [openSections, setOpenSections] = useState<Record<string, boolean>>(initialOpenSections);
 
   const toggleSection = (id: string) => {
     setOpenSections((current) => ({ ...current, [id]: !current[id] }));
@@ -51,10 +50,11 @@ export default function UserGuideScreen() {
         </View>
 
         <View style={styles.sections}>
-          {userGuideSections.map((section) => (
+          {userGuideSections.map((section, index) => (
             <GuideSectionCard
               key={section.id}
               section={section}
+              tintIndex={index}
               isOpen={!!openSections[section.id]}
               onToggle={() => toggleSection(section.id)}
             />
@@ -72,18 +72,24 @@ export default function UserGuideScreen() {
 
 function GuideSectionCard({
   section,
+  tintIndex,
   isOpen,
   onToggle,
 }: {
   section: UserGuideSection;
+  tintIndex: number;
   isOpen: boolean;
   onToggle: () => void;
 }) {
   const colors = useColors();
   const iconName = section.icon as FeatherName;
+  const sectionTints = [colors.accent, "#EFF6FF", "#F0FDF4", "#F5F3FF", "#FFF7ED", "#FAF7F2"];
+  const iconTints = [colors.secondary, "#DBEAFE", "#DCFCE7", "#EDE9FE", "#FFEDD5", "#F3EDE5"];
+  const tint = sectionTints[tintIndex % sectionTints.length];
+  const iconTint = iconTints[tintIndex % iconTints.length];
 
   return (
-    <View style={[styles.sectionCard, { backgroundColor: colors.card, borderColor: colors.border, borderRadius: colors.radius }]}>
+    <View style={[styles.sectionCard, { backgroundColor: tint, borderColor: colors.border, borderRadius: colors.radius }]}>
       <Pressable
         accessibilityRole="button"
         accessibilityLabel={`${isOpen ? "Collapse" : "Expand"} ${section.title}`}
@@ -91,7 +97,7 @@ function GuideSectionCard({
         onPress={onToggle}
         style={({ pressed }) => [styles.sectionHeader, { opacity: pressed ? 0.72 : 1 }]}
       >
-        <View style={[styles.sectionIcon, { backgroundColor: colors.secondary }]}>
+        <View style={[styles.sectionIcon, { backgroundColor: iconTint }]}>
           <Feather name={iconName} size={17} color={colors.primary} />
         </View>
         <View style={styles.sectionHeaderCopy}>
@@ -102,7 +108,7 @@ function GuideSectionCard({
       </Pressable>
 
       {isOpen ? (
-        <View style={[styles.sectionBody, { borderTopColor: colors.border }]}>
+        <View style={[styles.sectionBody, { backgroundColor: colors.card, borderTopColor: colors.border }]}>
           {section.items.map((item, index) => (
             <GuideItemBlock key={`${section.id}-${item.title}`} item={item} isLast={index === section.items.length - 1} />
           ))}

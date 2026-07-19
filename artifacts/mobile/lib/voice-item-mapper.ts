@@ -53,43 +53,98 @@ function cleanNameCandidate(value: string | null | undefined): string | null {
     .replace(/\s+/g, " ")
     .replace(/[,\s.]+$/g, "")
     .trim();
-  if (!cleaned || cleaned.length < 3) return null;
+  if (
+    !cleaned ||
+    cleaned.length < 3 ||
+    /^(?:item|product|object|thing|it|this|that|unknown item)$/i.test(cleaned) ||
+    /^(?:bought|purchased|paid)\b/i.test(cleaned)
+  ) return null;
   return cleaned;
 }
 
-function fallbackName(transcript: string, extraction: VoiceExtractionResult): string | null {
-  const hasDisplayName = cleanText(extraction.display_name);
-  if (hasDisplayName) return hasDisplayName;
+function titleCaseItemPhrase(value: string): string {
+  return value
+    .split(/(\s+|-)/)
+    .map((part) => {
+      if (!part.trim() || part === "-") return part;
+      if (/^(?:tv|rc|lcd|led|oled|qled|uhd|hd|4k|8k)$/i.test(part)) return part.toUpperCase();
+      if (/^(?:inch|inches)$/i.test(part)) return part.toLowerCase();
+      if (/^[A-Z0-9][A-Za-z0-9.-]*$/.test(part) && /[A-Z0-9]/.test(part.slice(1))) return part;
+      return part[0].toUpperCase() + part.slice(1).toLowerCase();
+    })
+    .join("");
+}
 
-  if (isFieldCommand(transcript) || hasNonNameStructuredExtraction(extraction)) {
-    return null;
+function inferProductType(...values: Array<string | null | undefined>): string | null {
+  const text = values.filter(Boolean).join(" ").toLowerCase();
+  const types: Array<[RegExp, string]> = [
+    [/\b(?:radio[ -]?controlled|remote[ -]?controlled|rc)\s+car\b/, "RC Car"],
+    [/\bvacuum(?:\s+cleaner)?\b/, "Vacuum Cleaner"],
+    [/\b(?:television|tv)\b/, "TV"],
+    [/\bsoundbar\b/, "Soundbar"],
+    [/\b(?:mobile\s+)?phone\b/, "Phone"],
+    [/\blaptop\b/, "Laptop"],
+    [/\btablet\b/, "Tablet"],
+    [/\bcamera\b/, "Camera"],
+    [/\bwashing\s+machine\b/, "Washing Machine"],
+    [/\b(?:refrigerator|fridge)\b/, "Fridge"],
+    [/\bsofa\b|\bcouch\b/, "Sofa"],
+    [/\blawn\s*mower\b/, "Lawn Mower"],
+  ];
+  return types.find(([pattern]) => pattern.test(text))?.[1] ?? null;
+}
+
+function joinDistinctNameParts(...values: Array<string | null>): string | null {
+  const parts: string[] = [];
+  for (const value of values) {
+    const cleaned = cleanNameCandidate(value);
+    if (!cleaned) continue;
+    const normalized = cleaned.toLocaleLowerCase();
+    if (parts.some((part) => part.toLocaleLowerCase().includes(normalized))) continue;
+    const containedIndex = parts.findIndex((part) => normalized.includes(part.toLocaleLowerCase()));
+    if (containedIndex >= 0) parts.splice(containedIndex, 1, cleaned);
+    else parts.push(cleaned);
+  }
+  return parts.length ? titleCaseItemPhrase(parts.join(" ")) : null;
+}
+
+function fallbackName(transcript: string, extraction: VoiceExtractionResult): string | null {
+  const brand = cleanText(extraction.maker_artist_brand) ?? cleanText(extraction.brand) ?? cleanText(extraction.make);
+  const model = cleanText(extraction.model_title) ?? cleanText(extraction.model);
+  const productType = cleanNameCandidate(extraction.product_type) ?? inferProductType(
+    extraction.category,
+    extraction.description,
+    extraction.raw_summary,
+    transcript,
+  );
+  const proposedName = cleanNameCandidate(extraction.name) ?? cleanNameCandidate(extraction.display_name);
+  if (proposedName) {
+    const normalizedProposal = proposedName.toLocaleLowerCase();
+    const isOnlyKnownIdentifier = [brand, model, joinDistinctNameParts(brand, model)]
+      .some((value) => value?.toLocaleLowerCase() === normalizedProposal);
+    return productType && isOnlyKnownIdentifier
+      ? joinDistinctNameParts(brand, model, productType)
+      : proposedName;
   }
 
-  return (
-    cleanNameCandidate(transcript.split(/[.;\n]/)[0]) ??
-    cleanNameCandidate(extraction.raw_summary) ??
-    cleanNameCandidate(extraction.description)
-  );
-}
+  if (productType && (brand || model)) return joinDistinctNameParts(brand, model, productType);
+  if (brand && model) return joinDistinctNameParts(brand, model);
 
-function isFieldCommand(transcript: string): boolean {
-  return /^(?:set|add|update|change|rename|fill|make|i bought|bought|purchased|paid|model)\b/i.test(transcript.trim());
-}
+  // A transcript phrase is only used when it contains a recognisable product
+  // type. This avoids fabricating names from purchase-only speech such as
+  // "Bought it in 2021 for $300".
+  if (productType) {
+    const spokenIdentity = transcript
+      .split(/\b(?:bought|purchased|paid|from|for\s+\$|in\s+(?:19|20)\d{2})\b|[,;\n]/i)[0]
+      .trim();
+    const transcriptName = cleanNameCandidate(spokenIdentity);
+    if (transcriptName && !/^(?:it|this|that)\b/i.test(transcriptName)) {
+      return titleCaseItemPhrase(transcriptName);
+    }
+    return joinDistinctNameParts(brand, model, productType);
+  }
 
-function hasNonNameStructuredExtraction(extraction: VoiceExtractionResult): boolean {
-  return Boolean(
-    extraction.quantity != null ||
-      extraction.maker_artist_brand ||
-      extraction.brand ||
-      extraction.make ||
-      extraction.model_title ||
-      extraction.model ||
-      extraction.retailer_store_purchased_from ||
-      extraction.seller ||
-      extraction.purchase_year ||
-      extraction.year_or_era ||
-      extraction.notes,
-  );
+  return null;
 }
 
 function fallbackPrice(transcript: string): number | null {
@@ -154,6 +209,7 @@ function makeChange(
   nextValue: VoiceScalar,
   patch: VoiceItemPatch,
   uncertain: boolean,
+  selectedByDefault = !uncertain,
 ): VoiceMappedChange | null {
   if (nextValue === null || sameValue(currentValue, nextValue)) return null;
   return {
@@ -164,7 +220,7 @@ function makeChange(
     nextValue,
     patch,
     uncertain,
-    selectedByDefault: !uncertain,
+    selectedByDefault,
   };
 }
 
@@ -197,7 +253,15 @@ export function mapVoiceItemExtraction({
   if (accepts("name")) {
     const direct = targetField === "name" ? plainTargetValue(transcript) : null;
     const next = direct ?? fallbackName(transcript, extraction);
-    add(makeChange("name", currentValues.name ?? null, next, { name: next }, direct ? false : isUncertain(extraction, "display_name", "name")));
+    const uncertain = direct ? false : isUncertain(extraction, "name", "display_name", "product_type");
+    add(makeChange(
+      "name",
+      currentValues.name ?? null,
+      next,
+      { name: next },
+      uncertain,
+      !cleanText(currentValues.name) && !uncertain,
+    ));
   }
 
   if (accepts("category")) {

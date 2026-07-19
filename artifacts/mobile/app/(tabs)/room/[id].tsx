@@ -7,11 +7,13 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import React, { useEffect, useRef, useState } from "react";
 import {
   AccessibilityInfo,
+  ActionSheetIOS,
   ActivityIndicator,
   Alert,
   Animated,
   Easing,
   FlatList,
+  InteractionManager,
   Keyboard,
   KeyboardAvoidingView,
   Linking,
@@ -72,7 +74,14 @@ import { supabase } from "@/lib/supabase";
 import { subtractDeletedItems, withoutRoomItems } from "@/lib/room-deletion";
 import { formatCurrencyTotals, groupAmountsByCurrency, moneyDisplayToken } from "@/lib/money";
 import { parseReplacementPriceInput, resolveReviewedValueCurrency, resolveStoredValueCurrency, resolveValueMarket, supportedCurrencyCode } from "@/lib/replacement-value";
-import { roomCoverActions, withRoomCoverPhoto, withRoomListCoverPhoto, type RoomCoverAction } from "@/lib/room-cover-photo";
+import { findPotentialDuplicateGroups } from "@/lib/potential-duplicates";
+import {
+  createDeferredRoomCoverPickerController,
+  roomCoverActions,
+  withRoomCoverPhoto,
+  withRoomListCoverPhoto,
+  type RoomCoverAction,
+} from "@/lib/room-cover-photo";
 import type { InventoryItem, InventoryRoom } from "@/types";
 import type { VoiceItemPatch } from "@/types/voice";
 
@@ -85,6 +94,22 @@ const ROOM_COVER_PICKER_OPTIONS: ImagePicker.ImagePickerOptions = {
   allowsEditing: true,
   aspect: [16, 9],
 };
+
+function roomCoverPickerLog(message: string, details?: Record<string, unknown>) {
+  if (!__DEV__) return;
+  if (details) {
+    console.info(`[roomCoverPicker] ${message}`, details);
+    return;
+  }
+  console.info(`[roomCoverPicker] ${message}`);
+}
+
+function roomCoverActionLabel(action: RoomCoverAction): string {
+  if (action === "camera") return "Take photo";
+  if (action === "library") return "Choose from library";
+  if (action === "remove") return "Remove cover";
+  return "Cancel";
+}
 
 /** Maps category key → Feather icon name */
 const CATEGORY_ICONS: Record<string, keyof typeof Feather.glyphMap> = {
@@ -1196,12 +1221,14 @@ const MemoizedAnimatedItemCard = React.memo(AnimatedItemCard, detailedCardPropsE
 const MemoizedCompactItemCard = React.memo(CompactItemCard, compactCardPropsEqual);
 
 export default function ItemsScreen() {
-  const { id, name, fileId, fileName, addedCount } = useLocalSearchParams<{
+  const { id, name, fileId, fileName, addedCount, addedItemIds, scrollToTop } = useLocalSearchParams<{
     id: string;
     name: string;
     fileId?: string;
     fileName?: string;
     addedCount?: string;
+    addedItemIds?: string;
+    scrollToTop?: string;
   }>();
   const { session } = useAuth();
   const colors = useColors();
@@ -1214,6 +1241,7 @@ export default function ItemsScreen() {
   const [localCoverUrl, setLocalCoverUrl] = useState<string | null>(null);
   const [coverSavedTick, setCoverSavedTick] = useState(false);
   const [coverActionSheetVisible, setCoverActionSheetVisible] = useState(false);
+  const [roomCoverPickerController] = useState(createDeferredRoomCoverPickerController);
   const [archivingRoom, setArchivingRoom] = useState(false);
   const [newItemIds, setNewItemIds] = useState<Set<string>>(new Set());
   const [roomImageViewer, setRoomImageViewer] = useState<{ item?: InventoryItem; uri: string; title: string } | null>(null);
@@ -1228,12 +1256,14 @@ export default function ItemsScreen() {
   const [readinessFilter, setReadinessFilter] = useState<RoomReadinessFilter>((initialViewSession?.readinessFilter as RoomReadinessFilter | undefined) ?? "all");
   const [sortOption, setSortOption] = useState<RoomSortOption>((initialViewSession?.sortOption as RoomSortOption | undefined) ?? "recent");
   const [selectionMode, setSelectionMode] = useState(false);
+  const [duplicateReviewMode, setDuplicateReviewMode] = useState(false);
   const [selectedItemIds, setSelectedItemIds] = useState<Set<string>>(new Set());
   const [bulkWorking, setBulkWorking] = useState(false);
   const [moveModalVisible, setMoveModalVisible] = useState(false);
   const [categorySummaryExpanded, setCategorySummaryExpanded] = useState(false);
   const openingItemRef = useRef(false);
   const restoredRoomScrollRef = useRef(false);
+  const consumedScrollToTopTokenRef = useRef<string | null>(null);
   const roomViewabilityConfig = useRef({ itemVisiblePercentThreshold: 20 }).current;
   const liveScrollOffsetRef = useRef(initialViewSession?.offset ?? 0);
 
@@ -1464,6 +1494,26 @@ export default function ItemsScreen() {
     setSortOption("recent");
   }, []);
 
+  const duplicateGroups = React.useMemo(
+    () => findPotentialDuplicateGroups(items ?? []),
+    [items],
+  );
+  const duplicateCandidateItems = React.useMemo(
+    () => duplicateGroups.flatMap((group) => group.items),
+    [duplicateGroups],
+  );
+  const duplicateGroupMetaByItemId = React.useMemo(() => {
+    const metadata = new Map<string, { groupNumber: number; reason: string; firstItemId: string }>();
+    duplicateGroups.forEach((group, index) => {
+      group.items.forEach((item) => metadata.set(item.id, {
+        groupNumber: index + 1,
+        reason: group.reason,
+        firstItemId: group.items[0].id,
+      }));
+    });
+    return metadata;
+  }, [duplicateGroups]);
+
   useEffect(() => {
     updateRoomViewSession(id, {
       viewMode,
@@ -1474,6 +1524,7 @@ export default function ItemsScreen() {
     });
   }, [categoryFilter, id, readinessFilter, searchText, sortOption, viewMode]);
   const visibleItems = React.useMemo(() => {
+    if (duplicateReviewMode) return duplicateCandidateItems;
     const filtered = (items ?? []).filter((item) => {
       const matchesSearch =
         !normalizedSearchText ||
@@ -1490,7 +1541,7 @@ export default function ItemsScreen() {
       if (sortOption === "name_asc") return a.name.localeCompare(b.name);
       return (a.sort_order ?? 0) - (b.sort_order ?? 0);
     });
-  }, [categoryFilter, items, normalizedSearchText, readinessFilter, sortOption]);
+  }, [categoryFilter, duplicateCandidateItems, duplicateReviewMode, items, normalizedSearchText, readinessFilter, sortOption]);
 
   const roomSummary = React.useMemo(() => {
     const roomItems = items ?? [];
@@ -1522,7 +1573,7 @@ export default function ItemsScreen() {
   }, [items, resolvedPropertyCurrency]);
 
   useEffect(() => {
-    if (isLoading || visibleItems.length === 0 || restoredRoomScrollRef.current) return;
+    if (scrollToTop || isLoading || visibleItems.length === 0 || restoredRoomScrollRef.current) return;
     const saved = getRoomViewSession(id);
     if (!saved) return;
     restoredRoomScrollRef.current = true;
@@ -1537,7 +1588,23 @@ export default function ItemsScreen() {
       }
     });
     return () => cancelAnimationFrame(frame);
-  }, [id, isLoading, visibleItems]);
+  }, [id, isLoading, scrollToTop, visibleItems]);
+
+  useEffect(() => {
+    if (!scrollToTop || consumedScrollToTopTokenRef.current === scrollToTop || isLoading) return;
+    const expectedIds = (addedItemIds ?? "").split(",").filter(Boolean);
+    if (expectedIds.length === 0 || !expectedIds.every((itemId) => (items ?? []).some((item) => item.id === itemId))) return;
+
+    consumedScrollToTopTokenRef.current = scrollToTop;
+    restoredRoomScrollRef.current = true;
+    liveScrollOffsetRef.current = 0;
+    updateRoomViewSession(id, { offset: 0, anchorItemId: null });
+    const frame = requestAnimationFrame(() => {
+      listRef.current?.scrollToOffset({ offset: 0, animated: false });
+      router.setParams({ scrollToTop: undefined, addedItemIds: undefined });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [addedItemIds, id, isLoading, items, scrollToTop]);
 
   const onRoomViewableItemsChanged = React.useCallback(
     ({ viewableItems }: { viewableItems: Array<{ item: InventoryItem }> }) => {
@@ -1563,6 +1630,7 @@ export default function ItemsScreen() {
 
   const clearSelection = React.useCallback(() => {
     setSelectionMode(false);
+    setDuplicateReviewMode(false);
     setSelectedItemIds(new Set());
     setMoveModalVisible(false);
   }, []);
@@ -1620,6 +1688,15 @@ export default function ItemsScreen() {
 
   const enterSelectionMode = React.useCallback(() => {
     setActiveEdit(null);
+    setDuplicateReviewMode(false);
+    setSelectionMode(true);
+    setSelectedItemIds(new Set());
+    void Haptics.selectionAsync().catch(() => undefined);
+  }, []);
+
+  const enterDuplicateReviewMode = React.useCallback(() => {
+    setActiveEdit(null);
+    setDuplicateReviewMode(true);
     setSelectionMode(true);
     setSelectedItemIds(new Set());
     void Haptics.selectionAsync().catch(() => undefined);
@@ -1640,7 +1717,8 @@ export default function ItemsScreen() {
       removeNewItemIds(ids);
       await invalidateRoomBulkQueries();
       showToast(`${ids.length} item${ids.length === 1 ? "" : "s"} deleted`);
-      clearSelection();
+      if (duplicateReviewMode) setSelectedItemIds(new Set());
+      else clearSelection();
     } catch (deleteFailure) {
       Alert.alert(
         "Couldn't delete selected items",
@@ -1649,7 +1727,7 @@ export default function ItemsScreen() {
     } finally {
       setBulkWorking(false);
     }
-  }, [bulkWorking, clearSelection, invalidateRoomBulkQueries, queryClient, removeNewItemIds, selectedCount, selectedItemIds, showToast]);
+  }, [bulkWorking, clearSelection, duplicateReviewMode, invalidateRoomBulkQueries, queryClient, removeNewItemIds, selectedCount, selectedItemIds, showToast]);
 
   const confirmDeleteSelectedItems = React.useCallback(() => {
     if (selectedCount === 0 || bulkWorking) return;
@@ -1981,29 +2059,100 @@ export default function ItemsScreen() {
   }, [coverUploading, id, localCoverUrl, queryClient, refreshRoomCover, resolvedFileId, session?.user.id, showToast]);
 
   const pickRoomCover = React.useCallback(async (source: "camera" | "library") => {
-    if (coverUploading) return;
+    roomCoverPickerLog("picker action entered", { source, coverUploading });
+    if (coverUploading) {
+      roomCoverPickerLog("picker action skipped while upload is active", { source });
+      return;
+    }
     try {
       if (Platform.OS !== "web") {
+        roomCoverPickerLog("permission request entered", { source });
         const permission = source === "camera"
           ? await ImagePicker.requestCameraPermissionsAsync()
           : await ImagePicker.requestMediaLibraryPermissionsAsync();
+        roomCoverPickerLog("permission result returned", { source, status: permission.status });
         if (permission.status !== "granted") {
           showPermissionHelp(source === "camera" ? "camera" : "photo library");
           return;
         }
       }
+      roomCoverPickerLog(
+        source === "camera" && Platform.OS !== "web"
+          ? "launchCameraAsync called"
+          : "launchImageLibraryAsync called",
+        { source },
+      );
       const result = source === "camera" && Platform.OS !== "web"
         ? await ImagePicker.launchCameraAsync(ROOM_COVER_PICKER_OPTIONS)
         : await ImagePicker.launchImageLibraryAsync(ROOM_COVER_PICKER_OPTIONS);
-      if (result.canceled || !result.assets[0]) return;
+      roomCoverPickerLog("picker result returned", {
+        source,
+        canceled: result.canceled,
+        assetCount: result.assets?.length ?? 0,
+      });
+      if (result.canceled || !result.assets[0]) {
+        roomCoverPickerLog("picker cancellation", { source });
+        return;
+      }
       await saveRoomCover(result.assets[0].uri);
     } catch (error) {
+      roomCoverPickerLog("picker threw error", {
+        source,
+        error: error instanceof Error ? error.message : String(error),
+      });
       Alert.alert(
         "Couldn't open photos",
         error instanceof Error ? error.message : "Please try again.",
       );
     }
   }, [coverUploading, saveRoomCover, showPermissionHelp]);
+
+  const flushPendingRoomCoverPicker = React.useCallback(() => {
+    roomCoverPickerLog("controller execute called", {
+      hasPending: roomCoverPickerController.hasPending(),
+      guardLocked: roomCoverPickerController.isLaunchInFlight(),
+    });
+    void roomCoverPickerController.executePending(async (action) => {
+      roomCoverPickerLog("pending action cleared for execution", {
+        action,
+        hasPending: roomCoverPickerController.hasPending(),
+        guardLocked: roomCoverPickerController.isLaunchInFlight(),
+      });
+      await pickRoomCover(action);
+    }).then((executed) => {
+      roomCoverPickerLog("controller execution completed", {
+        executed,
+        hasPending: roomCoverPickerController.hasPending(),
+      });
+    }).catch((error) => {
+      roomCoverPickerLog("controller execution threw error", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      Alert.alert(
+        "Couldn't open photos",
+        error instanceof Error ? error.message : "Please try again.",
+      );
+    }).finally(() => {
+      roomCoverPickerLog("guard released", {
+        guardLocked: roomCoverPickerController.isLaunchInFlight(),
+        hasPending: roomCoverPickerController.hasPending(),
+      });
+    });
+  }, [pickRoomCover, roomCoverPickerController]);
+
+  useEffect(() => {
+    roomCoverPickerLog("selector modal visibility changed", {
+      visible: coverActionSheetVisible,
+      platform: Platform.OS,
+      hasPending: roomCoverPickerController.hasPending(),
+    });
+  }, [coverActionSheetVisible, roomCoverPickerController]);
+
+  useEffect(() => {
+    if (Platform.OS === "ios" || coverActionSheetVisible || !roomCoverPickerController.hasPending()) return;
+    const interaction = InteractionManager.runAfterInteractions(flushPendingRoomCoverPicker);
+    return () => interaction.cancel();
+  }, [coverActionSheetVisible, flushPendingRoomCoverPicker, roomCoverPickerController]);
 
   const removeRoomCover = React.useCallback(async () => {
     if (coverUploading) return;
@@ -2030,17 +2179,91 @@ export default function ItemsScreen() {
     }
   }, [coverUploading, id, queryClient, refreshRoomCover, resolvedFileId, showToast]);
 
-  const handleRoomCoverAction = React.useCallback((action: RoomCoverAction) => {
-    setCoverActionSheetVisible(false);
+  const handleRoomCoverAction = React.useCallback((action: RoomCoverAction, selectorAlreadyDismissed = false) => {
+    roomCoverPickerLog(`${roomCoverActionLabel(action)} pressed`, {
+      action,
+      selectorAlreadyDismissed,
+      modalVisibleBeforeDismissal: coverActionSheetVisible,
+      hasPending: roomCoverPickerController.hasPending(),
+      guardLocked: roomCoverPickerController.isLaunchInFlight(),
+    });
     if (action === "camera" || action === "library") {
-      void pickRoomCover(action);
-    } else if (action === "remove") {
+      const queued = roomCoverPickerController.queue(action);
+      roomCoverPickerLog("pending action set", {
+        action,
+        queued,
+        hasPending: roomCoverPickerController.hasPending(),
+        guardLocked: roomCoverPickerController.isLaunchInFlight(),
+      });
+      if (!queued) return;
+      if (selectorAlreadyDismissed) {
+        roomCoverPickerLog("native selector dismissed; executing pending action", { action });
+        flushPendingRoomCoverPicker();
+        return;
+      }
+      setCoverActionSheetVisible(false);
+      roomCoverPickerLog("selector modal dismissal requested", {
+        action,
+        modalVisibleBeforeDismissal: coverActionSheetVisible,
+        requestedVisible: false,
+      });
+      return;
+    }
+
+    roomCoverPickerController.cancelPending();
+    roomCoverPickerLog("pending action cleared", { action, hasPending: roomCoverPickerController.hasPending() });
+    setCoverActionSheetVisible(false);
+    if (action === "remove") {
       Alert.alert("Remove room cover?", "The current room cover photo will be removed.", [
         { text: "Cancel", style: "cancel" },
         { text: "Remove cover", style: "destructive", onPress: () => void removeRoomCover() },
       ]);
     }
-  }, [pickRoomCover, removeRoomCover]);
+  }, [coverActionSheetVisible, flushPendingRoomCoverPicker, removeRoomCover, roomCoverPickerController]);
+
+  const dismissRoomCoverActionSheet = React.useCallback(() => {
+    roomCoverPickerLog("selector canceled", {
+      modalVisibleBeforeDismissal: coverActionSheetVisible,
+      hasPending: roomCoverPickerController.hasPending(),
+    });
+    roomCoverPickerController.cancelPending();
+    setCoverActionSheetVisible(false);
+  }, [coverActionSheetVisible, roomCoverPickerController]);
+
+  const openRoomCoverActionSheet = React.useCallback(() => {
+    roomCoverPickerController.cancelPending();
+    const actions = roomCoverActions(Boolean(localCoverUrl ?? room?.cover_photo_url));
+    roomCoverPickerLog("selector opened", {
+      platform: Platform.OS,
+      modalVisible: coverActionSheetVisible,
+      actions,
+      guardLocked: roomCoverPickerController.isLaunchInFlight(),
+    });
+
+    if (Platform.OS === "ios") {
+      const removeIndex = actions.indexOf("remove");
+      ActionSheetIOS.showActionSheetWithOptions(
+        {
+          title: "Room cover photo",
+          options: actions.map(roomCoverActionLabel),
+          cancelButtonIndex: actions.indexOf("cancel"),
+          destructiveButtonIndex: removeIndex >= 0 ? removeIndex : undefined,
+        },
+        (buttonIndex) => {
+          const action = actions[buttonIndex] ?? "cancel";
+          roomCoverPickerLog("native selector callback fired after dismissal", {
+            buttonIndex,
+            action,
+            modalVisible: coverActionSheetVisible,
+          });
+          handleRoomCoverAction(action, true);
+        },
+      );
+      return;
+    }
+
+    setCoverActionSheetVisible(true);
+  }, [coverActionSheetVisible, handleRoomCoverAction, localCoverUrl, room?.cover_photo_url, roomCoverPickerController]);
 
   const renderRoomCover = () => (
     <>
@@ -2153,7 +2376,7 @@ export default function ItemsScreen() {
         </View>
       )}
       <Pressable
-        onPress={() => setCoverActionSheetVisible(true)}
+        onPress={openRoomCoverActionSheet}
         disabled={coverUploading}
         style={[styles.cameraBtn, { backgroundColor: "rgba(0,0,0,0.45)" }]}
         hitSlop={8}
@@ -2168,12 +2391,18 @@ export default function ItemsScreen() {
       </Pressable>
     </View>
     <Modal
-      visible={coverActionSheetVisible}
+      visible={Platform.OS !== "ios" && coverActionSheetVisible}
       transparent
       animationType="fade"
-      onRequestClose={() => setCoverActionSheetVisible(false)}
+      onDismiss={() => {
+        roomCoverPickerLog("selector modal onDismiss fired", {
+          platform: Platform.OS,
+          hasPending: roomCoverPickerController.hasPending(),
+        });
+      }}
+      onRequestClose={dismissRoomCoverActionSheet}
     >
-      <Pressable style={styles.coverActionBackdrop} onPress={() => setCoverActionSheetVisible(false)}>
+      <Pressable style={styles.coverActionBackdrop} onPress={dismissRoomCoverActionSheet}>
         <Pressable style={[styles.coverActionSheet, { backgroundColor: colors.card }]} onPress={(event) => event.stopPropagation()}>
           <Text style={[styles.coverActionTitle, { color: colors.foreground }]}>Room cover photo</Text>
           {roomCoverActions(Boolean(localCoverUrl ?? room?.cover_photo_url)).map((action) => (
@@ -2183,7 +2412,7 @@ export default function ItemsScreen() {
               onPress={() => handleRoomCoverAction(action)}
               style={({ pressed }) => [styles.coverActionButton, { borderColor: colors.border, opacity: pressed ? 0.65 : 1 }]}
             >
-              <Text style={[styles.coverActionText, { color: action === "remove" ? colors.destructive : colors.foreground }]}>{action === "camera" ? "Take photo" : action === "library" ? "Choose from library" : action === "remove" ? "Remove cover" : "Cancel"}</Text>
+              <Text style={[styles.coverActionText, { color: action === "remove" ? colors.destructive : colors.foreground }]}>{roomCoverActionLabel(action)}</Text>
             </Pressable>
           ))}
         </Pressable>
@@ -2253,8 +2482,35 @@ export default function ItemsScreen() {
           {selectionMode ? `${selectedCount} selected · Cancel` : "Select"}
         </Text>
       </Pressable>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={duplicateReviewMode ? "Close potential duplicates review" : "Review potential duplicates"}
+        onPress={duplicateReviewMode ? clearSelection : enterDuplicateReviewMode}
+        style={({ pressed }) => [
+          styles.itemListSelectTiny,
+          {
+            borderColor: duplicateReviewMode ? colors.primary : colors.border,
+            backgroundColor: duplicateReviewMode ? colors.accent : colors.secondary,
+            opacity: pressed ? 0.72 : 1,
+          },
+        ]}
+        hitSlop={8}
+      >
+        <Feather name="copy" size={14} color={colors.primary} />
+        <Text style={[styles.itemListSelectText, { color: colors.primary }]}>Potential duplicates</Text>
+      </Pressable>
     </View>
-    {filtersActive ? (
+    {duplicateReviewMode ? (
+      <View style={[styles.duplicateReviewSummary, { backgroundColor: colors.accent, borderColor: colors.border }]}>
+        <View style={styles.duplicateReviewSummaryCopy}>
+          <Text style={[styles.duplicateReviewTitle, { color: colors.foreground }]}>Review potential duplicates</Text>
+          <Text style={[styles.duplicateReviewText, { color: colors.mutedForeground }]}>Similar names are grouped below. Select only the copies you want to delete.</Text>
+        </View>
+        <Pressable accessibilityRole="button" onPress={clearSelection} hitSlop={8}>
+          <Feather name="x" size={19} color={colors.mutedForeground} />
+        </Pressable>
+      </View>
+    ) : filtersActive ? (
       <View style={[styles.filterSummary, { backgroundColor: colors.card, borderColor: colors.border }]}>
         <Feather name="search" size={14} color={colors.primary} />
         <Text style={[styles.filterSummaryText, { color: colors.mutedForeground }]}>
@@ -2297,6 +2553,15 @@ export default function ItemsScreen() {
   );
 
   const renderEmptyItems = () => {
+    if (duplicateReviewMode) {
+      return (
+        <EmptyState
+          icon="check-circle"
+          title="No potential duplicates found in this room"
+          subtitle="Coverly only surfaces conservative matches based on similar item names and supporting details."
+        />
+      );
+    }
     if ((items ?? []).length > 0 && filtersActive) {
       return (
         <EmptyState
@@ -2328,8 +2593,8 @@ export default function ItemsScreen() {
   };
 
   const renderRoomItem = ({ item }: { item: InventoryItem }) => {
-    if (viewMode === "compact") {
-      return (
+    const groupMeta = duplicateReviewMode ? duplicateGroupMetaByItemId.get(item.id) : null;
+    const card = viewMode === "compact" ? (
         <MemoizedCompactItemCard
           item={item}
           parentRoomName={resolvedRoomName}
@@ -2346,10 +2611,7 @@ export default function ItemsScreen() {
           onRepositionPin={repositionRoomItemPin}
           onExpandImage={openRoomItemImage}
         />
-      );
-    }
-
-    return (
+      ) : (
       <MemoizedAnimatedItemCard
         item={item}
         parentRoomName={resolvedRoomName}
@@ -2375,6 +2637,23 @@ export default function ItemsScreen() {
           )
         }
       />
+    );
+
+    return (
+      <>
+        {groupMeta?.firstItemId === item.id ? (
+          <View style={[styles.duplicateGroupHeader, { borderColor: colors.border, backgroundColor: colors.secondary }]}>
+            <View style={[styles.duplicateGroupBadge, { backgroundColor: colors.primary }]}>
+              <Text style={[styles.duplicateGroupBadgeText, { color: colors.primaryForeground }]}>{groupMeta.groupNumber}</Text>
+            </View>
+            <View style={styles.duplicateGroupCopy}>
+              <Text style={[styles.duplicateGroupTitle, { color: colors.foreground }]}>Group {groupMeta.groupNumber}</Text>
+              <Text style={[styles.duplicateGroupReason, { color: colors.mutedForeground }]}>{groupMeta.reason}</Text>
+            </View>
+          </View>
+        ) : null}
+        {card}
+      </>
     );
   };
 
@@ -2461,16 +2740,16 @@ export default function ItemsScreen() {
         <>
           <Animated.FlatList
             ref={listRef}
-            key={viewMode}
+            key={`${viewMode}-${duplicateReviewMode ? "duplicates" : "normal"}`}
             data={visibleItems}
             keyExtractor={(item) => item.id}
             renderItem={renderRoomItem}
-            numColumns={viewMode === "compact" ? 2 : 1}
+            numColumns={viewMode === "compact" && !duplicateReviewMode ? 2 : 1}
             initialNumToRender={8}
             maxToRenderPerBatch={6}
             windowSize={5}
             updateCellsBatchingPeriod={40}
-            columnWrapperStyle={viewMode === "compact" ? styles.gridRow : undefined}
+            columnWrapperStyle={viewMode === "compact" && !duplicateReviewMode ? styles.gridRow : undefined}
             ListHeaderComponent={renderRoomCover}
             ListFooterComponent={<View style={{ height: insets.bottom + STICKY_ACTION_CLEARANCE }} />}
             contentContainerStyle={[
@@ -2522,22 +2801,24 @@ export default function ItemsScreen() {
                   {selectedCount} selected
                 </Text>
               </View>
-              <Pressable
-                onPress={openMoveSelected}
-                disabled={bulkWorking || selectedCount === 0}
-                style={({ pressed }) => [
-                  styles.bulkActionBtn,
-                  {
-                    borderColor: colors.border,
-                    backgroundColor: colors.secondary,
-                    opacity: pressed || bulkWorking || selectedCount === 0 ? 0.55 : 1,
-                  },
-                ]}
-                hitSlop={4}
-              >
-                <Feather name="corner-up-right" size={16} color={colors.foreground} />
-                <Text style={[styles.bulkActionText, { color: colors.foreground }]}>Move</Text>
-              </Pressable>
+              {!duplicateReviewMode ? (
+                <Pressable
+                  onPress={openMoveSelected}
+                  disabled={bulkWorking || selectedCount === 0}
+                  style={({ pressed }) => [
+                    styles.bulkActionBtn,
+                    {
+                      borderColor: colors.border,
+                      backgroundColor: colors.secondary,
+                      opacity: pressed || bulkWorking || selectedCount === 0 ? 0.55 : 1,
+                    },
+                  ]}
+                  hitSlop={4}
+                >
+                  <Feather name="corner-up-right" size={16} color={colors.foreground} />
+                  <Text style={[styles.bulkActionText, { color: colors.foreground }]}>Move</Text>
+                </Pressable>
+              ) : null}
               <Pressable
                 onPress={confirmDeleteSelectedItems}
                 disabled={bulkWorking || selectedCount === 0}
@@ -2909,6 +3190,8 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "flex-start",
+    flexWrap: "wrap",
+    gap: 8,
   },
   itemListSelectTiny: {
     minHeight: 28,
@@ -2929,6 +3212,35 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   itemListSelectText: { fontSize: 12, fontFamily: "Inter_700Bold" },
+  duplicateReviewSummary: {
+    marginHorizontal: 16,
+    marginTop: 10,
+    borderWidth: 1,
+    borderRadius: 10,
+    padding: 12,
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 10,
+  },
+  duplicateReviewSummaryCopy: { flex: 1, gap: 3 },
+  duplicateReviewTitle: { fontSize: 13, fontFamily: "Inter_700Bold" },
+  duplicateReviewText: { fontSize: 12, lineHeight: 17, fontFamily: "Inter_400Regular" },
+  duplicateGroupHeader: {
+    marginTop: 8,
+    marginBottom: 8,
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingHorizontal: 11,
+    paddingVertical: 9,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 9,
+  },
+  duplicateGroupBadge: { width: 24, height: 24, borderRadius: 12, alignItems: "center", justifyContent: "center" },
+  duplicateGroupBadgeText: { fontSize: 11, fontFamily: "Inter_700Bold" },
+  duplicateGroupCopy: { flex: 1, gap: 1 },
+  duplicateGroupTitle: { fontSize: 12, fontFamily: "Inter_700Bold" },
+  duplicateGroupReason: { fontSize: 11, fontFamily: "Inter_400Regular" },
   scanSuccessBanner: {
     marginHorizontal: 16,
     marginTop: 12,

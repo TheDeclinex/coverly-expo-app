@@ -274,7 +274,10 @@ export default function AddItemScreen() {
         ? parseReplacementPriceInput(currentValue).value == null
         : parseOriginalMoneyDraft(currentValue) == null);
 
-    if (has("name") && canFill("name", name)) setName(patch.name ?? "");
+    // The patch contains only changes selected in the review sheet. A selected
+    // name is therefore an explicit user choice, including when replacing a
+    // draft name; an unselected suggestion never reaches this function.
+    if (has("name")) setName(patch.name ?? "");
     if (has("category") && canFill("category", category)) setCategory(patch.category ?? "");
     if (has("description") && canFill("description", description)) setDescription(patch.description ?? "");
     if (has("quantity") && patch.quantity != null && canFill("quantity", quantity)) setQuantity(String(patch.quantity));

@@ -21,6 +21,8 @@ export interface ScanEncodedImage {
   base64?: string;
   /** MIME type e.g. "image/jpeg" */
   mimeType: string;
+  /** Normalized local filename metadata when available */
+  fileName?: string | null;
   /** Durable Supabase Storage path uploaded before scan invoke */
   storagePath?: string;
   /** Picker-reported or probed image width, used only for diagnostics/adaptive preparation */

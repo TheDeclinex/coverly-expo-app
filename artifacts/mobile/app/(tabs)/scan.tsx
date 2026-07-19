@@ -1,6 +1,6 @@
 import { Feather } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { File } from "expo-file-system";
+import { File, Paths } from "expo-file-system";
 import { Image } from "expo-image";
 import * as Haptics from "expo-haptics";
 import * as ImageManipulator from "expo-image-manipulator";
@@ -39,6 +39,11 @@ import { useEntitlements } from "@/context/EntitlementsContext";
 import { useColors } from "@/hooks/useColors";
 import { buildItemInsertPayload } from "@/lib/item-insert-helpers";
 import { formatCurrencyFull } from "@/lib/inventory-mappers";
+import {
+  SCAN_LIBRARY_IMAGE_CONVERSION_ERROR,
+  normalizeScanLibrarySelection,
+  scanLibrarySourceFormat,
+} from "@/lib/scan-image-normalization";
 import {
   MAX_MULTI_PHOTO_IMAGES,
   MAX_VIDEO_SCAN_FRAMES,
@@ -81,6 +86,7 @@ const EXTREME_IMAGE_MAX_DIMENSION = 5200;
 const EXTREME_IMAGE_MAX_MEGA_PIXELS = 20;
 const COMPAT_IMAGE_MAX_DIMENSION = 1600;
 const COMPAT_IMAGE_COMPRESSION = 0.72;
+const LIBRARY_IMAGE_JPEG_COMPRESSION = 0.8;
 const COMPATIBILITY_ERROR_COPY =
   "This phone had trouble processing the photo. Try again in compatibility mode or choose a photo from gallery.";
 
@@ -334,6 +340,67 @@ async function imageFromPickerAsset(
     height: metadata.height,
     fileSize: metadata.fileSize,
   };
+}
+
+function hasJpegExtension(uri: string): boolean {
+  return /\.jpe?g$/i.test(uri.split(/[?#]/, 1)[0]);
+}
+
+function ensureNativeJpegFileUri(uri: string, index: number): string {
+  if (Platform.OS === "web" || hasJpegExtension(uri)) return uri;
+  const destination = new File(
+    Paths.cache,
+    `coverly-scan-${Date.now()}-${index}-${Math.random().toString(36).slice(2, 7)}.jpg`,
+  );
+  new File(uri).copy(destination);
+  return destination.uri;
+}
+
+async function normalizeLibraryPickerAssets(
+  assets: ImagePicker.ImagePickerAsset[],
+): Promise<ScanEncodedImage[]> {
+  return normalizeScanLibrarySelection(assets, async (asset, index) => {
+    const metadata = await metadataForAsset(asset as ImagePicker.ImagePickerAsset);
+    const sourceFormat = scanLibrarySourceFormat(asset);
+    scanLog("library image normalization started", {
+      assetIndex: index,
+      sourceFormat,
+      uriScheme: metadata.uriScheme,
+      originalWidth: metadata.width,
+      originalHeight: metadata.height,
+      originalFileSize: metadata.fileSize,
+      originalMimeType: asset.mimeType ?? null,
+      compression: LIBRARY_IMAGE_JPEG_COMPRESSION,
+    });
+
+    const result = await ImageManipulator.manipulateAsync(
+      asset.uri,
+      [],
+      {
+        compress: LIBRARY_IMAGE_JPEG_COMPRESSION,
+        format: ImageManipulator.SaveFormat.JPEG,
+        base64: false,
+      },
+    );
+    const normalizedUri = ensureNativeJpegFileUri(result.uri, index);
+    const fileSize = await localFileSize(normalizedUri);
+    scanLog("library image normalization completed", {
+      assetIndex: index,
+      sourceFormat,
+      uriScheme: uriScheme(normalizedUri),
+      width: result.width,
+      height: result.height,
+      fileSize,
+      mimeType: "image/jpeg",
+    });
+
+    return {
+      uri: normalizedUri,
+      width: result.width,
+      height: result.height,
+      fileSize,
+    };
+  });
 }
 
 async function prepareImageForCompatibility(
@@ -823,14 +890,17 @@ export default function ScanScreen() {
     queryClient.invalidateQueries({ queryKey: ["rooms", selectedFileId, session.user.id] });
   };
 
-  const pickImages = async () => {
-    if (!selectedMode) return;
+  const pickImages = async (
+    mode: ScanMode | null = selectedMode,
+    existingImageCount = images.length,
+  ) => {
+    if (!mode) return;
     if (!selectedFileId || !selectedRoomId) {
       setScanError("Choose a property and room before adding photos.");
       return;
     }
-    const isMulti = selectedMode === "multi_photo_room";
-    const remainingMultiPhotos = MAX_MULTI_PHOTO_IMAGES - images.length;
+    const isMulti = mode === "multi_photo_room";
+    const remainingMultiPhotos = MAX_MULTI_PHOTO_IMAGES - existingImageCount;
     if (isMulti && remainingMultiPhotos <= 0) {
       setMultiPhotoPromptVisible(true);
       return;
@@ -840,26 +910,35 @@ export default function ScanScreen() {
       Alert.alert("Permission needed", "Allow photo library access to continue.");
       return;
     }
-    scanLog("image processing started", { source: "library", mode: selectedMode });
+    scanLog("image processing started", { source: "library", mode });
     setCompatibilityPrompt(null);
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
       allowsMultipleSelection: isMulti,
       selectionLimit: isMulti ? remainingMultiPhotos : 1,
-      quality: 0.8,
+      quality: 1,
       base64: false,
     });
     scanLog("image picker returned", {
       source: "library",
-      mode: selectedMode,
+      mode,
       canceled: result.canceled,
       assetCount: result.canceled ? 0 : result.assets.length,
       hasUri: !result.canceled && result.assets.some((asset) => !!asset.uri),
     });
     if (!result.canceled) {
-      const picked = (
-        await Promise.all(result.assets.map((asset, index) => imageFromPickerAsset(asset, "library", index)))
-      ).filter((image): image is ScanEncodedImage => image !== null);
+      let picked: ScanEncodedImage[];
+      try {
+        picked = await normalizeLibraryPickerAssets(result.assets);
+      } catch (error) {
+        scanLog("library image normalization failed", {
+          mode,
+          assetCount: result.assets.length,
+          message: errorMessage(error),
+        });
+        setScanError(SCAN_LIBRARY_IMAGE_CONVERSION_ERROR);
+        return;
+      }
       scanLog("photo captured", {
         source: "library",
         imageCount: picked.length,
@@ -875,11 +954,11 @@ export default function ScanScreen() {
       } else {
         const singleImage = picked.slice(0, 1);
         setImages(singleImage);
-        await handleStartScan(selectedMode, singleImage);
+        await handleStartScan(mode, singleImage);
       }
     }
     if (result.canceled) {
-      scanLog("image picker cancelled", { source: "library", mode: selectedMode });
+      scanLog("image picker cancelled", { source: "library", mode });
     }
   };
 
@@ -1139,10 +1218,15 @@ export default function ScanScreen() {
     setMultiPhotoPromptVisible(false);
   };
 
-  const chooseScanMode = (mode: ScanMode, comingSoon?: boolean) => {
+  const chooseScanMode = (
+    mode: ScanMode,
+    comingSoon?: boolean,
+    source: "camera" | "library" = "camera",
+  ) => {
     if (comingSoon) return;
     scanLog("mode selected", {
       mode,
+      source,
       hasFileId: Boolean(selectedFileId),
       hasRoomId: Boolean(selectedRoomId),
       device: androidDeviceSummary(),
@@ -1167,11 +1251,25 @@ export default function ScanScreen() {
     clearCaptureState();
     aiScanEntitlementCheckedRef.current = true;
     setSelectedMode(mode);
+    if (source === "library") {
+      if (mode === "video_room") {
+        void pickVideo();
+        return;
+      }
+      void pickImages(mode, 0);
+      return;
+    }
     if (mode === "video_room") {
       void recordVideo();
       return;
     }
     void takePhoto(mode, mode !== "multi_photo_room");
+  };
+
+  const libraryLabelForMode = (mode: ScanMode) => {
+    if (mode === "multi_photo_room") return `Select up to ${MAX_MULTI_PHOTO_IMAGES} from Library`;
+    if (mode === "video_room") return "Choose Existing Video";
+    return "Choose from Library";
   };
 
   const getDestRoomName = (resolvedRoomId?: string) => {
@@ -1764,6 +1862,8 @@ export default function ScanScreen() {
           fileId: selectedFileId,
           fileName: paramFileName ?? "Property",
           addedCount: String(savedItemIds.length),
+          addedItemIds: savedItemIds.join(","),
+          scrollToTop: `${selectedRoomId}:${Date.now()}`,
         },
       });
     }
@@ -2704,6 +2804,26 @@ export default function ScanScreen() {
                     {m.creditLabel}
                   </Text>
                 </View>
+                {!m.comingSoon ? (
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel={libraryLabelForMode(m.mode)}
+                    hitSlop={6}
+                    onPress={(event) => {
+                      event.stopPropagation();
+                      chooseScanMode(m.mode, m.comingSoon, "library");
+                    }}
+                    style={({ pressed }) => [
+                      styles.modeLibraryButton,
+                      {
+                        backgroundColor: palette.chip,
+                        opacity: pressed ? 0.65 : 1,
+                      },
+                    ]}
+                  >
+                    <Feather name="upload" size={17} color={palette.icon} />
+                  </Pressable>
+                ) : null}
               </Pressable>
             );
           })}
@@ -2918,20 +3038,41 @@ export default function ScanScreen() {
             </Text>
 
             {images.length < MAX_MULTI_PHOTO_IMAGES ? (
-              <Pressable
-                onPress={takeAnotherMultiPhoto}
-                style={({ pressed }) => [
-                  styles.captureModalButton,
-                  {
-                    backgroundColor: colors.primary,
-                    borderColor: colors.primary,
-                    opacity: pressed ? 0.85 : 1,
-                  },
-                ]}
-              >
-                <Feather name="camera" size={18} color={colors.primaryForeground} />
-                <Text style={[styles.captureModalButtonText, { color: colors.primaryForeground }]}>Take another photo</Text>
-              </Pressable>
+              <>
+                <Pressable
+                  onPress={takeAnotherMultiPhoto}
+                  style={({ pressed }) => [
+                    styles.captureModalButton,
+                    {
+                      backgroundColor: colors.primary,
+                      borderColor: colors.primary,
+                      opacity: pressed ? 0.85 : 1,
+                    },
+                  ]}
+                >
+                  <Feather name="camera" size={18} color={colors.primaryForeground} />
+                  <Text style={[styles.captureModalButtonText, { color: colors.primaryForeground }]}>Take another photo</Text>
+                </Pressable>
+                <Pressable
+                  onPress={() => {
+                    setMultiPhotoPromptVisible(false);
+                    void pickImages("multi_photo_room");
+                  }}
+                  style={({ pressed }) => [
+                    styles.captureModalButton,
+                    {
+                      backgroundColor: colors.card,
+                      borderColor: colors.border,
+                      opacity: pressed ? 0.75 : 1,
+                    },
+                  ]}
+                >
+                  <Feather name="image" size={18} color={colors.primary} />
+                  <Text style={[styles.captureModalButtonText, { color: colors.primary }]}>
+                    Select up to {MAX_MULTI_PHOTO_IMAGES - images.length} from Library
+                  </Text>
+                </Pressable>
+              </>
             ) : null}
 
             <Pressable
@@ -3005,6 +3146,14 @@ const styles = StyleSheet.create({
   },
   modeCard: { borderWidth: 1, padding: 14, flexDirection: "row", alignItems: "flex-start", gap: 12 },
   modeIcon: { width: 40, height: 40, borderRadius: 10, alignItems: "center", justifyContent: "center" },
+  modeLibraryButton: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: "center",
+    justifyContent: "center",
+    alignSelf: "center",
+  },
   modeTitle: { fontSize: 15, fontFamily: "Inter_600SemiBold" },
   modeSub: { fontSize: 13, fontFamily: "Inter_400Regular", lineHeight: 18 },
   modeCredit: { fontSize: 11, fontFamily: "Inter_500Medium", marginTop: 2 },

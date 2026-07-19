@@ -139,7 +139,7 @@ serve(async (req: Request) => {
         input: [
           {
             role: "system",
-            content: "Extract structured household inventory item details. Extract only explicitly stated or strongly implied information; never guess. Return null and mark uncertain fields when unsure. Do not create commands or actions. " + targetInstruction,
+            content: "Extract structured household inventory item details. Extract only explicitly stated or strongly implied information; never guess. When the item can be identified, return a concise human-readable name built from brand, model, and product type where available (for example, 'Dyson V15 Vacuum Cleaner'). Do not return vague names such as Item, Product, or Object. Return null and mark uncertain fields when unsure. Do not create commands or actions. " + targetInstruction,
           },
           {
             role: "user",
@@ -155,7 +155,8 @@ serve(async (req: Request) => {
               type: "object",
               additionalProperties: false,
               properties: {
-                display_name: { type: ["string", "null"] },
+                name: { type: ["string", "null"] },
+                product_type: { type: ["string", "null"] },
                 description: { type: ["string", "null"] },
                 category: { type: ["string", "null"] },
                 brand: { type: ["string", "null"] },
@@ -182,7 +183,7 @@ serve(async (req: Request) => {
                 uncertain_fields: { type: "array", items: { type: "string" } },
               },
               required: [
-                "display_name", "description", "category", "brand", "make", "model",
+                "name", "product_type", "description", "category", "brand", "make", "model",
                 "maker_artist_brand", "model_title", "serial_number", "year_or_era",
                 "purchase_year", "retailer_store_purchased_from", "seller",
                 "purchase_source_type", "purchase_price", "estimated_value", "quantity",

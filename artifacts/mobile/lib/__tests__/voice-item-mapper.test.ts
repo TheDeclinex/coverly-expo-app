@@ -6,11 +6,12 @@ import {
   mapVoiceItemExtraction,
   resolveAmbiguousPrice,
 } from "../voice-item-mapper.ts";
+import { buildItemInsertPayload } from "../item-insert-helpers.ts";
 import type { VoiceExtractionResult } from "../../types/voice.ts";
 
 function extraction(overrides: Partial<VoiceExtractionResult> = {}): VoiceExtractionResult {
   return {
-    display_name: null, description: null, category: null, brand: null, make: null,
+    name: null, product_type: null, display_name: null, description: null, category: null, brand: null, make: null,
     model: null, maker_artist_brand: null, model_title: null, serial_number: null,
     year_or_era: null, purchase_year: null, retailer_store_purchased_from: null,
     seller: null, purchase_source_type: null, purchase_price: null, estimated_value: null,
@@ -21,8 +22,93 @@ function extraction(overrides: Partial<VoiceExtractionResult> = {}): VoiceExtrac
 }
 
 test("maps item name", () => {
-  const [change] = mapVoiceItemExtraction({ transcript: "Rename this TV", extraction: extraction({ display_name: "Samsung 65 inch TV" }) });
+  const [change] = mapVoiceItemExtraction({ transcript: "Rename this TV", extraction: extraction({ name: "Samsung 65 inch TV" }) });
   assert.deepEqual(change.patch, { name: "Samsung 65 inch TV" });
+});
+
+test("builds a specific Traxxas item name from structured voice values", () => {
+  const changes = mapVoiceItemExtraction({
+    transcript: "Traxxas Revo 3 Nitro RC car, $2500.",
+    extraction: extraction({
+      brand: "Traxxas",
+      model: "Revo 3 Nitro",
+      product_type: "RC car",
+      purchase_price: 2500,
+      estimated_value: 2500,
+      description: "Nitro-powered radio-controlled car",
+    }),
+  });
+  const patch = buildSelectedVoicePatch(changes, new Set(changes.map((change) => change.id)));
+
+  assert.equal(patch.name, "Traxxas Revo 3 Nitro RC Car");
+  assert.equal(patch.brand_maker, "Traxxas");
+  assert.equal(patch.model_series, "Revo 3 Nitro");
+  assert.equal(patch.original_purchase_price, 2500);
+  assert.equal(patch.unit_estimated_price, 2500);
+  assert.equal(patch.estimated_price, 2500);
+});
+
+test("builds a Dyson item name while preserving retailer and year suggestions", () => {
+  const changes = mapVoiceItemExtraction({
+    transcript: "Dyson V15 vacuum cleaner bought from Harvey Norman in 2022.",
+    extraction: extraction({
+      brand: "Dyson",
+      model: "V15",
+      product_type: "vacuum cleaner",
+      retailer_store_purchased_from: "Harvey Norman",
+      purchase_year: "2022",
+    }),
+  });
+  const patch = buildSelectedVoicePatch(changes, new Set(changes.map((change) => change.id)));
+
+  assert.equal(patch.name, "Dyson V15 Vacuum Cleaner");
+  assert.equal(patch.purchase_source, "Harvey Norman");
+  assert.equal(patch.purchase_year_approx, "2022");
+});
+
+test("an existing item name is reviewed but only applied when explicitly selected", () => {
+  const changes = mapVoiceItemExtraction({
+    transcript: "Dyson V15 vacuum cleaner",
+    currentValues: { name: "Cordless vacuum" },
+    extraction: extraction({ brand: "Dyson", model: "V15", product_type: "vacuum cleaner" }),
+  });
+  const nameChange = changes.find((change) => change.field === "name");
+
+  assert.ok(nameChange);
+  assert.equal(nameChange.currentValue, "Cordless vacuum");
+  assert.equal(nameChange.nextValue, "Dyson V15 Vacuum Cleaner");
+  assert.equal(nameChange.selectedByDefault, false);
+  assert.equal(buildSelectedVoicePatch(changes, new Set()).name, undefined);
+  assert.equal(buildSelectedVoicePatch(changes, new Set(["name"])).name, "Dyson V15 Vacuum Cleaner");
+});
+
+test("does not fabricate a generic name from purchase-only speech", () => {
+  const changes = mapVoiceItemExtraction({
+    transcript: "Bought it in 2021 for $300.",
+    extraction: extraction({ purchase_year: "2021", purchase_price: 300, estimated_value: 300 }),
+  });
+  const patch = buildSelectedVoicePatch(changes, new Set(changes.map((change) => change.id)));
+
+  assert.equal(changes.some((change) => change.field === "name"), false);
+  assert.equal(patch.name, undefined);
+  assert.equal(patch.purchase_year_approx, "2021");
+  assert.equal(patch.original_purchase_price, 300);
+});
+
+test("a selected generated name supplies the required manual item name", () => {
+  const changes = mapVoiceItemExtraction({
+    transcript: "Traxxas Revo 3 Nitro RC car, $2500.",
+    extraction: extraction({ brand: "Traxxas", model: "Revo 3 Nitro", product_type: "RC car" }),
+  });
+  const patch = buildSelectedVoicePatch(changes, new Set(["name"]));
+  assert.ok(patch.name?.trim());
+
+  const insert = buildItemInsertPayload({
+    fileId: "file-1",
+    roomId: "00000000-0000-0000-0000-000000000001",
+    name: patch.name!,
+  });
+  assert.equal(insert.name, "Traxxas Revo 3 Nitro RC Car");
 });
 
 test("falls back from spoken item phrase into structured add-item fields", () => {
@@ -109,7 +195,7 @@ test("generic price requires resolution", () => {
 test("field targeting resolves generic price and uncertain changes default off", () => {
   const [price] = mapVoiceItemExtraction({ transcript: "Set price to 500", targetField: "replacement_price", extraction: extraction({ estimated_value: 500 }) });
   assert.equal(price.field, "replacement_price");
-  const [name] = mapVoiceItemExtraction({ transcript: "Maybe rename it", extraction: extraction({ display_name: "Television", uncertain_fields: ["display_name"] }) });
+  const [name] = mapVoiceItemExtraction({ transcript: "Maybe rename it", extraction: extraction({ name: "Television", uncertain_fields: ["name"] }) });
   assert.equal(name.selectedByDefault, false);
 });
 
