@@ -1,7 +1,7 @@
 import { Feather } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { LinearGradient } from "expo-linear-gradient";
-import { Redirect } from "expo-router";
+import { Redirect, useLocalSearchParams } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import React, { useEffect, useRef, useState } from "react";
 import {
@@ -32,6 +32,7 @@ import {
   debugAnonKeyPrefix,
   anonKey,
 } from "@/lib/supabase";
+import { EMAIL_VERIFIED_URL, normalizeAuthEmail, PASSWORD_RESET_URL } from "@/lib/auth-links";
 
 // ─── Design tokens ────────────────────────────────────────────────────────────
 const HERO_TEXT   = coverlyBrand.navy;
@@ -46,6 +47,7 @@ const SHOW_CONNECTION_DEBUG = false;
 type Mode = "signin" | "signup" | "forgot";
 
 export default function LoginScreen() {
+  const params = useLocalSearchParams<{ mode?: string; notice?: string }>();
   const { session, hasSeenOnboarding } = useAuth();
   const colors      = useColors();
   const insets      = useSafeAreaInsets();
@@ -62,6 +64,12 @@ export default function LoginScreen() {
   const [error, setError]               = useState<string | null>(null);
   const [awaitConfirm, setAwaitConfirm] = useState(false);
   const [resetSent, setResetSent]       = useState(false);
+
+  const notice = params.notice === "email-verified"
+    ? "Email verified. Sign in to continue."
+    : params.notice === "password-updated"
+      ? "Password updated. Sign in with your new password."
+      : null;
 
   const [emailFocused,   setEmailFocused]   = useState(false);
   const [pwFocused,      setPwFocused]      = useState(false);
@@ -158,6 +166,10 @@ export default function LoginScreen() {
     };
   }, []);
 
+  useEffect(() => {
+    if (params.mode === "forgot") switchMode("forgot");
+  }, [params.mode]);
+
   // Route based on onboarding state:
   //   null  = still resolving AsyncStorage — keep showing splash (handled by _layout.tsx)
   //   false = new user, hasn't finished onboarding
@@ -204,14 +216,15 @@ export default function LoginScreen() {
   };
 
   const handleLogin = async () => {
-    if (!email.trim() || !password) {
+    const normalizedEmail = normalizeAuthEmail(email);
+    if (!normalizedEmail || !password) {
       setError("Please enter your email and password.");
       return;
     }
     setLoading(true);
     setError(null);
     const { error: authError } = await supabase.auth.signInWithPassword({
-      email: email.trim(),
+      email: normalizedEmail,
       password,
     });
     setLoading(false);
@@ -224,7 +237,8 @@ export default function LoginScreen() {
   };
 
   const handleSignUp = async () => {
-    if (!email.trim() || !password) {
+    const normalizedEmail = normalizeAuthEmail(email);
+    if (!normalizedEmail || !password) {
       setError("Please enter your email and password.");
       return;
     }
@@ -238,13 +252,10 @@ export default function LoginScreen() {
     }
     setLoading(true);
     setError(null);
-    // Post-verification landing page. Keep this Coverly-owned URL allowlisted in
-    // Supabase Auth redirect settings; native deep-link callback can replace it
-    // once app links are fully configured.
     const { data, error: authError } = await supabase.auth.signUp({
-      email: email.trim(),
+      email: normalizedEmail,
       password,
-      options: { emailRedirectTo: "https://www.coverly.nz/auth/verified" },
+      options: { emailRedirectTo: EMAIL_VERIFIED_URL },
     });
     setLoading(false);
     if (authError) {
@@ -259,23 +270,21 @@ export default function LoginScreen() {
   };
 
   const handleForgotPassword = async () => {
-    if (!email.trim()) {
+    const normalizedEmail = normalizeAuthEmail(email);
+    if (!normalizedEmail) {
       setError("Please enter your email address.");
       return;
     }
     setLoading(true);
     setError(null);
-    // TODO(auth): Wire a confirmed Coverly-owned password recovery completion
-    // route here (web reset page or native deep link) via redirectTo once it is
-    // allowlisted in Supabase Auth redirect settings. Until then, keep mobile
-    // copy explicit that the reset is completed from the email link.
     const { error: authError } = await supabase.auth.resetPasswordForEmail(
-      email.trim()
+      normalizedEmail,
+      { redirectTo: PASSWORD_RESET_URL }
     );
     setLoading(false);
     if (authError) {
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-      setError(authError.message);
+      setError("We couldn't send a reset email right now. Check your connection and try again.");
     } else {
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       setResetSent(true);
@@ -427,6 +436,12 @@ export default function LoginScreen() {
             /* ── Normal form ── */
             ) : (
               <>
+                {notice ? (
+                  <View style={styles.successBox}>
+                    <Feather name="check-circle" size={16} color={coverlyBrand.teal} />
+                    <Text style={styles.successText}>{notice}</Text>
+                  </View>
+                ) : null}
                 <Text style={[styles.cardTitle, { color: coverlyBrand.slate }]}>
                   {isSignUp ? "Create your account" : isForgot ? "Reset your password" : "Welcome back"}
                 </Text>
@@ -661,6 +676,24 @@ function InboxState({
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
+  successBox: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    padding: 12,
+    marginBottom: 14,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: coverlyBrand.border,
+    backgroundColor: coverlyBrand.inputBackground,
+  },
+  successText: {
+    flex: 1,
+    color: coverlyBrand.slate,
+    fontFamily: "Inter_500Medium",
+    fontSize: 13,
+    lineHeight: 19,
+  },
   root: { flex: 1, backgroundColor: "#F8FEFF" },
   scroll: { flexGrow: 1, justifyContent: "center", paddingHorizontal: 24 },
 

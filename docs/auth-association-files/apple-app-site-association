@@ -1,0 +1,25 @@
+{
+  "applinks": {
+    "details": [
+      {
+        "appIDs": [
+          "T55J3TTVC2.nz.coverly.app"
+        ],
+        "components": [
+          {
+            "/": "/open",
+            "comment": "Open the installed Coverly app"
+          },
+          {
+            "/": "/auth/verified",
+            "comment": "Return from Coverly email verification"
+          },
+          {
+            "/": "/reset-password",
+            "comment": "Return from Coverly password recovery"
+          }
+        ]
+      }
+    ]
+  }
+}

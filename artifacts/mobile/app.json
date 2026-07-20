@@ -23,6 +23,9 @@
         "backgroundColor": "#F8FAFC"
       },
       "bundleIdentifier": "nz.coverly.app",
+      "associatedDomains": [
+        "applinks:www.coverly.nz"
+      ],
       "buildNumber": "1",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
@@ -31,6 +34,33 @@
     },
     "android": {
       "package": "nz.coverly.app",
+      "intentFilters": [
+        {
+          "action": "VIEW",
+          "autoVerify": true,
+          "data": [
+            {
+              "scheme": "https",
+              "host": "www.coverly.nz",
+              "pathPrefix": "/open"
+            },
+            {
+              "scheme": "https",
+              "host": "www.coverly.nz",
+              "pathPrefix": "/auth/verified"
+            },
+            {
+              "scheme": "https",
+              "host": "www.coverly.nz",
+              "pathPrefix": "/reset-password"
+            }
+          ],
+          "category": [
+            "BROWSABLE",
+            "DEFAULT"
+          ]
+        }
+      ],
       "versionCode": 1,
       "icon": "./assets/brand/coverly-android-icon-safe.png",
       "splash": {

@@ -10,6 +10,7 @@ import {
   withRoomCoverPhoto,
   withRoomListCoverPhoto,
 } from "../room-cover-photo.ts";
+import type { RoomCoverPickerAction } from "../room-cover-photo.ts";
 
 function room(id: string, coverPhotoUrl: string | null): InventoryRoom {
   return {
@@ -34,9 +35,10 @@ test("cover actions include remove only when a cover exists", () => {
 test("camera and library actions launch only after dismissal execution", async () => {
   for (const action of ["camera", "library"] as const) {
     const controller = createDeferredRoomCoverPickerController();
-    const launched: string[] = [];
+    const launched: RoomCoverPickerAction[] = [];
+    const noLaunchedActions: RoomCoverPickerAction[] = [];
     assert.equal(controller.queue(action), true);
-    assert.deepEqual(launched, []);
+    assert.deepEqual(launched, noLaunchedActions);
     assert.equal(controller.hasPending(), true);
 
     assert.equal(await controller.executePending(async (pending) => {

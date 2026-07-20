@@ -1,0 +1,14 @@
+[
+  {
+    "relation": [
+      "delegate_permission/common.handle_all_urls"
+    ],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "nz.coverly.app",
+      "sha256_cert_fingerprints": [
+        "B7:77:A1:AD:57:48:67:6F:C4:4B:4D:50:B1:B0:EC:30:B3:92:0B:98:6C:4B:42:69:69:D1:94:24:40:0C:E9:2B"
+      ]
+    }
+  }
+]
