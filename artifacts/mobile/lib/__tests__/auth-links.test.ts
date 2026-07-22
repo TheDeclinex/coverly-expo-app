@@ -51,6 +51,7 @@ test("normalises auth email input before requests", () => {
 
 test("Expo configuration claims only the required HTTPS auth/open routes", () => {
   const config = JSON.parse(readFromTestDirectory("../../app.json"));
+  assert.equal(config.expo.scheme, "coverly");
   assert.deepEqual(config.expo.ios.associatedDomains, ["applinks:www.coverly.nz"]);
   const targets = config.expo.android.intentFilters[0].data.map(
     (entry: { host: string; pathPrefix: string }) => `${entry.host}${entry.pathPrefix}`,
@@ -86,7 +87,9 @@ test("auth routes keep recovery on its dedicated screen and wait for onboarding 
   assert.match(verifiedSource, /pendingDestination/);
   assert.match(resetSource, /type RecoveryState = "loading" \| "ready" \| "invalid" \| "success"/);
   assert.doesNotMatch(resetSource, /<Redirect/);
-  assert.match(openSource, /if \(!session\) return <Redirect href="\/login" \/>;/);
+  assert.match(openSource, /useLocalSearchParams<\{ notice\?: string \}>/);
+  assert.match(openSource, /notice === "email-verified"/);
+  assert.match(openSource, /pathname: "\/login", params: \{ notice: "email-verified" \}/);
 });
 
 test("reset screen updates the password and clears the recovery session", () => {

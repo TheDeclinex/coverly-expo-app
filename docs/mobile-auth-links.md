@@ -35,8 +35,10 @@ The verification page at `/auth/verified` must render:
 
 - Title: “Email verified”
 - Body: “Your email address has been confirmed. Return to Coverly and sign in.”
-- Primary button: “Open Coverly”, linked to `https://www.coverly.nz/auth/verified` (without copying auth query parameters or fragments into rendered text or logs)
-- Secondary action: “Back to website”, clearly linked to the marketing website
+- Primary button: “Open Coverly”, linked directly to `https://www.coverly.nz/open?notice=email-verified` (without copying auth query parameters or fragments into rendered text or logs)
+- Tertiary action: “Website”, shown as a small text link to the marketing website
+
+The `/open` browser fallback must offer one user-initiated `coverly://open` action, preserve only the allowlisted `notice=email-verified` value, and advise Gmail users to open the link in Safari. It must not automatically retry, loop, or copy arbitrary callback query/fragment values into the custom-scheme URL.
 
 Do not point “Open Coverly” at the web-app login. Do not automatically redirect this page to itself. When the page is the Supabase callback and contains auth credentials, its implementation must either securely complete/clean the callback before presenting the button or preserve the callback for the installed app; the website repository needs to choose one owner for token exchange to avoid consuming a one-time code twice.
 
@@ -58,6 +60,8 @@ Review Authentication → Email Templates without hard-coding tokens:
 - Confirmation templates should continue using Supabase's confirmation URL/template variable. `signUp` supplies the verified HTTPS redirect target.
 - Recovery templates should continue using Supabase's recovery URL/template variable. `resetPasswordForEmail` supplies the verified HTTPS redirect target.
 - If a customized template constructs its own `SiteURL` link and ignores the confirmation URL, change it to the supported Supabase template variable so the per-request redirect is retained.
+
+The ready-to-paste confirmation template is in `docs/auth-email-templates/confirm-signup.html`. The repository cannot update the Supabase dashboard automatically; paste that file into Authentication → Email Templates → Confirm signup and save it manually. It intentionally retains `{{ .ConfirmationURL }}`.
 
 Do not change the project Site URL merely to repair password recovery. The explicit redirect paths are the relevant settings.
 

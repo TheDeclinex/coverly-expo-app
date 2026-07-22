@@ -1,3 +1,4 @@
+import Constants from "expo-constants";
 import { Platform } from "react-native";
 import type { CustomerInfo, CustomerInfoUpdateListener, PurchasesOffering, PurchasesPackage, PurchasesStoreProduct } from "react-native-purchases";
 
@@ -44,6 +45,50 @@ function billingDiagnostic(event: string, details: Record<string, unknown> = {})
     hasApiKey: Boolean(apiKey()),
     plusEntitlementConfigured: Boolean(revenueCatEntitlementConfig.plusEntitlementId),
     familyEntitlementConfigured: Boolean(revenueCatEntitlementConfig.familyEntitlementId),
+    ...details,
+  });
+}
+
+type RevenueCatProductDiagnostic = PurchasesPackage["product"] & {
+  locale?: unknown;
+  localeIdentifier?: unknown;
+};
+
+function deviceLocale() {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().locale || null;
+  } catch {
+    return null;
+  }
+}
+
+// Temporary release-visible diagnostics for the iOS paywall investigation.
+// These contain product metadata only; no user or purchase identifiers are logged.
+function pricingDiagnostic(
+  event: "offering package loaded" | "purchase package selected",
+  pkg: PurchasesPackage,
+  details: Record<string, unknown> = {},
+) {
+  const product = pkg.product as RevenueCatProductDiagnostic;
+  const productLocale = typeof product.locale === "string"
+    ? product.locale
+    : typeof product.localeIdentifier === "string"
+      ? product.localeIdentifier
+      : null;
+
+  console.info(`[billing pricing diagnostic] ${event}`, {
+    appVersion: Constants.nativeAppVersion ?? Constants.expoConfig?.version ?? null,
+    nativeBuildVersion: Constants.nativeBuildVersion ?? null,
+    platform: Platform.OS,
+    deviceLocale: deviceLocale(),
+    productLocale,
+    packageIdentifier: pkg.identifier,
+    packageType: pkg.packageType,
+    productIdentifier: product.identifier,
+    productTitle: product.title ?? null,
+    priceString: product.priceString ?? null,
+    numericPrice: typeof product.price === "number" ? product.price : null,
+    currencyCode: typeof product.currencyCode === "string" ? product.currencyCode : null,
     ...details,
   });
 }
@@ -110,7 +155,14 @@ export async function loadOffering(): Promise<BillingResult<PurchasesOffering | 
     const { Purchases } = await sdk();
     const offerings = await Purchases.getOfferings();
     const wanted = process.env.EXPO_PUBLIC_REVENUECAT_OFFERING_ID;
-    return { ok: true, value: (wanted ? offerings.all[wanted] : offerings.current) ?? null };
+    const offering = (wanted ? offerings.all[wanted] : offerings.current) ?? null;
+    for (const pkg of offering?.availablePackages ?? []) {
+      pricingDiagnostic("offering package loaded", pkg, {
+        offeringIdentifier: offering?.identifier ?? null,
+        configuredOfferingIdentifier: wanted ?? null,
+      });
+    }
+    return { ok: true, value: offering };
   } catch (error) { return { ok: false, error: error instanceof Error ? error.message : "Could not load subscription options." }; }
 }
 
@@ -139,7 +191,12 @@ export async function addCustomerInfoListener(listener: CustomerInfoUpdateListen
 }
 
 export async function buyPackage(pkg: PurchasesPackage): Promise<BillingResult<CustomerInfo>> {
-  try { const { Purchases } = await sdk(); const result = await Purchases.purchasePackage(pkg); return { ok: true, value: result.customerInfo }; }
+  try {
+    const { Purchases } = await sdk();
+    pricingDiagnostic("purchase package selected", pkg);
+    const result = await Purchases.purchasePackage(pkg);
+    return { ok: true, value: result.customerInfo };
+  }
   catch (error) {
     const value = error as { code?: string; userCancelled?: boolean | null; message?: string };
     const { PURCHASES_ERROR_CODE } = await sdk().catch(() => ({ PURCHASES_ERROR_CODE: null }));

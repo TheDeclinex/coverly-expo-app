@@ -104,6 +104,37 @@ export function buildUpgradePackages<T extends UpgradePackageLike>(packages: T[]
   };
 }
 
+export function defaultBillingPeriod(
+  packages: readonly UpgradeDisplayPackage[],
+): UpgradeBillingPeriod | null {
+  if (packages.some((entry) => entry.period === "annual")) return "annual";
+  if (packages.some((entry) => entry.period === "monthly")) return "monthly";
+  return packages[0]?.period ?? null;
+}
+
+export function selectedUpgradePackage<T extends UpgradePackageLike>(
+  packages: readonly UpgradeDisplayPackage<T>[],
+  period: UpgradeBillingPeriod | null,
+): UpgradeDisplayPackage<T> | null {
+  if (!period) return null;
+  return packages.find((entry) => entry.period === period) ?? null;
+}
+
+export function upgradePackageHasPrice(entry: UpgradeDisplayPackage | null) {
+  return Boolean(entry?.pkg.product.priceString?.trim());
+}
+
+export function upgradePurchaseDisabled(
+  entry: UpgradeDisplayPackage | null,
+  state: { purchaseLoading: boolean; isRefreshing: boolean; currentPackage: boolean },
+) {
+  return state.purchaseLoading
+    || state.isRefreshing
+    || state.currentPackage
+    || !entry
+    || !upgradePackageHasPrice(entry);
+}
+
 export function isCurrentPackage(productIdentifier: string, activeSubscriptions: readonly string[] | null | undefined) {
   return activeSubscriptions?.includes(productIdentifier) === true;
 }

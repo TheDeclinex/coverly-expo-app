@@ -37,5 +37,8 @@ test("upgrade screen keeps restore, current-package protection, and an authorita
   assert.doesNotMatch(upgradeSource, /Only Coverly Family enables multiple properties\./);
   assert.doesNotMatch(upgradeSource, /Your Plus plan includes one property\./);
   assert.match(upgradeSource, /propertyAllowance\.accessClass === "full_access"/);
+  assert.match(upgradeSource, /onChoose\(selectedPackage\.pkg\)/);
+  assert.match(upgradeSource, /Choose \$\{content\.name\}/);
+  assert.match(upgradeSource, /Best value/);
   assert.doesNotMatch(upgradeSource, /invit|collaborat|shared access|household members/i);
 });
