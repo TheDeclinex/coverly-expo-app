@@ -32,6 +32,7 @@ import { useAuth } from "@/context/AuthContext";
 import { ENABLE_RECOMMENDED_ACTIONS } from "@/constants/recommendedActions";
 import { propertyTypeLabel } from "@/constants/propertyTypes";
 import { useColors } from "@/hooks/useColors";
+import { formatUnreadBadge, useFeedbackUnread } from "@/hooks/useFeedbackUnread";
 import { usePropertyAllowance } from "@/hooks/usePropertyAllowance";
 import { useSignedImageRecovery, useSignedUrl, useSignedUrls } from "@/hooks/useSignedUrls";
 import { calcPortfolioStats } from "@/lib/dashboard-stats";
@@ -456,6 +457,8 @@ export default function HomeScreen() {
   const { allowance, refreshAllowance } = usePropertyAllowance();
   const colors = useColors();
   const insets = useSafeAreaInsets();
+  const feedbackUnread = useFeedbackUnread();
+  const supportBadge = formatUnreadBadge(feedbackUnread.data?.userUnreadCount ?? 0);
   const [globalSearchVisible, setGlobalSearchVisible] = React.useState(false);
   const [globalSearchText, setGlobalSearchText] = React.useState("");
   const [globalReadinessFilter, setGlobalReadinessFilter] = React.useState<GlobalReadinessFilter>("all");
@@ -1082,7 +1085,7 @@ export default function HomeScreen() {
                 onPress={() => router.push("/account" as Href)}
                 hitSlop={8}
                 accessibilityRole="button"
-                accessibilityLabel="Open account"
+                accessibilityLabel={supportBadge ? `Open account, ${supportBadge} unread support replies` : "Open account"}
                 style={({ pressed }) => [
                   styles.accountAction,
                   {
@@ -1092,6 +1095,11 @@ export default function HomeScreen() {
                 ]}
               >
                 <Feather name="user" size={18} color={colors.mutedForeground} />
+                {supportBadge ? (
+                  <View style={[styles.headerUnreadBadge, { backgroundColor: colors.warning }]}>
+                    <Text style={[styles.headerUnreadText, { color: colors.warningForeground }]}>{supportBadge}</Text>
+                  </View>
+                ) : null}
               </Pressable>
             </View>
           ),
@@ -1234,6 +1242,18 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
+  headerUnreadBadge: {
+    position: "absolute",
+    right: -4,
+    top: -5,
+    minWidth: 17,
+    height: 17,
+    borderRadius: 9,
+    paddingHorizontal: 4,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  headerUnreadText: { fontSize: 8, fontFamily: "Inter_700Bold" },
   globalSearchBackdrop: {
     flex: 1,
     justifyContent: "flex-end",

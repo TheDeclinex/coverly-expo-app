@@ -8,13 +8,13 @@ import {
 } from "expo-audio";
 import { File } from "expo-file-system";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Platform } from "react-native";
+import { Linking, Platform } from "react-native";
 
 import type { VoiceRecordingInput } from "@/lib/voice-input";
 
 const DEFAULT_MAX_DURATION_SECONDS = 45;
 const VOICE_EDIT_FALLBACK_MESSAGE = "Voice edit could not start. Please try again or type your changes manually.";
-type VoicePermission = "unknown" | "granted" | "denied";
+type VoicePermission = "unknown" | "granted" | "denied" | "blocked";
 type VoiceEntryPoint = "edit_item_full_voice" | "inline_voice_field" | "replacement_price_voice_search" | "unknown_voice";
 type VoiceDiagnosticStage =
   | "voice_permission_button_pressed"
@@ -53,6 +53,7 @@ export function useVoiceRecording(maxDurationSeconds = DEFAULT_MAX_DURATION_SECO
   const recorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
   const recorderState = useAudioRecorderState(recorder, 250);
   const [permission, setPermission] = useState<VoicePermission>("unknown");
+  const [canAskAgain, setCanAskAgain] = useState(true);
   const [recording, setRecording] = useState<VoiceRecordingInput | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isRequestingPermission, setIsRequestingPermission] = useState(false);
@@ -96,7 +97,8 @@ export function useVoiceRecording(maxDurationSeconds = DEFAULT_MAX_DURATION_SECO
     try {
       const result = await getRecordingPermissionsAsync();
       const granted = result.granted === true;
-      setPermissionIfMounted(granted ? "granted" : result.canAskAgain === false ? "denied" : "unknown");
+      if (mountedRef.current) setCanAskAgain(result.canAskAgain !== false);
+      setPermissionIfMounted(granted ? "granted" : result.canAskAgain === false ? "blocked" : "unknown");
       return granted;
     } catch {
       if (__DEV__) console.info("[voice]", { stage: "permission_check_failed", platform: Platform.OS, entryPoint });
@@ -106,6 +108,10 @@ export function useVoiceRecording(maxDurationSeconds = DEFAULT_MAX_DURATION_SECO
 
   const requestPermission = useCallback(async () => {
     if (requestingPermissionRef.current) return permission === "granted";
+    if (permission === "blocked") {
+      setErrorIfMounted("Microphone access is turned off for Coverly. Open Settings to allow access.");
+      return false;
+    }
     requestingPermissionRef.current = true;
     if (mountedRef.current) {
       setIsRequestingPermission(true);
@@ -116,12 +122,14 @@ export function useVoiceRecording(maxDurationSeconds = DEFAULT_MAX_DURATION_SECO
     try {
       const result = await requestRecordingPermissionsAsync();
       const granted = result.granted === true;
-      setPermissionIfMounted(granted ? "granted" : "denied");
+      if (mountedRef.current) setCanAskAgain(result.canAskAgain !== false);
+      setPermissionIfMounted(granted ? "granted" : result.canAskAgain === false ? "blocked" : "denied");
       logDiagnostic(granted ? "permission_granted" : "permission_denied");
       return granted;
-    } catch {
+    } catch (permissionError) {
       setPermissionIfMounted("denied");
       setErrorIfMounted(VOICE_EDIT_FALLBACK_MESSAGE);
+      if (__DEV__) console.warn("[voice]", { stage: "permission_request_failed", platform: Platform.OS, entryPoint, error: String(permissionError) });
       logDiagnostic("permission_denied");
       return false;
     } finally {
@@ -162,6 +170,7 @@ export function useVoiceRecording(maxDurationSeconds = DEFAULT_MAX_DURATION_SECO
       recordingActiveRef.current = false;
       await setAudioModeAsync({ allowsRecording: false }).catch(() => undefined);
       setErrorIfMounted(VOICE_EDIT_FALLBACK_MESSAGE);
+      if (__DEV__) console.warn("[voice]", { stage: "recording_failed", platform: Platform.OS, entryPoint, error: String(recordingError) });
       logDiagnostic("recording_failed");
       return false;
     } finally {
@@ -186,6 +195,7 @@ export function useVoiceRecording(maxDurationSeconds = DEFAULT_MAX_DURATION_SECO
       recordingActiveRef.current = false;
       await setAudioModeAsync({ allowsRecording: false }).catch(() => undefined);
       setErrorIfMounted(VOICE_EDIT_FALLBACK_MESSAGE);
+      if (__DEV__) console.warn("[voice]", { stage: "recording_stop_failed", platform: Platform.OS, entryPoint, error: String(recordingError) });
       return null;
     } finally {
       stoppingRecordingRef.current = false;
@@ -206,9 +216,18 @@ export function useVoiceRecording(maxDurationSeconds = DEFAULT_MAX_DURATION_SECO
   }, [recorder, recorderState.isRecording]);
 
   const durationSeconds = Math.floor((recorderState.durationMillis ?? 0) / 1000);
+  const openSettings = useCallback(async () => {
+    try {
+      await Linking.openSettings();
+    } catch (settingsError) {
+      setErrorIfMounted("Open your device settings and allow microphone access for Coverly.");
+      if (__DEV__) console.warn("[voice]", { stage: "open_settings_failed", platform: Platform.OS, entryPoint, error: String(settingsError) });
+    }
+  }, [entryPoint, setErrorIfMounted]);
 
   return {
     permission,
+    canAskAgain,
     checkPermission,
     requestPermission,
     isRequestingPermission,
@@ -222,6 +241,7 @@ export function useVoiceRecording(maxDurationSeconds = DEFAULT_MAX_DURATION_SECO
     startRecording,
     stopRecording,
     reset,
+    openSettings,
     logDiagnostic,
   };
 }

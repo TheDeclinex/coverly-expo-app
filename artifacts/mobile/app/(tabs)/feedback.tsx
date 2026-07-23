@@ -1,4 +1,5 @@
 import { Feather } from "@expo/vector-icons";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Image } from "expo-image";
 import * as ImagePicker from "expo-image-picker";
 import { Stack, router, useLocalSearchParams, usePathname } from "expo-router";
@@ -6,8 +7,9 @@ import React from "react";
 import {
   ActivityIndicator,
   Alert,
+  Keyboard,
+  Modal,
   Pressable,
-  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -16,10 +18,15 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { useAuth } from "@/context/AuthContext";
+import { FeedbackConversation } from "@/components/FeedbackConversation";
+import { FeedbackScreenshotPreview } from "@/components/FeedbackScreenshotPreview";
+import { KeyboardAwareScrollViewCompat } from "@/components/KeyboardAwareScrollViewCompat";
 import { useColors } from "@/hooks/useColors";
 import {
   feedbackCategoryLabel,
   feedbackPriorityLabel,
+  feedbackStatusLabel,
+  feedbackTicketHasUnread,
   feedbackTypeLabel,
   serializeError,
   validateFeedbackScreenshotFile,
@@ -30,10 +37,12 @@ import {
 } from "@/lib/feedback-model";
 import {
   submitFeedbackReport,
+  loadMyFeedbackReports,
+  type FeedbackReportRow,
   type FeedbackScreenshotInput,
 } from "@/lib/feedback-service";
 
-const typeOptions: FeedbackType[] = ["issue", "feedback", "enhancement"];
+const typeOptions: FeedbackType[] = ["issue", "bug", "feature", "feedback"];
 const categoryOptions: FeedbackCategory[] = ["general", "scan", "pricing", "claim_pack", "billing", "account"];
 const priorityOptions: FeedbackPriority[] = ["normal", "low", "blocking"];
 
@@ -41,6 +50,7 @@ export default function FeedbackScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const { session } = useAuth();
+  const queryClient = useQueryClient();
   const pathname = usePathname();
   const params = useLocalSearchParams<{
     type?: FeedbackType;
@@ -56,6 +66,14 @@ export default function FeedbackScreen() {
   const [isPicking, setIsPicking] = React.useState(false);
   const [isSubmitting, setIsSubmitting] = React.useState(false);
   const [inlineError, setInlineError] = React.useState<string | null>(null);
+  const [selectedTicket, setSelectedTicket] = React.useState<FeedbackReportRow | null>(null);
+  const reportsQuery = useQuery({
+    queryKey: ["user-feedback-reports", session?.user.id],
+    queryFn: () => loadMyFeedbackReports(session!.user.id, 50),
+    enabled: Boolean(session?.user.id),
+    staleTime: 20_000,
+    retry: 1,
+  });
 
   const pickScreenshot = async () => {
     setInlineError(null);
@@ -124,6 +142,10 @@ export default function FeedbackScreen() {
         currentRoute: pathname,
         screenshot,
       });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["user-feedback-reports", session.user.id] }),
+        queryClient.invalidateQueries({ queryKey: ["feedback-unread-counts", session.user.id] }),
+      ]);
 
       Alert.alert(
         "Thanks - feedback sent",
@@ -143,11 +165,24 @@ export default function FeedbackScreen() {
   return (
     <>
       <Stack.Screen options={{ title: "Feedback & Support" }} />
-      <ScrollView
+      <KeyboardAwareScrollViewCompat
         keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="interactive"
+        bottomOffset={insets.bottom + 20}
         contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + 28 }]}
         showsVerticalScrollIndicator={false}
       >
+        <MyFeedbackList
+          reports={reportsQuery.data ?? []}
+          isLoading={reportsQuery.isLoading}
+          isError={reportsQuery.isError}
+          onOpen={(ticket) => {
+            Keyboard.dismiss();
+            setSelectedTicket(ticket);
+          }}
+          onRetry={() => void reportsQuery.refetch()}
+        />
+
         <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border, borderRadius: colors.radius }]}>
           <Text style={[styles.title, { color: colors.foreground }]}>Send feedback</Text>
           <Text style={[styles.helper, { color: colors.mutedForeground }]}>
@@ -261,8 +296,142 @@ export default function FeedbackScreen() {
             {isSubmitting ? "Sending..." : "Send feedback"}
           </Text>
         </Pressable>
-      </ScrollView>
+      </KeyboardAwareScrollViewCompat>
+      <UserTicketModal
+        report={selectedTicket
+          ? reportsQuery.data?.find((report) => report.id === selectedTicket.id) ?? selectedTicket
+          : null}
+        onClose={() => setSelectedTicket(null)}
+      />
     </>
+  );
+}
+
+function ticketIsUnread(report: FeedbackReportRow): boolean {
+  return feedbackTicketHasUnread("user", {
+    userLastReadAt: report.user_last_read_at,
+    lastAdminMessageAt: report.last_admin_message_at,
+  });
+}
+
+function feedbackDate(value: string | null): string {
+  if (!value) return "Date unavailable";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "Date unavailable";
+  return date.toLocaleDateString("en-NZ", { day: "numeric", month: "short", year: "numeric" });
+}
+
+function MyFeedbackList({
+  reports,
+  isLoading,
+  isError,
+  onOpen,
+  onRetry,
+}: {
+  reports: FeedbackReportRow[];
+  isLoading: boolean;
+  isError: boolean;
+  onOpen: (report: FeedbackReportRow) => void;
+  onRetry: () => void;
+}) {
+  const colors = useColors();
+  return (
+    <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border, borderRadius: colors.radius }]}>
+      <View style={styles.myFeedbackHeader}>
+        <View style={{ flex: 1 }}>
+          <Text style={[styles.title, { color: colors.foreground }]}>My feedback</Text>
+          <Text style={[styles.helper, { color: colors.mutedForeground }]}>Replies and updates from Coverly support.</Text>
+        </View>
+        {isLoading ? <ActivityIndicator size="small" color={colors.primary} /> : null}
+      </View>
+      {isError ? (
+        <Pressable accessibilityRole="button" onPress={onRetry}>
+          <Text style={[styles.retryText, { color: colors.primary }]}>Couldn’t load your tickets. Tap to retry.</Text>
+        </Pressable>
+      ) : !isLoading && reports.length === 0 ? (
+        <Text style={[styles.helper, { color: colors.mutedForeground }]}>Tickets you submit will appear here.</Text>
+      ) : (
+        <View style={styles.ticketList}>
+          {reports.map((report, index) => {
+            const unread = ticketIsUnread(report);
+            return (
+              <Pressable
+                key={report.id}
+                accessibilityRole="button"
+                accessibilityLabel={`${report.title ?? "Feedback ticket"}${unread ? ", unread support reply" : ""}`}
+                onPress={() => onOpen(report)}
+                style={({ pressed }) => [
+                  styles.ticketRow,
+                  index > 0 && { borderTopColor: colors.border, borderTopWidth: StyleSheet.hairlineWidth },
+                  { opacity: pressed ? 0.72 : 1 },
+                ]}
+              >
+                <View style={styles.ticketCopy}>
+                  <View style={styles.ticketTitleRow}>
+                    {unread ? <View style={[styles.unreadDot, { backgroundColor: colors.warning }]} /> : null}
+                    <Text style={[styles.ticketTitle, { color: colors.foreground }]} numberOfLines={1}>
+                      {report.title ?? feedbackTypeLabel(report.classification ?? report.feedback_type)}
+                    </Text>
+                  </View>
+                  <Text style={[styles.ticketPreview, { color: colors.mutedForeground }]} numberOfLines={1}>
+                    {report.latest_message_preview ?? report.description ?? "No message"}
+                  </Text>
+                  <Text style={[styles.ticketMeta, { color: colors.mutedForeground }]}>
+                    {feedbackStatusLabel(report.status)} · {feedbackDate(report.last_activity_at ?? report.created_at)}
+                  </Text>
+                </View>
+                <Feather name="chevron-right" size={17} color={colors.mutedForeground} />
+              </Pressable>
+            );
+          })}
+        </View>
+      )}
+    </View>
+  );
+}
+
+function UserTicketModal({ report, onClose }: { report: FeedbackReportRow | null; onClose: () => void }) {
+  const colors = useColors();
+  const insets = useSafeAreaInsets();
+  return (
+    <Modal visible={Boolean(report)} animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
+      <View style={[styles.modalRoot, { backgroundColor: colors.background, paddingTop: insets.top + 8 }]}>
+        <View style={[styles.modalHeader, { borderBottomColor: colors.border }]}>
+          <View style={{ flex: 1 }}>
+            <Text style={[styles.modalEyebrow, { color: colors.mutedForeground }]}>SUPPORT TICKET</Text>
+            <Text style={[styles.modalTitle, { color: colors.foreground }]} numberOfLines={2}>{report?.title ?? "Feedback ticket"}</Text>
+          </View>
+          <Pressable accessibilityRole="button" accessibilityLabel="Close support ticket" onPress={onClose} style={[styles.closeButton, { backgroundColor: colors.secondary }]}>
+            <Feather name="x" size={18} color={colors.foreground} />
+          </Pressable>
+        </View>
+        {report ? (
+          <KeyboardAwareScrollViewCompat
+            keyboardShouldPersistTaps="handled"
+            keyboardDismissMode="interactive"
+            bottomOffset={insets.bottom + 20}
+            contentContainerStyle={[styles.modalContent, { paddingBottom: insets.bottom + 28 }]}
+          >
+            <View style={[styles.ticketDetailCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
+              <Text style={[styles.label, { color: colors.mutedForeground }]}>ORIGINAL REPORT</Text>
+              <Text style={[styles.reportText, { color: colors.foreground }]}>{report.description ?? "No description supplied."}</Text>
+              <Text style={[styles.ticketMeta, { color: colors.mutedForeground }]}>
+                {feedbackStatusLabel(report.status)} · {feedbackDate(report.created_at)}
+              </Text>
+            </View>
+            {report.screenshot_url ? (
+              <View style={[styles.ticketDetailCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
+                <Text style={[styles.label, { color: colors.foreground }]}>Screenshot</Text>
+                <FeedbackScreenshotPreview storedValue={report.screenshot_url} ticketId={report.id} />
+              </View>
+            ) : null}
+            <View style={[styles.ticketDetailCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
+              <FeedbackConversation ticketId={report.id} status={report.status} viewerRole="user" />
+            </View>
+          </KeyboardAwareScrollViewCompat>
+        ) : null}
+      </View>
+    </Modal>
   );
 }
 
@@ -336,4 +505,22 @@ const styles = StyleSheet.create({
   error: { fontSize: 12, lineHeight: 17, fontFamily: "Inter_600SemiBold" },
   submitButton: { minHeight: 50, borderRadius: 999, alignItems: "center", justifyContent: "center", flexDirection: "row", gap: 9 },
   submitText: { fontSize: 14, fontFamily: "Inter_700Bold" },
+  myFeedbackHeader: { flexDirection: "row", alignItems: "center", gap: 10 },
+  retryText: { fontSize: 12, lineHeight: 17, fontFamily: "Inter_600SemiBold" },
+  ticketList: { marginHorizontal: -15, marginBottom: -15 },
+  ticketRow: { minHeight: 72, paddingHorizontal: 15, paddingVertical: 11, flexDirection: "row", alignItems: "center", gap: 8 },
+  ticketCopy: { flex: 1, gap: 3 },
+  ticketTitleRow: { flexDirection: "row", alignItems: "center", gap: 7 },
+  unreadDot: { width: 8, height: 8, borderRadius: 4 },
+  ticketTitle: { flex: 1, fontSize: 13, fontFamily: "Inter_700Bold" },
+  ticketPreview: { fontSize: 11, fontFamily: "Inter_400Regular" },
+  ticketMeta: { fontSize: 10, lineHeight: 15, fontFamily: "Inter_500Medium" },
+  modalRoot: { flex: 1 },
+  modalHeader: { borderBottomWidth: StyleSheet.hairlineWidth, paddingHorizontal: 16, paddingBottom: 12, flexDirection: "row", alignItems: "center", gap: 12 },
+  modalEyebrow: { fontSize: 10, letterSpacing: 0.7, fontFamily: "Inter_700Bold" },
+  modalTitle: { fontSize: 18, lineHeight: 23, fontFamily: "Inter_700Bold" },
+  closeButton: { width: 38, height: 38, borderRadius: 19, alignItems: "center", justifyContent: "center" },
+  modalContent: { padding: 16, gap: 12 },
+  ticketDetailCard: { borderWidth: 1, borderRadius: 12, padding: 14, gap: 10 },
+  reportText: { fontSize: 14, lineHeight: 21, fontFamily: "Inter_400Regular" },
 });

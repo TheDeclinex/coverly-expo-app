@@ -1,13 +1,11 @@
-export type FeedbackType = "issue" | "feedback" | "enhancement";
+export type FeedbackType = "issue" | "bug" | "feature" | "feedback";
 export type FeedbackCategory = "general" | "scan" | "pricing" | "claim_pack" | "billing" | "account";
 export type FeedbackPriority = "low" | "normal" | "blocking";
 export type FeedbackAdminStatus =
   | "new"
   | "under_investigation"
-  | "bug"
   | "development"
   | "testing"
-  | "feature"
   | "resolved"
   | "closed";
 
@@ -36,6 +34,7 @@ export interface FeedbackInsertPayloadInput {
   appOwnership?: string | null;
   executionEnvironment?: string | null;
   deviceInfo: string;
+  deviceModel?: string | null;
   osInfo: string;
   browserInfo?: string | null;
 }
@@ -50,6 +49,7 @@ export function buildFeedbackReportInsertPayload(input: FeedbackInsertPayloadInp
     source: "mobile_app",
     status: "new",
     feedback_type: feedbackTypeToExistingColumn(input.form.type),
+    classification: input.form.type,
     severity: feedbackPriorityToSeverity(input.form.priority),
     title: feedbackTitle(input.form),
     description: input.form.message.trim(),
@@ -60,18 +60,26 @@ export function buildFeedbackReportInsertPayload(input: FeedbackInsertPayloadInp
     route: input.currentRoute ?? null,
     environment: input.environment,
     app_version: input.appVersion ?? null,
+    app_build_number: input.buildNumber ?? null,
     device_info: input.deviceInfo,
+    device_model: input.deviceModel ?? null,
     os_info: input.osInfo,
     browser_info: input.browserInfo ?? null,
     metadata_json: {
       category: input.form.category,
       priority: input.form.priority,
       buildNumber: input.buildNumber ?? null,
+      combinedAppVersion: input.appVersion
+        ? `${input.appVersion}${input.buildNumber ? ` (${input.buildNumber})` : ""}`
+        : null,
       appOwnership: input.appOwnership ?? null,
       executionEnvironment: input.executionEnvironment ?? null,
     },
     created_at: input.now,
     updated_at: input.now,
+    last_activity_at: input.now,
+    user_last_read_at: input.now,
+    latest_message_preview: input.form.message.trim().slice(0, 180),
   };
 }
 
@@ -93,7 +101,7 @@ export function summarizeFeedbackInsertPayload(
 }
 
 export function feedbackTypeToExistingColumn(value: FeedbackType): string {
-  if (value === "enhancement") return "enhancement";
+  if (value === "feature") return "enhancement";
   if (value === "feedback") return "feedback";
   return "issue";
 }
@@ -211,6 +219,42 @@ export function createFeedbackScreenshotPath(
   return `${safeUserId}/${safeFeedbackId}/screenshot.${extension}`;
 }
 
+export function parseFeedbackScreenshotValue(
+  storedValue: string,
+  supabaseUrl = "",
+  bucket = "feedback-screenshots",
+): { kind: "path"; value: string } | { kind: "url"; value: string } {
+  const trimmed = storedValue.trim();
+  if (!/^https?:\/\//i.test(trimmed)) {
+    return { kind: "path", value: trimmed.replace(new RegExp(`^${bucket}/`), "") };
+  }
+
+  try {
+    const url = new URL(trimmed);
+    const configuredHost = supabaseUrl ? new URL(supabaseUrl).host : null;
+    const marker = "/storage/v1/object/";
+    const markerIndex = url.pathname.indexOf(marker);
+    if (markerIndex >= 0 && (!configuredHost || url.host === configuredHost)) {
+      const objectPath = url.pathname.slice(markerIndex + marker.length);
+      const bucketMarker = `${bucket}/`;
+      const bucketIndex = objectPath.indexOf(bucketMarker);
+      if (bucketIndex >= 0) {
+        return {
+          kind: "path",
+          value: decodeURIComponent(objectPath.slice(bucketIndex + bucketMarker.length)),
+        };
+      }
+    }
+    if (url.protocol === "https:" || url.protocol === "http:") {
+      return { kind: "url", value: url.toString() };
+    }
+  } catch {
+    // Return the original value as a path so storage resolution produces the
+    // same controlled error state as any other unusable stored path.
+  }
+  return { kind: "path", value: trimmed };
+}
+
 export interface SerializedError {
   name?: string;
   message: string;
@@ -259,7 +303,8 @@ export function serializeError(error: unknown): SerializedError {
 }
 
 export function feedbackTypeLabel(value: FeedbackType | string | null | undefined): string {
-  if (value === "enhancement") return "Enhancement";
+  if (value === "feature" || value === "enhancement") return "Feature";
+  if (value === "bug") return "Bug";
   if (value === "feedback") return "Feedback";
   if (value === "issue") return "Issue";
   if (value === "recognition_issue") return "Recognition issue";
@@ -286,10 +331,8 @@ export function feedbackPriorityLabel(value: FeedbackPriority | string | null | 
 export const feedbackAdminStatusOptions: FeedbackAdminStatus[] = [
   "new",
   "under_investigation",
-  "bug",
   "development",
   "testing",
-  "feature",
   "resolved",
   "closed",
 ];
@@ -303,6 +346,30 @@ export function feedbackStatusLabel(value: string | null | undefined): string {
   if (value === "resolved") return "Resolved";
   if (value === "closed") return "Closed";
   return "New";
+}
+
+export function feedbackBuildDisplay(
+  appVersion: string | null | undefined,
+  buildNumber: string | null | undefined,
+): string {
+  if (appVersion) return `${appVersion}${buildNumber ? ` (${buildNumber})` : ""}`;
+  return buildNumber ? `Build ${buildNumber}` : "Unknown";
+}
+
+export function feedbackTicketHasUnread(
+  role: "user" | "admin",
+  values: {
+    userLastReadAt?: string | null;
+    adminLastReadAt?: string | null;
+    lastUserMessageAt?: string | null;
+    lastAdminMessageAt?: string | null;
+  },
+): boolean {
+  const messageAt = role === "user" ? values.lastAdminMessageAt : values.lastUserMessageAt;
+  const readAt = role === "user" ? values.userLastReadAt : values.adminLastReadAt;
+  if (!messageAt) return false;
+  if (!readAt) return true;
+  return new Date(messageAt).getTime() > new Date(readAt).getTime();
 }
 
 export function isFeedbackAdminStatus(value: string): value is FeedbackAdminStatus {

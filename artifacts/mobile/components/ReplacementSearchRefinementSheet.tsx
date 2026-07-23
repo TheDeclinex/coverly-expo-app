@@ -552,7 +552,16 @@ export function ReplacementSearchRefinementSheet({
                 </View>
               </View>
             ) : null}
-            {voiceError ? <Text style={[styles.errorText, { color: colors.destructive }]}>{voiceError}</Text> : null}
+            {voiceError ? (
+              <View style={styles.voiceErrorRow}>
+                <Text style={[styles.errorText, { color: colors.destructive, flex: 1 }]}>{voiceError}</Text>
+                {voice.permission === "blocked" ? (
+                  <Pressable accessibilityRole="button" onPress={() => void voice.openSettings()}>
+                    <Text style={[styles.linkText, { color: colors.primary }]}>Open Settings</Text>
+                  </Pressable>
+                ) : null}
+              </View>
+            ) : null}
           </View>
 
           <View style={styles.supportingSection}>
@@ -691,6 +700,7 @@ const styles = StyleSheet.create({
   stopText: { fontSize: 12, fontFamily: "Inter_600SemiBold" },
   inlineBusy: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, minHeight: 48 },
   voiceReview: { borderRadius: 12, padding: 12, gap: 8 },
+  voiceErrorRow: { flexDirection: "row", alignItems: "center", gap: 10 },
   voiceReviewLabel: { fontSize: 9, letterSpacing: 0.7, fontFamily: "Inter_600SemiBold" },
   voiceTranscript: { fontSize: 13, lineHeight: 19, fontFamily: "Inter_400Regular" },
   reviewActions: { flexDirection: "row", justifyContent: "flex-end", flexWrap: "wrap", gap: 8 },

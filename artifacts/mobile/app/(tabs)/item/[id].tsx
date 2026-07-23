@@ -291,7 +291,7 @@ export default function ItemDetailScreen() {
 
     const updates: Partial<InventoryItem> = {
       barcode: values.barcode,
-      barcode_verified: true,
+      barcode_verified: values.verified ?? true,
       ...(values.name ? { name: values.name } : {}),
       ...(values.brandMaker ? { brand_maker: values.brandMaker } : {}),
       ...(values.modelSeries ? { model_series: values.modelSeries } : {}),
@@ -507,6 +507,18 @@ export default function ItemDetailScreen() {
           item={item}
           onClose={() => setBarcodeScanOpen(false)}
           onApply={handleApplyBarcode}
+          onTakePhoto={() => {
+            setBarcodeScanOpen(false);
+            router.push({
+              pathname: "/(tabs)/scan",
+              params: {
+                roomId: item.room_id ?? "",
+                roomName: params.roomName ?? "",
+                fileId: item.file_id,
+                fileName: params.fileName ?? "",
+              },
+            } as Href);
+          }}
         />
       ) : null}
     </>

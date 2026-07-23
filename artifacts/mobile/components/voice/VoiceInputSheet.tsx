@@ -105,8 +105,8 @@ export function VoiceInputSheet({
       if (!visibleRef.current) return;
       if (granted) setPhase("ready");
       else {
-        setPhase("error");
-        setErrorMessage(VOICE_EDIT_FALLBACK_MESSAGE);
+        setPhase("permission");
+        setErrorMessage("Microphone access wasn’t granted. You can try again or type your changes.");
       }
     } catch {
       if (visibleRef.current) {
@@ -261,7 +261,15 @@ export function VoiceInputSheet({
                 <Text style={[styles.stateTitle, { color: colors.foreground }]}>Microphone access</Text>
                 <Text style={[styles.stateText, { color: colors.mutedForeground }]}>Coverly needs microphone access only while you record voice input.</Text>
                 {errorMessage && <Text style={[styles.errorText, { color: colors.destructive }]}>{errorMessage}</Text>}
-                <PrimaryButton label={voice.isRequestingPermission ? "Checking access" : "Allow microphone"} disabled={voice.isRequestingPermission} onPress={() => void requestPermission()} />
+                <PrimaryButton
+                  label={voice.permission === "blocked"
+                    ? "Open Settings"
+                    : voice.isRequestingPermission
+                      ? "Checking access"
+                      : "Allow microphone"}
+                  disabled={voice.isRequestingPermission}
+                  onPress={() => voice.permission === "blocked" ? void voice.openSettings() : void requestPermission()}
+                />
               </View>
             )}
 

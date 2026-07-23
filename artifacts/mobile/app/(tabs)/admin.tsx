@@ -10,6 +10,7 @@ import { LoadingState } from "@/components/LoadingState";
 import { useAuth } from "@/context/AuthContext";
 import { useAccountProfile } from "@/hooks/useAccountProfile";
 import { useColors } from "@/hooks/useColors";
+import { useFeedbackUnread } from "@/hooks/useFeedbackUnread";
 import { adminMetricLabel } from "@/lib/admin-model";
 import { loadAdminOverview } from "@/lib/admin-service";
 import {
@@ -40,6 +41,7 @@ export default function AdminScreen() {
   const insets = useSafeAreaInsets();
   const { session } = useAuth();
   const { isAdmin, isLoading } = useAccountProfile();
+  const feedbackUnread = useFeedbackUnread();
 
   const overviewQuery = useQuery({
     queryKey: ["admin-overview", session?.user.id],
@@ -112,6 +114,8 @@ export default function AdminScreen() {
             title="Support inbox"
             subtitle="Review feedback, issues, and enhancement requests"
             value={supportCountLabel(feedbackQuery.data, feedbackQuery.isLoading, feedbackQuery.isError)}
+            badgeCount={feedbackUnread.data?.adminUnreadCount}
+            tone="amber"
             onPress={() => router.push("/admin-support" as Href)}
             last
           />
@@ -123,6 +127,7 @@ export default function AdminScreen() {
             title="User lookup"
             subtitle="Email, user ID, inventory and usage"
             value="Connected"
+            tone="blue"
             onPress={() => router.push("/admin-users" as Href)}
           />
           <AccountRow
@@ -130,6 +135,7 @@ export default function AdminScreen() {
             title="Access grants"
             subtitle="Tester and temporary Plus access"
             value="Connected"
+            tone="blue"
             onPress={() => router.push("/admin-access" as Href)}
             last
           />
@@ -141,9 +147,10 @@ export default function AdminScreen() {
             title="Entitlement debug"
             subtitle="Supabase plan fields, overrides, usage and RevenueCat state"
             value="Connected"
+            tone="green"
             onPress={() => router.push("/admin-entitlements" as Href)}
           />
-          <AccountRow icon="shuffle" title="Supabase vs RevenueCat" value="Partial" last />
+          <AccountRow icon="shuffle" title="Supabase vs RevenueCat" value="Partial" tone="green" last />
         </AccountSection>
 
         <AccountSection title="Claim packs">
@@ -151,22 +158,23 @@ export default function AdminScreen() {
             icon="package"
             title="Orders & history"
             value="Connected"
+            tone="lavender"
             onPress={() => router.push("/admin-claim-packs" as Href)}
           />
-          <AccountRow icon="repeat" title="Generation and retries" value="Not available" last />
+          <AccountRow icon="repeat" title="Generation and retries" value="Not available" tone="lavender" last />
         </AccountSection>
 
         <AccountSection title="Operational logs">
-          <AccountRow icon="alert-triangle" title="Recent errors" value="Connected" onPress={() => router.push("/admin-errors" as Href)} />
-          <AccountRow icon="camera" title="AI scan logs" value="Not available" />
-          <AccountRow icon="search" title="Replacement pricing searches" value="Not available" last />
+          <AccountRow icon="alert-triangle" title="Recent errors" value="Connected" tone="lavender" onPress={() => router.push("/admin-errors" as Href)} />
+          <AccountRow icon="camera" title="AI scan logs" value="Not available" tone="lavender" />
+          <AccountRow icon="search" title="Replacement pricing searches" value="Not available" tone="lavender" last />
         </AccountSection>
 
         <AccountSection title="System health">
-          <AccountRow icon="server" title="Environment" value={environment} />
-          <AccountRow icon="database" title="Supabase session" value={session ? "Connected" : "Unavailable"} />
-          <AccountRow icon="activity" title="Edge Functions" value="Not checked" />
-          <AccountRow icon="toggle-left" title="Feature flags" value="Not available" last />
+          <AccountRow icon="server" title="Environment" value={environment} tone="greyBlue" />
+          <AccountRow icon="database" title="Supabase session" value={session ? "Connected" : "Unavailable"} tone="greyBlue" />
+          <AccountRow icon="activity" title="Edge Functions" value="Not checked" tone="greyBlue" />
+          <AccountRow icon="toggle-left" title="Feature flags" value="Not available" tone="greyBlue" last />
         </AccountSection>
       </ScrollView>
     </>

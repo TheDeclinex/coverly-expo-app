@@ -1,4 +1,9 @@
 import { supabase } from "@/lib/supabase";
+export {
+  classifyBarcodeFailure,
+  isSupportedBarcodeValue,
+  type BarcodeFailureKind,
+} from "@/lib/barcode-model";
 
 const BARCODE_FUNCTION_NAME = "barcode-verify";
 
@@ -50,7 +55,6 @@ export interface BarcodeVerifyFailure {
 }
 
 export type BarcodeVerifyResponse = BarcodeVerifySuccess | BarcodeVerifyFailure;
-
 export async function verifyBarcode(
   request: BarcodeVerifyRequest,
 ): Promise<BarcodeVerifyResponse> {

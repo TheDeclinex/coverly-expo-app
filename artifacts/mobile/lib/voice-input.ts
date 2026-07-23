@@ -14,6 +14,25 @@ export interface VoiceRecordingInput {
   extension: string;
 }
 
+const VOICE_REQUEST_TIMEOUT_MS = 35_000;
+
+async function withVoiceTimeout<T>(operation: Promise<T>): Promise<T> {
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      operation,
+      new Promise<T>((_, reject) => {
+        timeout = setTimeout(
+          () => reject(new Error("Voice processing timed out.")),
+          VOICE_REQUEST_TIMEOUT_MS,
+        );
+      }),
+    ]);
+  } finally {
+    if (timeout) clearTimeout(timeout);
+  }
+}
+
 async function blobToBase64(blob: Blob): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -62,7 +81,9 @@ export async function callVoiceDescribe(
       mimeType: recording.mimeType,
       ext: recording.extension,
     };
-    const { data, error } = await supabase.functions.invoke<VoiceDescribeResponse>("voice-describe", { body });
+    const { data, error } = await withVoiceTimeout(
+      supabase.functions.invoke<VoiceDescribeResponse>("voice-describe", { body }),
+    );
     if (error) {
       const contextResponse = (error as { context?: Response }).context;
       return {

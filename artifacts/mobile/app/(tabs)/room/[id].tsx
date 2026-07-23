@@ -491,7 +491,7 @@ function ItemCard({
   const applyBarcodeMatch = async (values: BarcodeApplyValues) => {
     const updates: Partial<InventoryItem> = {
       barcode: values.barcode,
-      barcode_verified: true,
+      barcode_verified: values.verified ?? true,
       ...(values.name ? { name: values.name } : {}),
       ...(values.brandMaker ? { brand_maker: values.brandMaker } : {}),
       ...(values.modelSeries ? { model_series: values.modelSeries } : {}),
@@ -1002,6 +1002,10 @@ function ItemCard({
         item={item}
         onClose={() => setBarcodeScanOpen(false)}
         onApply={applyBarcodeMatch}
+        onTakePhoto={() => {
+          setBarcodeScanOpen(false);
+          void handleScanRoom();
+        }}
       />
     </>
   );

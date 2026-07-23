@@ -5,11 +5,14 @@ import {
   buildFeedbackReportInsertPayload,
   createFeedbackScreenshotPath,
   feedbackCategoryLabel,
+  feedbackBuildDisplay,
   feedbackPriorityLabel,
   feedbackStatusLabel,
+  feedbackTicketHasUnread,
   feedbackTypeLabel,
   isFeedbackAdminStatus,
   serializeError,
+  parseFeedbackScreenshotValue,
   summarizeFeedbackInsertPayload,
   validateFeedbackScreenshotFile,
   validateFeedbackForm,
@@ -88,6 +91,42 @@ test("feedback labels are human readable", () => {
   assert.equal(isFeedbackAdminStatus("admin_only"), false);
 });
 
+test("legacy tickets without a build number render safely", () => {
+  assert.equal(feedbackBuildDisplay("1.0.0", null), "1.0.0");
+  assert.equal(feedbackBuildDisplay(null, null), "Unknown");
+  assert.equal(feedbackBuildDisplay("1.0.0", "12"), "1.0.0 (12)");
+});
+
+test("screenshot values recover storage paths from legacy Supabase URLs", () => {
+  assert.deepEqual(
+    parseFeedbackScreenshotValue("user/ticket/screenshot.png"),
+    { kind: "path", value: "user/ticket/screenshot.png" },
+  );
+  assert.deepEqual(
+    parseFeedbackScreenshotValue(
+      "https://demo.supabase.co/storage/v1/object/sign/feedback-screenshots/user/ticket/screenshot.png?token=expired",
+      "https://demo.supabase.co",
+    ),
+    { kind: "path", value: "user/ticket/screenshot.png" },
+  );
+});
+
+test("unread state only follows messages from the opposite party", () => {
+  assert.equal(feedbackTicketHasUnread("user", {
+    userLastReadAt: "2026-07-23T10:00:00.000Z",
+    lastAdminMessageAt: "2026-07-23T10:01:00.000Z",
+    lastUserMessageAt: "2026-07-23T10:02:00.000Z",
+  }), true);
+  assert.equal(feedbackTicketHasUnread("user", {
+    userLastReadAt: "2026-07-23T10:03:00.000Z",
+    lastAdminMessageAt: "2026-07-23T10:01:00.000Z",
+  }), false);
+  assert.equal(feedbackTicketHasUnread("admin", {
+    adminLastReadAt: null,
+    lastUserMessageAt: "2026-07-23T10:02:00.000Z",
+  }), true);
+});
+
 test("feedback insert payload is stable when screenshot is selected", () => {
   const baseInput = {
     id: "11111111-1111-4111-8111-111111111111",
@@ -117,9 +156,11 @@ test("feedback insert payload is stable when screenshot is selected", () => {
   assert.equal(textOnlyPayload.source, "mobile_app");
   assert.equal(textOnlyPayload.status, "new");
   assert.equal(textOnlyPayload.feedback_type, "issue");
+  assert.equal(textOnlyPayload.classification, "issue");
   assert.equal(textOnlyPayload.severity, "moderate");
   assert.equal(textOnlyPayload.user_id, baseInput.userId);
   assert.equal(textOnlyPayload.screenshot_url, null);
+  assert.equal(textOnlyPayload.app_build_number, "7");
   assert.equal("screenshotRequested" in textOnlyPayload.metadata_json, false);
 
   assert.deepEqual(

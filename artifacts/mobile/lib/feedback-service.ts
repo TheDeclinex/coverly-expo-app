@@ -2,10 +2,12 @@ import Constants from "expo-constants";
 import { File } from "expo-file-system";
 import { Platform } from "react-native";
 
+import { getInstalledAppContext } from "@/lib/app-build-context";
 import {
   buildFeedbackReportInsertPayload,
   createFeedbackId,
   createFeedbackScreenshotPath,
+  parseFeedbackScreenshotValue,
   serializeError,
   summarizeFeedbackInsertPayload,
   validateFeedbackScreenshotFile,
@@ -43,6 +45,7 @@ export interface FeedbackReportRow {
   user_id: string | null;
   user_email: string | null;
   feedback_type: string | null;
+  classification: string | null;
   severity: string | null;
   status: string | null;
   title: string | null;
@@ -51,14 +54,38 @@ export interface FeedbackReportRow {
   screenshot_url: string | null;
   user_name: string | null;
   app_version: string | null;
+  app_build_number: string | null;
   route: string | null;
   screen_name: string | null;
   environment: string | null;
   device_info: string | null;
+  device_model: string | null;
   os_info: string | null;
   browser_info: string | null;
   metadata_json: { category?: string; priority?: string; buildNumber?: string; [key: string]: unknown } | null;
   created_at: string | null;
+  last_activity_at: string | null;
+  user_last_read_at: string | null;
+  admin_last_read_at: string | null;
+  last_user_message_at: string | null;
+  last_admin_message_at: string | null;
+  latest_message_preview: string | null;
+}
+
+export interface FeedbackMessageRow {
+  id: string;
+  ticket_id: string;
+  sender_user_id: string;
+  sender_role: "user" | "admin" | "system";
+  body: string;
+  attachment_path: string | null;
+  created_at: string;
+  edited_at: string | null;
+}
+
+export interface FeedbackUnreadCounts {
+  userUnreadCount: number;
+  adminUnreadCount: number;
 }
 
 function logFeedbackStep(step: string, payload: Record<string, unknown>) {
@@ -76,12 +103,6 @@ function logFeedbackWarning(step: string, payload: Record<string, unknown>, erro
 
 function appEnvironment(): string {
   return process.env.EXPO_PUBLIC_APP_ENV ?? (__DEV__ ? "development" : "production");
-}
-
-function appBuildNumber(): string | null {
-  if (Platform.OS === "ios") return Constants.expoConfig?.ios?.buildNumber ?? null;
-  if (Platform.OS === "android") return Constants.expoConfig?.android?.versionCode?.toString() ?? null;
-  return null;
 }
 
 async function readScreenshotBody(screenshot: FeedbackScreenshotInput): Promise<Blob | ArrayBuffer> {
@@ -107,6 +128,7 @@ export async function submitFeedbackReport(input: FeedbackSubmitInput): Promise<
 
   const feedbackId = createFeedbackId();
   const now = new Date().toISOString();
+  const installedApp = getInstalledAppContext();
   const payload = buildFeedbackReportInsertPayload({
     id: feedbackId,
     userId: input.userId,
@@ -115,12 +137,15 @@ export async function submitFeedbackReport(input: FeedbackSubmitInput): Promise<
     currentRoute: input.currentRoute ?? null,
     now,
     environment: appEnvironment(),
-    appVersion: Constants.expoConfig?.version ?? null,
-    buildNumber: appBuildNumber(),
+    appVersion: installedApp.appVersion,
+    buildNumber: installedApp.buildNumber,
     appOwnership: Constants.appOwnership ?? null,
     executionEnvironment: Constants.executionEnvironment ?? null,
-    deviceInfo: Platform.OS,
-    osInfo: `${Platform.OS} ${Platform.Version}`,
+    deviceInfo: installedApp.deviceModel
+      ? `${installedApp.platform} · ${installedApp.deviceModel}`
+      : installedApp.platform,
+    deviceModel: installedApp.deviceModel,
+    osInfo: installedApp.osVersion,
     browserInfo: Platform.OS === "web" ? "Expo web" : null,
   });
   const insertSummary = summarizeFeedbackInsertPayload(payload, {
@@ -168,7 +193,7 @@ export async function submitFeedbackReport(input: FeedbackSubmitInput): Promise<
     logFeedbackStep("screenshot upload starting", {
       feedbackId,
       bucket: FEEDBACK_SCREENSHOTS_BUCKET,
-      hasUploadPath: Boolean(uploadPath),
+      storedPath: uploadPath,
       contentType,
       fileSize: input.screenshot.fileSize ?? null,
     });
@@ -179,7 +204,7 @@ export async function submitFeedbackReport(input: FeedbackSubmitInput): Promise<
     } catch (readError) {
       logFeedbackWarning("screenshot file read failed", {
         feedbackId,
-        hasUploadPath: Boolean(uploadPath),
+        storedPath: uploadPath,
         contentType,
       }, readError);
       throw readError;
@@ -195,7 +220,7 @@ export async function submitFeedbackReport(input: FeedbackSubmitInput): Promise<
       logFeedbackWarning("screenshot upload failed", {
         feedbackId,
         bucket: FEEDBACK_SCREENSHOTS_BUCKET,
-        hasUploadPath: Boolean(uploadPath),
+        storedPath: uploadPath,
         contentType,
       }, uploadError);
       throw uploadError;
@@ -210,7 +235,7 @@ export async function submitFeedbackReport(input: FeedbackSubmitInput): Promise<
       logFeedbackWarning("screenshot_url update failed", {
         feedbackId,
         table: "feedback_reports",
-        hasUploadPath: Boolean(uploadPath),
+        storedPath: uploadPath,
         userIdPresent: Boolean(input.userId),
       }, updateError);
       throw updateError;
@@ -219,7 +244,7 @@ export async function submitFeedbackReport(input: FeedbackSubmitInput): Promise<
     logFeedbackStep("screenshot attached", {
       feedbackId,
       bucket: FEEDBACK_SCREENSHOTS_BUCKET,
-      hasUploadPath: Boolean(uploadPath),
+      storedPath: uploadPath,
     });
 
     return { id: feedbackId, screenshotAttached: true };
@@ -227,7 +252,7 @@ export async function submitFeedbackReport(input: FeedbackSubmitInput): Promise<
     logFeedbackWarning("feedback submitted without screenshot fallback", {
       feedbackId,
       bucket: FEEDBACK_SCREENSHOTS_BUCKET,
-      hasUploadPath: Boolean(uploadPath),
+      storedPath: uploadPath,
     }, error);
     return {
       id: feedbackId,
@@ -240,25 +265,94 @@ export async function submitFeedbackReport(input: FeedbackSubmitInput): Promise<
 export async function loadRecentFeedbackReports(limit = 20): Promise<FeedbackReportRow[]> {
   const { data, error } = await supabase
     .from("feedback_reports")
-    .select("id, user_id, user_email, user_name, feedback_type, severity, status, title, description, expected_result, screenshot_url, app_version, route, screen_name, environment, device_info, os_info, browser_info, metadata_json, created_at")
+    .select("id, user_id, user_email, user_name, feedback_type, classification, severity, status, title, description, expected_result, screenshot_url, app_version, app_build_number, route, screen_name, environment, device_info, device_model, os_info, browser_info, metadata_json, created_at, last_activity_at, user_last_read_at, admin_last_read_at, last_user_message_at, last_admin_message_at, latest_message_preview")
+    .order("last_activity_at", { ascending: false, nullsFirst: false })
     .order("created_at", { ascending: false })
     .limit(limit);
   if (error) throw error;
   return (data ?? []) as FeedbackReportRow[];
 }
 
-export async function createFeedbackScreenshotSignedUrl(storagePath: string): Promise<string> {
+export async function loadMyFeedbackReports(userId: string, limit = 50): Promise<FeedbackReportRow[]> {
+  const { data, error } = await supabase
+    .from("feedback_reports")
+    .select("id, user_id, user_email, user_name, feedback_type, classification, severity, status, title, description, expected_result, screenshot_url, app_version, app_build_number, route, screen_name, environment, device_info, device_model, os_info, browser_info, metadata_json, created_at, last_activity_at, user_last_read_at, admin_last_read_at, last_user_message_at, last_admin_message_at, latest_message_preview")
+    .eq("user_id", userId)
+    .order("last_activity_at", { ascending: false, nullsFirst: false })
+    .order("created_at", { ascending: false })
+    .limit(limit);
+  if (error) throw error;
+  return (data ?? []) as FeedbackReportRow[];
+}
+
+export { parseFeedbackScreenshotValue } from "@/lib/feedback-model";
+
+export async function createFeedbackScreenshotSignedUrl(storedValue: string): Promise<string> {
+  const source = parseFeedbackScreenshotValue(
+    storedValue,
+    process.env.EXPO_PUBLIC_SUPABASE_URL ?? "",
+    FEEDBACK_SCREENSHOTS_BUCKET,
+  );
+  if (source.kind === "url") {
+    logFeedbackStep("legacy screenshot URL accepted", { urlHost: new URL(source.value).host });
+    return source.value;
+  }
+
+  logFeedbackStep("screenshot signed url requested", {
+    bucket: FEEDBACK_SCREENSHOTS_BUCKET,
+    storedPath: source.value,
+  });
   const { data, error } = await supabase.storage
     .from(FEEDBACK_SCREENSHOTS_BUCKET)
-    .createSignedUrl(storagePath, 60 * 5);
+    .createSignedUrl(source.value, 60 * 5);
   if (error || !data?.signedUrl) {
     logFeedbackWarning("admin screenshot signed url failed", {
       bucket: FEEDBACK_SCREENSHOTS_BUCKET,
-      pathPresent: Boolean(storagePath),
+      storedPath: source.value,
     }, error ?? new Error("Signed URL not returned"));
     throw error ?? new Error("Signed URL not returned");
   }
   return data.signedUrl;
+}
+
+export async function loadFeedbackMessages(ticketId: string): Promise<FeedbackMessageRow[]> {
+  const { data, error } = await supabase
+    .from("feedback_messages")
+    .select("id, ticket_id, sender_user_id, sender_role, body, attachment_path, created_at, edited_at")
+    .eq("ticket_id", ticketId)
+    .order("created_at", { ascending: true });
+  if (error) throw error;
+  return (data ?? []) as FeedbackMessageRow[];
+}
+
+export async function sendFeedbackMessage(ticketId: string, body: string): Promise<FeedbackMessageRow> {
+  const message = body.trim();
+  if (!message || message.length > 4000) {
+    throw new Error("Messages must contain between 1 and 4000 characters.");
+  }
+  const { data, error } = await supabase.rpc("feedback_add_message", {
+    p_ticket_id: ticketId,
+    p_body: message,
+  });
+  if (error) throw error;
+  return data as FeedbackMessageRow;
+}
+
+export async function markFeedbackTicketRead(ticketId: string): Promise<void> {
+  const { error } = await supabase.rpc("feedback_mark_ticket_read", {
+    p_ticket_id: ticketId,
+  });
+  if (error) throw error;
+}
+
+export async function loadFeedbackUnreadCounts(): Promise<FeedbackUnreadCounts> {
+  const { data, error } = await supabase.rpc("get_feedback_unread_counts");
+  if (error) throw error;
+  const row = Array.isArray(data) ? data[0] : data;
+  return {
+    userUnreadCount: Number(row?.user_unread_count ?? 0),
+    adminUnreadCount: Number(row?.admin_unread_count ?? 0),
+  };
 }
 
 export async function updateFeedbackReportStatus(id: string, status: FeedbackAdminStatus): Promise<void> {

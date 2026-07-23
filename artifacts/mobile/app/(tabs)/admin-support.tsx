@@ -6,7 +6,9 @@ import { ActivityIndicator, Alert, Modal, Pressable, ScrollView, StyleSheet, Tex
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { LoadingState } from "@/components/LoadingState";
-import { ImageViewerModal } from "@/components/ImageViewerModal";
+import { FeedbackConversation } from "@/components/FeedbackConversation";
+import { FeedbackScreenshotPreview } from "@/components/FeedbackScreenshotPreview";
+import { KeyboardAwareScrollViewCompat } from "@/components/KeyboardAwareScrollViewCompat";
 import { useAuth } from "@/context/AuthContext";
 import { useAccountProfile } from "@/hooks/useAccountProfile";
 import { useColors } from "@/hooks/useColors";
@@ -15,12 +17,12 @@ import {
   feedbackCategoryLabel,
   feedbackPriorityLabel,
   feedbackStatusLabel,
+  feedbackTicketHasUnread,
   feedbackTypeLabel,
   serializeError,
   type FeedbackAdminStatus,
 } from "@/lib/feedback-model";
 import {
-  createFeedbackScreenshotSignedUrl,
   loadRecentFeedbackReports,
   type FeedbackReportRow,
   updateFeedbackReportStatus,
@@ -28,7 +30,7 @@ import {
 
 type InboxFilter = "all" | "new" | "open" | "closed";
 
-const openStatuses = new Set(["under_investigation", "bug", "development", "testing", "feature"]);
+const openStatuses = new Set(["under_investigation", "development", "testing"]);
 const closedStatuses = new Set(["resolved", "closed"]);
 
 function ticketMatchesFilter(report: FeedbackReportRow, filter: InboxFilter): boolean {
@@ -48,6 +50,13 @@ function formatFeedbackDate(value: string | null): string {
 
 function ticketCategory(report: FeedbackReportRow): string {
   return feedbackCategoryLabel(report.metadata_json?.category);
+}
+
+function ticketIsUnreadForAdmin(report: FeedbackReportRow): boolean {
+  return feedbackTicketHasUnread("admin", {
+    adminLastReadAt: report.admin_last_read_at,
+    lastUserMessageAt: report.last_user_message_at,
+  });
 }
 
 export default function AdminSupportScreen() {
@@ -217,13 +226,14 @@ function SupportTicketList({
           <View style={styles.badgeRow}>
             <Badge label={feedbackStatusLabel(report.status)} tone="status" />
             <Badge label={feedbackPriorityLabel(report.severity)} tone="severity" />
-            <Badge label={feedbackTypeLabel(report.feedback_type)} />
+            <Badge label={feedbackTypeLabel(report.classification ?? report.feedback_type)} />
             <Badge label={ticketCategory(report)} />
             {report.screenshot_url ? <Badge label="Screenshot" tone="status" /> : null}
           </View>
           <Text style={[styles.ticketMeta, { color: colors.mutedForeground }]} numberOfLines={1}>
             {report.user_email ?? "Unknown user"} - {formatFeedbackDate(report.created_at)}
           </Text>
+          {ticketIsUnreadForAdmin(report) ? <Badge label="Unread reply" tone="severity" /> : null}
         </Pressable>
       ))}
     </View>
@@ -245,27 +255,11 @@ function FeedbackTicketModal({
 }) {
   const colors = useColors();
   const insets = useSafeAreaInsets();
-  const [openingScreenshot, setOpeningScreenshot] = React.useState(false);
-  const [screenshotViewerUri, setScreenshotViewerUri] = React.useState<string | null>(null);
   const [technicalOpen, setTechnicalOpen] = React.useState(false);
 
   React.useEffect(() => {
     if (visible) setTechnicalOpen(false);
   }, [visible, report?.id]);
-
-  const openScreenshot = async () => {
-    if (!report?.screenshot_url) return;
-    setOpeningScreenshot(true);
-    try {
-      const signedUrl = await createFeedbackScreenshotSignedUrl(report.screenshot_url);
-      setScreenshotViewerUri(signedUrl);
-    } catch (error) {
-      if (__DEV__) console.warn("[adminFeedback] screenshot open failed", { error: serializeError(error) });
-      Alert.alert("Couldn't open screenshot", "Please try again.");
-    } finally {
-      setOpeningScreenshot(false);
-    }
-  };
 
   const metadata = report?.metadata_json
     ? JSON.stringify(report.metadata_json, null, 2)
@@ -288,12 +282,18 @@ function FeedbackTicketModal({
         </View>
 
         {report ? (
-          <ScrollView contentContainerStyle={[styles.modalContent, { paddingBottom: insets.bottom + 24 }]} showsVerticalScrollIndicator={false}>
+          <KeyboardAwareScrollViewCompat
+            keyboardShouldPersistTaps="handled"
+            keyboardDismissMode="interactive"
+            bottomOffset={insets.bottom + 20}
+            contentContainerStyle={[styles.modalContent, { paddingBottom: insets.bottom + 24 }]}
+            showsVerticalScrollIndicator={false}
+          >
             <View style={[styles.summaryCard, { backgroundColor: colors.card, borderColor: colors.border, borderRadius: colors.radius }]}>
               <View style={styles.summaryBadges}>
                 <Badge label={feedbackStatusLabel(report.status)} tone="status" />
                 <Badge label={feedbackPriorityLabel(report.severity)} tone="severity" />
-                <Badge label={feedbackTypeLabel(report.feedback_type)} />
+                <Badge label={feedbackTypeLabel(report.classification ?? report.feedback_type)} />
               </View>
               <DetailPair label="User" value={report.user_email ?? "Unknown user"} />
               <DetailPair label="Created" value={formatFeedbackDate(report.created_at)} />
@@ -312,6 +312,7 @@ function FeedbackTicketModal({
 
             <View style={[styles.detailCard, { backgroundColor: colors.card, borderColor: colors.border, borderRadius: colors.radius }]}>
               <Text style={[styles.cardTitle, { color: colors.foreground }]}>Admin actions</Text>
+              <Text style={[styles.detailLabel, { color: colors.mutedForeground }]}>STATUS</Text>
               <View style={styles.statusGrid}>
                 {feedbackAdminStatusOptions.map((status) => {
                   const active = report.status === status;
@@ -338,30 +339,16 @@ function FeedbackTicketModal({
                   );
                 })}
               </View>
+              <Text style={[styles.detailLabel, { color: colors.mutedForeground }]}>CLASSIFICATION</Text>
+              <View style={styles.summaryBadges}>
+                <Badge label={feedbackTypeLabel(report.classification ?? report.feedback_type)} />
+              </View>
               {isUpdatingStatus ? <Text style={[styles.ticketMeta, { color: colors.mutedForeground }]}>Updating status...</Text> : null}
             </View>
 
             <View style={[styles.detailCard, { backgroundColor: colors.card, borderColor: colors.border, borderRadius: colors.radius }]}>
               <Text style={[styles.cardTitle, { color: colors.foreground }]}>Screenshot</Text>
-              {report.screenshot_url ? (
-                <>
-                  <Text style={[styles.detailValue, { color: colors.foreground }]}>Screenshot attached</Text>
-                  <Pressable
-                    accessibilityRole="button"
-                    accessibilityLabel="Open feedback screenshot"
-                    disabled={openingScreenshot}
-                    onPress={() => void openScreenshot()}
-                    style={[styles.openButton, { backgroundColor: colors.primary }]}
-                  >
-                    {openingScreenshot ? <ActivityIndicator color={colors.primaryForeground} /> : <Feather name="image" size={16} color={colors.primaryForeground} />}
-                    <Text style={[styles.openButtonText, { color: colors.primaryForeground }]}>
-                      {openingScreenshot ? "Opening..." : "Open screenshot"}
-                    </Text>
-                  </Pressable>
-                </>
-              ) : (
-                <Text style={[styles.detailValue, { color: colors.mutedForeground }]}>No screenshot attached.</Text>
-              )}
+              <FeedbackScreenshotPreview storedValue={report.screenshot_url} ticketId={report.id} />
             </View>
 
             <View style={[styles.detailCard, { backgroundColor: colors.card, borderColor: colors.border, borderRadius: colors.radius }]}>
@@ -370,8 +357,14 @@ function FeedbackTicketModal({
               <DetailPair label="Screen" value={report.screen_name} />
               <DetailPair label="Environment" value={report.environment} />
               <DetailPair label="App version" value={report.app_version} />
+              <DetailPair label="Build" value={report.app_build_number ?? report.metadata_json?.buildNumber} />
               <DetailPair label="Device" value={report.device_info} />
+              <DetailPair label="Device model" value={report.device_model} />
               <DetailPair label="OS" value={report.os_info} />
+            </View>
+
+            <View style={[styles.detailCard, { backgroundColor: colors.card, borderColor: colors.border, borderRadius: colors.radius }]}>
+              <FeedbackConversation ticketId={report.id} status={report.status} viewerRole="admin" />
             </View>
 
             <View style={[styles.detailCard, { backgroundColor: colors.card, borderColor: colors.border, borderRadius: colors.radius }]}>
@@ -387,21 +380,16 @@ function FeedbackTicketModal({
               {technicalOpen ? (
                 <View style={styles.technicalContent}>
                   <DetailPair label="Browser" value={report.browser_info} />
-                  <DetailPair label="Category" value={ticketCategory(report)} />
+                  <DetailPair label="Classification" value={feedbackTypeLabel(report.classification ?? report.feedback_type)} />
+                  <DetailPair label="Area" value={ticketCategory(report)} />
                   {metadata ? <Text style={[styles.metadataText, { color: colors.foreground }]}>{metadata}</Text> : null}
                 </View>
               ) : null}
             </View>
-          </ScrollView>
+          </KeyboardAwareScrollViewCompat>
         ) : null}
       </View>
     </Modal>
-    <ImageViewerModal
-      uris={screenshotViewerUri ? [screenshotViewerUri] : []}
-      visible={!!screenshotViewerUri}
-      title="Feedback screenshot"
-      onClose={() => setScreenshotViewerUri(null)}
-    />
     </>
   );
 }

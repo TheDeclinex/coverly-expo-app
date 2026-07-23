@@ -13,6 +13,7 @@ import { useAuth } from "@/context/AuthContext";
 import { useEntitlements } from "@/context/EntitlementsContext";
 import { useAccountProfile } from "@/hooks/useAccountProfile";
 import { useColors } from "@/hooks/useColors";
+import { useFeedbackUnread } from "@/hooks/useFeedbackUnread";
 import {
   loadUsageAllowances,
   type UsageAllowance,
@@ -29,6 +30,7 @@ export default function AccountScreen() {
   const insets = useSafeAreaInsets();
   const { session, signOut } = useAuth();
   const { profile, isAdmin, isLoading, isError } = useAccountProfile();
+  const feedbackUnread = useFeedbackUnread();
   const {
     effectivePlan,
     purchaseLoading,
@@ -124,6 +126,7 @@ export default function AccountScreen() {
             icon="user"
             title="Profile & notifications"
             subtitle="Name, country and future notifications"
+            tone="blue"
             onPress={() => router.push("/profile-settings" as Href)}
             last
           />
@@ -149,12 +152,15 @@ export default function AccountScreen() {
             icon="book-open"
             title="User guide"
             subtitle="How to use Coverly"
+            tone="amber"
             onPress={() => router.push("/user-guide" as Href)}
           />
           <AccountRow
             icon="message-square"
             title="Feedback & support"
-            subtitle="Report an issue or send a suggestion"
+            subtitle="Report an issue or read support replies"
+            tone="amber"
+            badgeCount={feedbackUnread.data?.userUnreadCount}
             onPress={() => router.push("/feedback" as Href)}
             last
           />
@@ -166,6 +172,7 @@ export default function AccountScreen() {
               icon="shield"
               title="Admin"
               subtitle="System readiness and administration tools"
+              tone="greyBlue"
               onPress={() => router.push("/admin" as Href)}
               last
             />
@@ -177,6 +184,7 @@ export default function AccountScreen() {
             <AccountRow
               icon="lock"
               title="Privacy policy"
+              tone="green"
               onPress={() => void openLegal(privacyUrl, "privacy policy")}
             />
           ) : null}
@@ -184,6 +192,7 @@ export default function AccountScreen() {
             <AccountRow
               icon="file-text"
               title="Terms"
+              tone="green"
               onPress={() => void openLegal(termsUrl, "terms")}
             />
           ) : null}
@@ -191,13 +200,14 @@ export default function AccountScreen() {
             icon="trash-2"
             title="Request account deletion"
             subtitle="Delete your Coverly account and associated data."
+            tone="red"
             onPress={() => router.push("/account-deletion" as Href)}
             last
           />
         </AccountSection>
 
         <AccountSection title="Sign out">
-          <AccountRow icon="log-out" title="Sign out" onPress={confirmSignOut} last />
+          <AccountRow icon="log-out" title="Sign out" tone="neutral" onPress={confirmSignOut} last />
         </AccountSection>
       </ScrollView>
     </>
@@ -211,6 +221,7 @@ function ClaimPacksSection({ onOpen }: { onOpen: () => void }) {
         icon="package"
         title="Claim packs"
         subtitle="Create or continue a claim-pack draft"
+        tone="lavender"
         onPress={onOpen}
         last
       />
@@ -256,7 +267,7 @@ function PlanUsageSection({
 
   return (
     <AccountSection title="Plan & usage">
-      <View style={styles.planUsageContent}>
+      <View style={[styles.planUsageContent, { backgroundColor: "#F6FCFA" }]}>
         <View style={styles.planSummary}>
           <Text style={[styles.planName, { color: colors.foreground }]}>{planName}</Text>
           <Text style={[styles.planDescription, { color: colors.mutedForeground }]}>
