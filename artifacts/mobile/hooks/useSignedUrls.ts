@@ -6,12 +6,22 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  useQueries,
+  useQuery,
+  useQueryClient,
+  type QueryClient,
+} from "@tanstack/react-query";
 
+import { useAuth } from "@/context/AuthContext";
+import {
+  resolvedPrivateImageSource,
+  signedImageQueryKey,
+  type CoverlyImageSource,
+} from "@/lib/image-cache-model";
 import {
   INVENTORY_PHOTOS_BUCKET,
   getSignedDisplayUrl,
-  getSignedDisplayUrls,
   isStoragePath,
 } from "@/lib/storage-helpers";
 
@@ -21,7 +31,86 @@ const GC_TIME_MS    = 60 * 60 * 1000;
 
 function signedUrlsStableKey(pathsOrUrls: (string | null | undefined)[]): string {
   const unique = [...new Set(pathsOrUrls.filter((p): p is string => !!p))];
-  return unique.sort().join("\n");
+  return JSON.stringify(unique.sort());
+}
+
+async function resolveSignedImageSource(
+  accountId: string,
+  bucket: string,
+  pathOrUrl: string,
+): Promise<CoverlyImageSource | null> {
+  const uri = await getSignedDisplayUrl(bucket, pathOrUrl);
+  if (!uri) return null;
+  return isStoragePath(pathOrUrl)
+    ? resolvedPrivateImageSource({ accountId, bucket, pathOrUrl, uri })
+    : { uri };
+}
+
+function signedImageQueryOptions(
+  accountId: string,
+  bucket: string,
+  pathOrUrl: string,
+) {
+  return {
+    queryKey: signedImageQueryKey(accountId, bucket, pathOrUrl),
+    queryFn: () => resolveSignedImageSource(accountId, bucket, pathOrUrl),
+    enabled: Boolean(accountId && pathOrUrl),
+    staleTime: STALE_TIME_MS,
+    gcTime: GC_TIME_MS,
+  };
+}
+
+export async function fetchSignedImageSource(
+  queryClient: QueryClient,
+  accountId: string,
+  bucket: string,
+  pathOrUrl: string,
+): Promise<CoverlyImageSource | null> {
+  return queryClient.fetchQuery(
+    signedImageQueryOptions(accountId, bucket, pathOrUrl),
+  );
+}
+
+export function useSignedImageSource(
+  pathOrUrl: string | null | undefined,
+  bucket = INVENTORY_PHOTOS_BUCKET,
+): CoverlyImageSource | null | undefined {
+  const { session } = useAuth();
+  const accountId = session?.user.id ?? "";
+  const { data } = useQuery(
+    signedImageQueryOptions(accountId, bucket, pathOrUrl ?? ""),
+  );
+  return pathOrUrl ? (data ?? undefined) : null;
+}
+
+export function useSignedImageSources(
+  pathsOrUrls: (string | null | undefined)[],
+  bucket = INVENTORY_PHOTOS_BUCKET,
+): Map<string, CoverlyImageSource> {
+  const { session } = useAuth();
+  const accountId = session?.user.id ?? "";
+  const stableKey = useMemo(
+    () => signedUrlsStableKey(pathsOrUrls),
+    [pathsOrUrls],
+  );
+  const distinctPaths = useMemo(
+    () => JSON.parse(stableKey) as string[],
+    [stableKey],
+  );
+  const queries = useQueries({
+    queries: distinctPaths.map((pathOrUrl) =>
+      signedImageQueryOptions(accountId, bucket, pathOrUrl),
+    ),
+  });
+
+  return useMemo(() => {
+    const resolved = new Map<string, CoverlyImageSource>();
+    distinctPaths.forEach((path, index) => {
+      const source = queries[index]?.data;
+      if (source) resolved.set(path, source);
+    });
+    return resolved;
+  }, [distinctPaths, queries]);
 }
 
 /**
@@ -37,14 +126,8 @@ function signedUrlsStableKey(pathsOrUrls: (string | null | undefined)[]): string
 export function useSignedUrl(
   pathOrUrl: string | null | undefined,
 ): string | null | undefined {
-  const { data } = useQuery({
-    queryKey: ["signed-url", pathOrUrl ?? ""],
-    queryFn: () => getSignedDisplayUrl(INVENTORY_PHOTOS_BUCKET, pathOrUrl),
-    enabled: !!pathOrUrl,
-    staleTime: STALE_TIME_MS,
-    gcTime: GC_TIME_MS,
-  });
-  return pathOrUrl ? (data ?? undefined) : null;
+  const source = useSignedImageSource(pathOrUrl);
+  return pathOrUrl ? source?.uri : null;
 }
 
 /**
@@ -58,35 +141,22 @@ export function useSignedUrl(
 export function useSignedUrls(
   pathsOrUrls: (string | null | undefined)[],
 ): Map<string, string> {
-  // Stable, de-duped, sorted key so the query identity doesn't change on re-order.
-  const stableKey = useMemo(() => signedUrlsStableKey(pathsOrUrls), [pathsOrUrls]);
-
-  const hasAny = stableKey.length > 0;
-
-  const { data } = useQuery({
-    queryKey: ["signed-urls", stableKey],
-    queryFn: () => getSignedDisplayUrls(INVENTORY_PHOTOS_BUCKET, pathsOrUrls),
-    enabled: hasAny,
-    staleTime: STALE_TIME_MS,
-    gcTime: GC_TIME_MS,
-  });
-
-  // Dev-only diagnostics. Do not log paths or signed URLs.
-  useEffect(() => {
-    if (!data || data.size === 0) return;
-    const requested = stableKey.split("\n").filter(Boolean);
-    if (__DEV__) console.info("[useSignedUrls] resolved image URLs", {
-      resolvedCount: data.size,
-      requestedCount: requested.length,
-    });
-  }, [data, stableKey]);
-
-  return data ?? new Map<string, string>();
+  const sources = useSignedImageSources(pathsOrUrls);
+  return useMemo(
+    () =>
+      new Map(
+        [...sources.entries()].map(([path, source]) => [path, source.uri]),
+      ),
+    [sources],
+  );
 }
 
 export function useSignedImageRecovery(
   pathsOrUrls: (string | null | undefined)[],
+  bucket = INVENTORY_PHOTOS_BUCKET,
 ): (pathOrUrl: string | null | undefined) => void {
+  const { session } = useAuth();
+  const accountId = session?.user.id ?? "";
   const queryClient = useQueryClient();
   const stableKey = useMemo(() => signedUrlsStableKey(pathsOrUrls), [pathsOrUrls]);
   const refreshedPathsRef = useRef<Set<string>>(new Set());
@@ -108,20 +178,19 @@ export function useSignedImageRecovery(
         hasPath: true,
       });
 
-      void Promise.all([
-        queryClient.invalidateQueries({ queryKey: ["signed-url", storagePath] }),
-        stableKey
-          ? queryClient.invalidateQueries({ queryKey: ["signed-urls", stableKey] })
-          : Promise.resolve(),
-      ]).catch((error: unknown) => {
+      void queryClient
+        .invalidateQueries({
+          queryKey: signedImageQueryKey(accountId, bucket, storagePath),
+        })
+        .catch((error: unknown) => {
         if (__DEV__) {
           console.warn(
             "[imageRecovery] signed URL refresh failed",
             error instanceof Error ? error.message : String(error),
           );
         }
-      });
+        });
     },
-    [queryClient, stableKey],
+    [accountId, bucket, queryClient, stableKey],
   );
 }

@@ -34,7 +34,11 @@ import { propertyTypeLabel } from "@/constants/propertyTypes";
 import { useColors } from "@/hooks/useColors";
 import { formatUnreadBadge, useFeedbackUnread } from "@/hooks/useFeedbackUnread";
 import { usePropertyAllowance } from "@/hooks/usePropertyAllowance";
-import { useSignedImageRecovery, useSignedUrl, useSignedUrls } from "@/hooks/useSignedUrls";
+import {
+  useSignedImageRecovery,
+  useSignedImageSource,
+  useSignedImageSources,
+} from "@/hooks/useSignedUrls";
 import { calcPortfolioStats } from "@/lib/dashboard-stats";
 import {
   calculateCoverageInsight,
@@ -325,7 +329,7 @@ function PropertyCard({
   };
 
   // Resolve the storage path (or legacy signed URL) to a fresh display URL.
-  const signedCoverUrl = useSignedUrl(item.property_cover_image_url);
+  const signedCoverSource = useSignedImageSource(item.property_cover_image_url);
   const recoverSignedCoverUrl = useSignedImageRecovery([item.property_cover_image_url]);
 
   return (
@@ -341,9 +345,10 @@ function PropertyCard({
         },
       ]}
     >
-      {signedCoverUrl ? (
+      {signedCoverSource ? (
         <ReliableImage
-          uri={signedCoverUrl}
+          uri={signedCoverSource.uri}
+          cacheKey={signedCoverSource.cacheKey}
           style={[styles.cardImage, { borderRadius: colors.radius }]}
           contentFit="cover"
           onPermanentError={() => recoverSignedCoverUrl(item.property_cover_image_url)}
@@ -574,7 +579,7 @@ export default function HomeScreen() {
     () => (allItems ?? []).map((item) => item.image_url ?? item.photo_url ?? null),
     [allItems],
   );
-  const globalSearchSignedUrls = useSignedUrls(globalSearchImagePaths);
+  const globalSearchSignedSources = useSignedImageSources(globalSearchImagePaths);
   const recoverGlobalSearchImageUrl = useSignedImageRecovery(globalSearchImagePaths);
   const normalizedGlobalSearch = globalSearchText.trim().toLowerCase();
   const globalSearchActive = normalizedGlobalSearch.length > 0 || globalReadinessFilter !== "all";
@@ -964,7 +969,7 @@ export default function HomeScreen() {
               const room = item.room_id ? roomById.get(item.room_id) : null;
               const property = propertyById.get(item.file_id);
               const imageRef = item.image_url ?? item.photo_url ?? "";
-              const imageUri = globalSearchSignedUrls.get(imageRef) ?? null;
+              const imageSource = globalSearchSignedSources.get(imageRef) ?? null;
               const readiness = globalReadinessLabel(item);
               const value = getItemTotalValue(item);
 
@@ -981,9 +986,10 @@ export default function HomeScreen() {
                     },
                   ]}
                 >
-                  {imageUri ? (
+                  {imageSource ? (
                     <ReliableImage
-                      uri={imageUri}
+                      uri={imageSource.uri}
+                      cacheKey={imageSource.cacheKey}
                       style={styles.globalResultThumb}
                       contentFit="cover"
                       onPermanentError={() => recoverGlobalSearchImageUrl(imageRef)}

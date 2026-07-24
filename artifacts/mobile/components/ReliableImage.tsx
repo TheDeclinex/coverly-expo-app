@@ -7,6 +7,7 @@ type ExpoImageProps = React.ComponentProps<typeof Image>;
 
 interface ReliableImageProps extends Omit<ExpoImageProps, "source"> {
   uri: string | null | undefined;
+  cacheKey?: string;
   fallback?: React.ReactNode;
   retryDelaysMs?: number[];
   onPermanentError?: ExpoImageProps["onError"];
@@ -14,6 +15,7 @@ interface ReliableImageProps extends Omit<ExpoImageProps, "source"> {
 
 export function ReliableImage({
   uri,
+  cacheKey,
   fallback = null,
   retryDelaysMs = DEFAULT_IMAGE_LOAD_RETRY_DELAYS_MS,
   onLoad,
@@ -37,17 +39,18 @@ export function ReliableImage({
     setHasError(false);
     setLoadAttempt(0);
     return clearRetryTimeout;
-  }, [uri]);
+  }, [cacheKey, uri]);
 
   if (!uri || hasError) return <>{fallback}</>;
 
-  const imageRenderKey = `${uri}:${loadAttempt}`;
+  const imageIdentity = cacheKey ?? uri;
+  const imageRenderKey = `${imageIdentity}:${loadAttempt}`;
 
   return (
     <Image
       {...imageProps}
       key={imageRenderKey}
-      source={{ uri }}
+      source={{ uri, cacheKey }}
       recyclingKey={imageRenderKey}
       cachePolicy={loadAttempt > 0 ? "none" : (imageProps.cachePolicy ?? "memory-disk")}
       onLoad={(event) => {

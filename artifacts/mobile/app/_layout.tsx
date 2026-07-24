@@ -5,7 +5,11 @@ import {
   Inter_700Bold,
   useFonts,
 } from "@expo-google-fonts/inter";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import {
+  QueryClient,
+  QueryClientProvider,
+  useQueryClient,
+} from "@tanstack/react-query";
 import { Stack } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
 import React, { useEffect } from "react";
@@ -18,6 +22,8 @@ import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { ToastProvider } from "@/components/Toast";
 import { AuthProvider, useAuth } from "@/context/AuthContext";
 import { EntitlementsProvider } from "@/context/EntitlementsContext";
+import { synchroniseImageCacheAccount } from "@/lib/image-cache";
+import { isSignedImageQueryKey } from "@/lib/image-cache-model";
 
 SplashScreen.preventAutoHideAsync();
 SplashScreen.setOptions({ duration: 250, fade: true });
@@ -26,6 +32,7 @@ const queryClient = new QueryClient();
 
 function RootLayoutNav() {
   const { loading, session, hasSeenOnboarding } = useAuth();
+  const rootQueryClient = useQueryClient();
   const [fontsLoaded, fontError] = useFonts({
     Inter_400Regular,
     Inter_500Medium,
@@ -47,6 +54,22 @@ function RootLayoutNav() {
       active = false;
     };
   }, []);
+
+  useEffect(() => {
+    if (loading) return;
+    const accountId = session?.user.id ?? null;
+    rootQueryClient.removeQueries({
+      predicate: (query) => isSignedImageQueryKey(query.queryKey),
+    });
+    void synchroniseImageCacheAccount(accountId).catch((error: unknown) => {
+      if (__DEV__) {
+        console.warn(
+          "[imageCache] account-boundary cache clear failed",
+          error instanceof Error ? error.message : String(error),
+        );
+      }
+    });
+  }, [loading, rootQueryClient, session?.user.id]);
 
   // Auth is settled when not loading AND (no session, OR the onboarding flag has resolved).
   // Waiting for hasSeenOnboarding prevents a flash of the wrong screen for authed users.

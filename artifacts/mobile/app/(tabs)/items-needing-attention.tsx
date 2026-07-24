@@ -10,7 +10,7 @@ import { ErrorState } from "@/components/ErrorState";
 import { ReliableImage } from "@/components/ReliableImage";
 import { useAuth } from "@/context/AuthContext";
 import { useColors } from "@/hooks/useColors";
-import { useSignedImageRecovery, useSignedUrl } from "@/hooks/useSignedUrls";
+import { useSignedImageRecovery, useSignedImageSource } from "@/hooks/useSignedUrls";
 import {
   filterItemsNeedingAttention,
   isItemAttentionFilter,
@@ -37,7 +37,7 @@ const AttentionItemCard = React.memo(function AttentionItemCard({
 }) {
   const colors = useColors();
   const photoPath = getItemPhoto(item);
-  const imageUrl = useSignedUrl(photoPath);
+  const imageSource = useSignedImageSource(photoPath);
   const recoverImageUrl = useSignedImageRecovery([photoPath]);
   const handleOpen = React.useCallback(() => onOpen(item), [item, onOpen]);
 
@@ -52,7 +52,8 @@ const AttentionItemCard = React.memo(function AttentionItemCard({
       ]}
     >
       <ReliableImage
-        uri={imageUrl}
+        uri={imageSource?.uri}
+        cacheKey={imageSource?.cacheKey}
         style={styles.thumbnail}
         contentFit="cover"
         onPermanentError={() => recoverImageUrl(photoPath)}

@@ -7,6 +7,7 @@ import type { StyleProp, ViewStyle } from "react-native";
 
 import { ImageViewerModal } from "@/components/ImageViewerModal";
 import { ItemPinMarker, PIN_MARKER_SIZE } from "@/components/ItemPinMarker";
+import type { CoverlyImageInput } from "@/lib/image-cache-model";
 import { isDisplayableUri } from "@/lib/storage-helpers";
 import { focalCoverRect, pinMarkerPosition, pinMarkerPositionInRect } from "@/lib/pin-position";
 
@@ -14,13 +15,14 @@ const IMAGE_LOAD_RETRY_DELAYS_MS = [350, 900];
 
 interface ExpandableImageProps {
   uri: string | null | undefined;
+  cacheKey?: string;
   style?: StyleProp<ViewStyle>;
   contentFit?: ImageContentFit;
   placeholderIcon?: keyof typeof Feather.glyphMap;
   placeholderIconSize?: number;
   placeholderIconColor?: string;
   placeholderBackgroundColor?: string;
-  allUris?: string[];
+  allUris?: CoverlyImageInput[];
   initialPhotoIndex?: number;
   pinPhotoIndex?: number;
   viewerTitle?: string;
@@ -46,6 +48,7 @@ interface ExpandableImageProps {
 
 export function ExpandableImage({
   uri,
+  cacheKey,
   style,
   contentFit = "cover",
   placeholderIcon = "image",
@@ -85,10 +88,14 @@ export function ExpandableImage({
     setLoadAttempt(0);
     setNaturalDims({ w: 0, h: 0 });
     return clearRetryTimeout;
-  }, [uri]);
+  }, [cacheKey, uri]);
 
-  const lightboxUris: string[] =
-    allUris && allUris.length > 0 ? allUris : uri ? [uri] : [];
+  const lightboxUris: CoverlyImageInput[] =
+    allUris && allUris.length > 0
+      ? allUris
+      : uri
+        ? [{ uri, cacheKey }]
+        : [];
 
   const { w: pinW, h: pinH } = PIN_MARKER_SIZE.sm;
   const hasPin =
@@ -138,7 +145,8 @@ export function ExpandableImage({
   // At this point canDisplay is true → isDisplayableUri(uri) passed → uri is a real string.
   // TypeScript can't infer this without a type guard, so we assert here.
   const safeUri = uri as string;
-  const imageRenderKey = `${safeUri}:${loadAttempt}`;
+  const imageIdentity = cacheKey ?? safeUri;
+  const imageRenderKey = `${imageIdentity}:${loadAttempt}`;
 
   return (
     <>
@@ -162,7 +170,7 @@ export function ExpandableImage({
          */}
         <Image
           key={imageRenderKey}
-          source={{ uri: safeUri }}
+          source={{ uri: safeUri, cacheKey }}
           recyclingKey={imageRenderKey}
           cachePolicy={loadAttempt > 0 ? "none" : "memory-disk"}
           style={focalRect

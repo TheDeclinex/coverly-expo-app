@@ -37,13 +37,18 @@ import { ENABLE_RECOMMENDED_ACTIONS } from "@/constants/recommendedActions";
 import { getRoomPlaceholderIcon } from "@/constants/roomVisuals";
 import { useAuth } from "@/context/AuthContext";
 import { useColors } from "@/hooks/useColors";
-import { useSignedImageRecovery, useSignedUrl, useSignedUrls } from "@/hooks/useSignedUrls";
+import {
+  useSignedImageRecovery,
+  useSignedImageSource,
+  useSignedImageSources,
+} from "@/hooks/useSignedUrls";
 import {
   buildSparklinePoints,
   calcPropertyStats,
   type RoomStat,
 } from "@/lib/dashboard-stats";
 import { getCoverageColor } from "@/lib/coverage";
+import type { CoverlyImageSource } from "@/lib/image-cache-model";
 import {
   formatCurrency,
   formatCurrencyFull,
@@ -1061,7 +1066,7 @@ function RoomCard({
   completedCount,
   completionPulse,
   colors,
-  resolvedCoverUrl,
+  resolvedCoverSource,
   onCoverImagePermanentError,
 }: {
   item: InventoryRoom;
@@ -1073,8 +1078,8 @@ function RoomCard({
   completedCount: number;
   completionPulse?: boolean;
   colors: ReturnType<typeof import("@/hooks/useColors").useColors>;
-  /** Pre-resolved signed URL from the parent's batch useSignedUrls() call. */
-  resolvedCoverUrl?: string | null;
+  /** Pre-resolved signed source from the parent's object-level cache. */
+  resolvedCoverSource?: CoverlyImageSource | null;
   onCoverImagePermanentError?: () => void;
 }) {
   const handlePress = async () => {
@@ -1179,9 +1184,10 @@ function RoomCard({
               />
             )}
           </Svg>
-          {resolvedCoverUrl ? (
+          {resolvedCoverSource ? (
             <ReliableImage
-              uri={resolvedCoverUrl}
+              uri={resolvedCoverSource.uri}
+              cacheKey={resolvedCoverSource.cacheKey}
               style={styles.roomThumb}
               contentFit="cover"
               onPermanentError={onCoverImagePermanentError}
@@ -1366,7 +1372,7 @@ const MemoizedRoomCard = React.memo(
     && previous.completedCount === next.completedCount
     && previous.completionPulse === next.completionPulse
     && previous.colors === next.colors
-    && previous.resolvedCoverUrl === next.resolvedCoverUrl,
+    && previous.resolvedCoverSource === next.resolvedCoverSource,
 );
 
 function CoverAmountModal({
@@ -1864,10 +1870,10 @@ export default function PropertyDetailScreen() {
 
   // Signed URL for the property cover photo (path → 1-hr signed URL).
   // localCoverUrl overrides while the optimistic displayUrl is still fresh.
-  const signedCoverUrl = useSignedUrl(property?.property_cover_image_url);
+  const signedCoverSource = useSignedImageSource(property?.property_cover_image_url);
   const recoverPropertyCoverUrl = useSignedImageRecovery([property?.property_cover_image_url]);
 
-  // Batch-resolve room thumbnail paths → signed URLs in one round-trip.
+  // Resolve room thumbnail paths through shared per-object signed URL queries.
   // Derived from `rooms` (not `stats`) so URLs start resolving as soon as
   // rooms load — before items have finished loading (which stats requires).
   // This prevents the blank-thumbnail flash when navigating back.
@@ -1875,18 +1881,18 @@ export default function PropertyDetailScreen() {
     () => (rooms ?? []).map((r) => r.cover_photo_url ?? null),
     [rooms],
   );
-  const roomCoverSignedUrls = useSignedUrls(roomCoverPaths);
+  const roomCoverSignedSources = useSignedImageSources(roomCoverPaths);
   const recoverRoomCoverUrl = useSignedImageRecovery(roomCoverPaths);
 
-  // Map room.id → resolved signed URL, for clean O(1) lookup in renderItem.
-  const roomSignedUrlById = useMemo(() => {
-    const map = new Map<string, string | null>();
+  // Map room.id → resolved signed source, for clean O(1) lookup in renderItem.
+  const roomSignedSourceById = useMemo(() => {
+    const map = new Map<string, CoverlyImageSource | null>();
     for (const r of rooms ?? []) {
       const path = r.cover_photo_url;
-      map.set(r.id, path ? (roomCoverSignedUrls.get(path) ?? null) : null);
+      map.set(r.id, path ? (roomCoverSignedSources.get(path) ?? null) : null);
     }
     return map;
-  }, [rooms, roomCoverSignedUrls]);
+  }, [roomCoverSignedSources, rooms]);
 
   const handleAddRoom = async () => {
     const trimmed = addRoomName.trim();
@@ -2024,11 +2030,10 @@ export default function PropertyDetailScreen() {
       }
       // DB write confirmed — clear optimistic state and let the signed URL from
       // the freshly-invalidated property query drive the display.
-      // Invalidate both the property query and the cached signed URL for the new
-      // path so useSignedUrl immediately re-fetches the correct signed URL.
+      // Invalidate property data. The upload uses a new immutable path, so its
+      // object-level signed-image query and native cache identity are also new.
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["property", id] }),
-        queryClient.invalidateQueries({ queryKey: ["signed-url", uploaded.path] }),
         queryClient.invalidateQueries({ queryKey: ["files"] }),
         queryClient.invalidateQueries({ queryKey: ["inventory-files"] }),
       ]);
@@ -2075,7 +2080,7 @@ export default function PropertyDetailScreen() {
       <>
         {/* Property cover photo hero */}
         <View style={{ height: 200, overflow: "hidden" }}>
-          {(localCoverUrl ?? signedCoverUrl) ? (
+          {(localCoverUrl ?? signedCoverSource?.uri) ? (
             <Animated.View
               style={{
                 position: "absolute",
@@ -2087,7 +2092,8 @@ export default function PropertyDetailScreen() {
               }}
             >
               <ReliableImage
-                uri={localCoverUrl ?? signedCoverUrl}
+                uri={localCoverUrl ?? signedCoverSource?.uri}
+                cacheKey={localCoverUrl ? undefined : signedCoverSource?.cacheKey}
                 style={StyleSheet.absoluteFill}
                 contentFit="cover"
                 onPermanentError={() => recoverPropertyCoverUrl(property?.property_cover_image_url)}
@@ -2733,7 +2739,7 @@ export default function PropertyDetailScreen() {
                 completedCount={completionMap.get(rs.room.id) ?? 0}
                 completionPulse={completedPulseRoomIds.has(rs.room.id)}
                 colors={colors}
-                resolvedCoverUrl={roomSignedUrlById.get(rs.room.id) ?? null}
+                resolvedCoverSource={roomSignedSourceById.get(rs.room.id) ?? null}
                 onCoverImagePermanentError={() => recoverRoomCoverUrl(rs.room.cover_photo_url)}
               />
             </View>

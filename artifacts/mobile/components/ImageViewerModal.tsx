@@ -1,12 +1,13 @@
 import { Feather } from "@expo/vector-icons";
 import { BlurView } from "expo-blur";
-import type { ImageLoadEventData } from "expo-image";
+import { Image, type ImageLoadEventData } from "expo-image";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AccessibilityInfo,
   ActivityIndicator,
   Animated,
   FlatList,
+  InteractionManager,
   Modal,
   Pressable,
   StyleSheet,
@@ -20,6 +21,11 @@ import { DraggablePinLayer } from "@/components/DraggablePinLayer";
 import { ItemPinMarker, PIN_MARKER_SIZE } from "@/components/ItemPinMarker";
 import { ReliableImage } from "@/components/ReliableImage";
 import { useColors } from "@/hooks/useColors";
+import {
+  normalizeCoverlyImageSource,
+  type CoverlyImageInput,
+  type CoverlyImageSource,
+} from "@/lib/image-cache-model";
 import { pinBelongsToPhoto, viewerAllowsPinEditing } from "@/lib/image-viewer-config";
 import { pinMarkerPosition, renderedImageRect, type NormalizedPin } from "@/lib/pin-position";
 import {
@@ -32,7 +38,7 @@ import {
 } from "@/lib/viewer-pin-state";
 
 interface ImageViewerModalProps {
-  uris: string[];
+  uris: CoverlyImageInput[];
   initialIndex?: number;
   visible: boolean;
   onClose: () => void;
@@ -45,7 +51,7 @@ interface ImageViewerModalProps {
 }
 
 function ImagePage({
-  uri,
+  source,
   pageWidth,
   cardHeight,
   pin,
@@ -56,7 +62,7 @@ function ImagePage({
   onBackdropPress,
   onPermanentError,
 }: {
-  uri: string;
+  source: CoverlyImageSource;
   pageWidth: number;
   cardHeight: number;
   pin?: NormalizedPin | null;
@@ -101,7 +107,8 @@ function ImagePage({
         ) : (
           <>
             <ReliableImage
-              uri={uri}
+              uri={source.uri}
+              cacheKey={source.cacheKey}
               style={StyleSheet.absoluteFill}
               contentFit="contain"
               onLoad={(event: ImageLoadEventData) => {
@@ -157,14 +164,19 @@ export function ImageViewerModal({
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const { width, height } = useWindowDimensions();
-  const safeInitial = Math.max(0, Math.min(initialIndex, Math.max(0, uris.length - 1)));
+  const imageSources = useMemo(
+    () => uris.map(normalizeCoverlyImageSource),
+    [uris],
+  );
+  const safeInitial = Math.max(0, Math.min(initialIndex, Math.max(0, imageSources.length - 1)));
   const [currentIndex, setCurrentIndex] = useState(safeInitial);
   const [pinState, setPinState] = useState(() => createViewerPinState(pin));
   const [savingPin, setSavingPin] = useState(false);
   const [pinError, setPinError] = useState<string | null>(null);
   const [reduceMotion, setReduceMotion] = useState(false);
   const progress = useRef(new Animated.Value(0)).current;
-  const flatListRef = useRef<FlatList<string>>(null);
+  const flatListRef = useRef<FlatList<CoverlyImageSource>>(null);
+  const prefetchedImageRefs = useRef(new Map<string, Awaited<ReturnType<typeof Image.loadAsync>>>());
   const wasVisibleRef = useRef(false);
   const viewerPin = pinState.committedPin;
   const draftPin = pinState.draftPin;
@@ -195,6 +207,27 @@ export function ImageViewerModal({
     if (!visible) return;
     setPinState((current) => syncIncomingViewerPin(current, pin));
   }, [editingPin, pin?.x, pin?.y, visible]);
+
+  useEffect(() => {
+    if (!visible) {
+      prefetchedImageRefs.current.clear();
+      return;
+    }
+
+    const nextSource = imageSources[currentIndex + 1];
+    if (!nextSource?.uri.startsWith("http")) return;
+    const identity = nextSource.cacheKey ?? nextSource.uri;
+    if (prefetchedImageRefs.current.has(identity)) return;
+
+    const interaction = InteractionManager.runAfterInteractions(() => {
+      void Image.loadAsync(nextSource)
+        .then((imageRef) => {
+          prefetchedImageRefs.current.set(identity, imageRef);
+        })
+        .catch(() => undefined);
+    });
+    return () => interaction.cancel();
+  }, [currentIndex, imageSources, visible]);
 
   const close = useCallback(() => {
     if (editingPin) {
@@ -227,12 +260,12 @@ export function ImageViewerModal({
 
   const scrollToIndex = (index: number) => {
     if (editingPin) return;
-    const target = Math.max(0, Math.min(index, uris.length - 1));
+    const target = Math.max(0, Math.min(index, imageSources.length - 1));
     flatListRef.current?.scrollToIndex({ index: target, animated: true });
     setCurrentIndex(target);
   };
 
-  if (uris.length === 0) return null;
+  if (imageSources.length === 0) return null;
 
   return (
     <Modal visible={visible} transparent animationType="none" onRequestClose={close} statusBarTranslucent accessibilityViewIsModal>
@@ -253,7 +286,7 @@ export function ImageViewerModal({
           <View style={styles.topBar}>
             <View style={[styles.titlePill, { backgroundColor: colors.card }]}>
               <Text style={[styles.title, { color: colors.foreground }]} numberOfLines={1}>{title}</Text>
-              {uris.length > 1 ? <Text style={[styles.count, { color: colors.mutedForeground }]}>{currentIndex + 1} / {uris.length}</Text> : null}
+              {imageSources.length > 1 ? <Text style={[styles.count, { color: colors.mutedForeground }]}>{currentIndex + 1} / {imageSources.length}</Text> : null}
             </View>
             <Pressable accessibilityRole="button" accessibilityLabel={editingPin ? "Cancel pin movement" : "Close image viewer"} onPress={close} hitSlop={10} style={[styles.close, { backgroundColor: colors.card }]}>
               <Feather name="x" size={21} color={colors.foreground} />
@@ -263,18 +296,18 @@ export function ImageViewerModal({
           <FlatList
             ref={flatListRef}
             style={styles.gallery}
-            data={uris}
+            data={imageSources}
             horizontal
             pagingEnabled
-            scrollEnabled={!editingPin && uris.length > 1}
+            scrollEnabled={!editingPin && imageSources.length > 1}
             showsHorizontalScrollIndicator={false}
             initialScrollIndex={safeInitial}
             getItemLayout={(_, index) => ({ length: width, offset: width * index, index })}
             onMomentumScrollEnd={(event) => setCurrentIndex(Math.round(event.nativeEvent.contentOffset.x / width))}
-            keyExtractor={(_, index) => String(index)}
+            keyExtractor={(source, index) => `${source.cacheKey ?? source.uri}:${index}`}
             renderItem={({ item, index }) => (
               <ImagePage
-                uri={item}
+                source={item}
                 pageWidth={width}
                 cardHeight={cardHeight}
                 pin={pinBelongsToPhoto(index, pinIndex) ? viewerPin : null}

@@ -12,7 +12,7 @@ import Animated, {
 } from "react-native-reanimated";
 
 import { useColors } from "@/hooks/useColors";
-import { useSignedImageRecovery, useSignedUrl } from "@/hooks/useSignedUrls";
+import { useSignedImageRecovery, useSignedImageSource } from "@/hooks/useSignedUrls";
 import { ReliableImage } from "@/components/ReliableImage";
 
 export interface PhotoEntry {
@@ -98,7 +98,7 @@ function PhotoCard({
 
   // Resolve storage path → signed URL; local file:// URIs and legacy https:// URLs
   // pass through unchanged. undefined while loading → show broken state gracefully.
-  const resolvedUrl = useSignedUrl(photo.url);
+  const resolvedSource = useSignedImageSource(photo.url);
   const recoverSignedPhotoUrl = useSignedImageRecovery([photo.url]);
 
   return (
@@ -106,7 +106,8 @@ function PhotoCard({
       <Animated.View style={[animStyle, { width: CARD_W, gap: 6 }]}>
         <View style={{ position: "relative" }}>
           <ReliableImage
-            uri={resolvedUrl}
+            uri={resolvedSource?.uri}
+            cacheKey={resolvedSource?.cacheKey}
             style={{
               width: CARD_W,
               height: CARD_H,

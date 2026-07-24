@@ -30,7 +30,8 @@ import {
 import { useToast } from "@/components/Toast";
 import { useAuth } from "@/context/AuthContext";
 import { useColors } from "@/hooks/useColors";
-import { useSignedImageRecovery, useSignedUrls } from "@/hooks/useSignedUrls";
+import { useSignedImageRecovery, useSignedImageSources } from "@/hooks/useSignedUrls";
+import type { CoverlyImageSource } from "@/lib/image-cache-model";
 import { itemWithCommittedPin, replaceItemWithCommittedPin } from "@/lib/item-pin-state";
 import { supabase } from "@/lib/supabase";
 import type { InventoryItem, InventoryRoom } from "@/types";
@@ -163,13 +164,15 @@ export default function ItemDetailScreen() {
     return uris;
   }, [rawPrimaryUri, item?.attachments]);
 
-  // Resolve storage paths → 1-hr signed URLs in one batch call.
-  // While loading, signedUriMap is empty — use null so ExpandableImage shows its
+  // Resolve storage paths through shared per-object signed URL queries.
+  // While loading, signedSourceMap is empty — use null so ExpandableImage shows its
   // placeholder rather than passing an invalid storage path to the Image component.
-  const signedUriMap = useSignedUrls(rawPhotoUris);
+  const signedSourceMap = useSignedImageSources(rawPhotoUris);
   const recoverItemImageUrl = useSignedImageRecovery(rawPhotoUris);
-  const allPhotoUris = rawPhotoUris.map((u) => signedUriMap.get(u) ?? null).filter((u): u is string => u !== null);
-  const primaryUri = allPhotoUris[0] ?? null;
+  const allPhotoSources = rawPhotoUris
+    .map((uri) => signedSourceMap.get(uri) ?? null)
+    .filter((source): source is CoverlyImageSource => source !== null);
+  const primarySource = allPhotoSources[0] ?? null;
 
   const handleReplacementPricing = () => {
     router.push({
@@ -419,14 +422,15 @@ export default function ItemDetailScreen() {
           showsVerticalScrollIndicator={false}
         >
           <ExpandableImage
-            uri={primaryUri}
+            uri={primarySource?.uri}
+            cacheKey={primarySource?.cacheKey}
             style={styles.heroImage}
             contentFit="cover"
             placeholderIcon="package"
             placeholderIconSize={48}
             placeholderIconColor={colors.primary}
             placeholderBackgroundColor={colors.secondary}
-            allUris={allPhotoUris}
+            allUris={allPhotoSources}
             initialPhotoIndex={0}
             pinPhotoIndex={0}
             viewerTitle={item.name}

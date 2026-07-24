@@ -1326,8 +1326,6 @@ export default function ScanScreen() {
         queryClient.invalidateQueries({ queryKey: ["items", selectedRoomId] }),
         queryClient.invalidateQueries({ queryKey: ["all-items"] }),
         queryClient.invalidateQueries({ queryKey: ["property-items", selectedFileId] }),
-        // Also invalidate signed-url cache so the new item's path gets a fresh signed URL.
-        queryClient.invalidateQueries({ queryKey: ["signed-urls"] }),
       ];
 
       void Promise.allSettled(invalidations).then((results) => {

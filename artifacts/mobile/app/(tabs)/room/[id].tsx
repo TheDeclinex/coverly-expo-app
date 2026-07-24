@@ -58,7 +58,12 @@ import {
   getItemUnitPrice,
   hasValue,
 } from "@/lib/inventory-mappers";
-import { useSignedImageRecovery, useSignedUrl, useSignedUrls } from "@/hooks/useSignedUrls";
+import {
+  useSignedImageRecovery,
+  useSignedImageSource,
+  useSignedImageSources,
+} from "@/hooks/useSignedUrls";
+import type { CoverlyImageSource } from "@/lib/image-cache-model";
 import { isStoragePath } from "@/lib/storage-helpers";
 import { formatUploadFailure, uploadCoverPhoto } from "@/lib/photo-upload";
 import { itemWithCommittedPin, replaceItemWithCommittedPin } from "@/lib/item-pin-state";
@@ -187,7 +192,7 @@ function ItemCard({
   currencyCode,
   propertyCountryCode,
   colors,
-  resolvedImageUrl,
+  resolvedImageSource,
   onImagePermanentError,
   evidenceCount = 0,
   isNew = false,
@@ -208,8 +213,8 @@ function ItemCard({
   currencyCode: string;
   propertyCountryCode: string;
   colors: ReturnType<typeof import("@/hooks/useColors").useColors>;
-  /** Pre-resolved signed URL from the parent's batch useSignedUrls() call. */
-  resolvedImageUrl?: string | null;
+  /** Pre-resolved signed source from the parent's object-level cache. */
+  resolvedImageSource?: CoverlyImageSource | null;
   onImagePermanentError?: () => void;
   evidenceCount?: number;
   isNew?: boolean;
@@ -222,7 +227,7 @@ function ItemCard({
   onOpenItem: (itemId: string) => void;
   onScanRoom: () => void | Promise<void>;
   onRepositionPin: (item: InventoryItem, x: number, y: number) => Promise<void>;
-  onExpandImage: (item: InventoryItem, uri: string) => void;
+  onExpandImage: (item: InventoryItem, source: CoverlyImageSource) => void;
 }) {
   const queryClient = useQueryClient();
   const { showToast } = useToast();
@@ -268,15 +273,15 @@ function ItemCard({
         hasPhotoUrl: Boolean(item.photo_url),
         hasRawImageRef: Boolean(rawImageRef),
         type: imageRefType,
-        resolved_present: !!resolvedImageUrl,
+        resolved_present: !!resolvedImageSource,
       });
     }
-  }, [item.id, rawImageRef, imageRefType, resolvedImageUrl]);
+  }, [imageRefType, item.id, rawImageRef, resolvedImageSource]);
 
   // Do NOT fall back to rawImageRef — it may be a raw storage path that expo-image
-  // cannot load. resolvedImageUrl is the signed URL (or null while loading).
+  // cannot load. resolvedImageSource includes the signed URL and stable cache identity.
   // ExpandableImage shows the placeholder until the signed URL arrives.
-  const imageUri = resolvedImageUrl ?? null;
+  const imageSource = resolvedImageSource ?? null;
 
   const rawPin = item.image_pin as Record<string, unknown> | null | undefined;
   const pin =
@@ -554,7 +559,8 @@ function ItemCard({
         {/* Thumbnail */}
         <View style={[styles.thumbWrap, { borderColor: colors.border }]}>
           <ExpandableImage
-            uri={imageUri}
+            uri={imageSource?.uri}
+            cacheKey={imageSource?.cacheKey}
             style={styles.thumb}
             contentFit="cover"
             placeholderIcon={placeholderIcon}
@@ -565,7 +571,7 @@ function ItemCard({
             viewerTitle={item.name}
             pinPhotoIndex={0}
             onReposition={pin ? (x, y) => onRepositionPin(item, x, y) : undefined}
-            onExpand={() => onExpandImage(item, imageUri!)}
+            onExpand={() => imageSource && onExpandImage(item, imageSource)}
             disabled={selectionMode}
             onPermanentError={onImagePermanentError}
           />
@@ -1067,7 +1073,7 @@ function CompactItemCard({
   parentPropertyName,
   currencyCode,
   colors,
-  resolvedImageUrl,
+  resolvedImageSource,
   onImagePermanentError,
   isNew = false,
   selectionMode = false,
@@ -1082,7 +1088,7 @@ function CompactItemCard({
   parentPropertyName: string;
   currencyCode: string;
   colors: ReturnType<typeof import("@/hooks/useColors").useColors>;
-  resolvedImageUrl?: string | null;
+  resolvedImageSource?: CoverlyImageSource | null;
   onImagePermanentError?: () => void;
   isNew?: boolean;
   selectionMode?: boolean;
@@ -1090,7 +1096,7 @@ function CompactItemCard({
   onToggleSelected?: () => void;
   onOpenItem: (itemId: string) => void;
   onRepositionPin: (item: InventoryItem, x: number, y: number) => Promise<void>;
-  onExpandImage: (item: InventoryItem, uri: string) => void;
+  onExpandImage: (item: InventoryItem, source: CoverlyImageSource) => void;
 }) {
   const readinessChip = itemReadinessChip(item);
   const totalValue = getItemTotalValue(item);
@@ -1151,9 +1157,10 @@ function CompactItemCard({
             {isSelected ? <Feather name="check" size={12} color={colors.primaryForeground} /> : null}
           </View>
         ) : null}
-        {resolvedImageUrl ? (
+        {resolvedImageSource ? (
           <ExpandableImage
-            uri={resolvedImageUrl}
+            uri={resolvedImageSource.uri}
+            cacheKey={resolvedImageSource.cacheKey}
             style={styles.gridThumb}
             contentFit="cover"
             placeholderIcon={placeholderIcon}
@@ -1164,7 +1171,7 @@ function CompactItemCard({
             pinPhotoIndex={0}
             viewerTitle={item.name}
             onReposition={pin ? (x, y) => onRepositionPin(item, x, y) : undefined}
-            onExpand={() => onExpandImage(item, resolvedImageUrl)}
+            onExpand={() => onExpandImage(item, resolvedImageSource)}
             disabled={selectionMode}
             onPermanentError={onImagePermanentError}
           />
@@ -1201,7 +1208,7 @@ function detailedCardPropsEqual(
     && previous.colors === next.colors
     && previous.parentRoomName === next.parentRoomName
     && previous.parentPropertyName === next.parentPropertyName
-    && previous.resolvedImageUrl === next.resolvedImageUrl
+    && previous.resolvedImageSource === next.resolvedImageSource
     && previous.evidenceCount === next.evidenceCount
     && previous.isNew === next.isNew
     && previous.editingTarget === next.editingTarget
@@ -1217,7 +1224,7 @@ function compactCardPropsEqual(
     && previous.colors === next.colors
     && previous.parentRoomName === next.parentRoomName
     && previous.parentPropertyName === next.parentPropertyName
-    && previous.resolvedImageUrl === next.resolvedImageUrl
+    && previous.resolvedImageSource === next.resolvedImageSource
     && previous.isNew === next.isNew
     && previous.selectionMode === next.selectionMode
     && previous.isSelected === next.isSelected;
@@ -1250,7 +1257,11 @@ export default function ItemsScreen() {
   const [roomCoverPickerController] = useState(createDeferredRoomCoverPickerController);
   const [archivingRoom, setArchivingRoom] = useState(false);
   const [newItemIds, setNewItemIds] = useState<Set<string>>(new Set());
-  const [roomImageViewer, setRoomImageViewer] = useState<{ item?: InventoryItem; uri: string; title: string } | null>(null);
+  const [roomImageViewer, setRoomImageViewer] = useState<{
+    item?: InventoryItem;
+    source: CoverlyImageSource;
+    title: string;
+  } | null>(null);
   const [activeEdit, setActiveEdit] = useState<{
     itemId: string;
     target: CardEditTarget;
@@ -1432,16 +1443,16 @@ export default function ItemsScreen() {
   });
 
   // Signed URL for the room cover photo (resolves storage path → 1-hr signed URL)
-  const signedCoverUrl = useSignedUrl(room?.cover_photo_url);
+  const signedCoverSource = useSignedImageSource(room?.cover_photo_url);
   const recoverRoomCoverUrl = useSignedImageRecovery([room?.cover_photo_url]);
 
-  // Batch-resolve item thumbnail paths → signed URLs in one round-trip.
+  // Resolve item thumbnail paths through shared per-object signed URL queries.
   // Memoised so the array reference is stable between renders (avoids redundant key recomputation).
   const itemImagePaths = React.useMemo(
     () => (items ?? []).map((it) => it.image_url ?? it.photo_url ?? null),
     [items],
   );
-  const itemSignedUrls = useSignedUrls(itemImagePaths);
+  const itemSignedSources = useSignedImageSources(itemImagePaths);
   const recoverItemImageUrl = useSignedImageRecovery(itemImagePaths);
   const repositionRoomItemPin = React.useCallback(async (target: InventoryItem, x: number, y: number) => {
     const committed = itemWithCommittedPin(target, { x, y });
@@ -1468,8 +1479,8 @@ export default function ItemsScreen() {
       (current) => replaceItemWithCommittedPin(current, target.id, { x, y }),
     );
   }, [id, queryClient, session?.user.id]);
-  const openRoomItemImage = React.useCallback((target: InventoryItem, uri: string) => {
-    setRoomImageViewer({ item: target, uri, title: target.name });
+  const openRoomItemImage = React.useCallback((target: InventoryItem, source: CoverlyImageSource) => {
+    setRoomImageViewer({ item: target, source, title: target.name });
   }, []);
   const repositionRoomViewerPin = React.useCallback(async (x: number, y: number) => {
     const target = roomImageViewer?.item;
@@ -2041,12 +2052,11 @@ export default function ItemsScreen() {
         Alert.alert("Save failed", "Cover photo could not be saved. Please check your connection and try again.");
         return;
       }
-      // Invalidate the room query and the signed URL cache for the new path so
-      // useSignedUrl immediately re-fetches and the new cover appears right away.
+      // Invalidate room data. The upload uses a new immutable path, so its
+      // object-level signed-image query and native cache identity are also new.
       refreshRoomCover(uploaded.path);
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["room", id] }),
-        queryClient.invalidateQueries({ queryKey: ["signed-url", uploaded.path] }),
         queryClient.invalidateQueries({ queryKey: ["rooms", resolvedFileId] }),
         queryClient.invalidateQueries({ queryKey: ["rooms", resolvedFileId, session.user.id] }),
       ]);
@@ -2335,7 +2345,7 @@ export default function ItemsScreen() {
       </View>
     ) : null}
     <View style={[styles.coverContainer, { backgroundColor: colors.secondary }]}>
-      {localCoverUrl ?? signedCoverUrl ? (
+      {localCoverUrl ?? signedCoverSource?.uri ? (
         /* Parallax image — taller than container so it can shift up */
         <Animated.View
           style={{
@@ -2348,7 +2358,8 @@ export default function ItemsScreen() {
           }}
         >
           <ExpandableImage
-            uri={localCoverUrl ?? signedCoverUrl}
+            uri={localCoverUrl ?? signedCoverSource?.uri}
+            cacheKey={localCoverUrl ? undefined : signedCoverSource?.cacheKey}
             style={StyleSheet.absoluteFill}
             contentFit="cover"
             viewerTitle={resolvedRoomName}
@@ -2357,7 +2368,7 @@ export default function ItemsScreen() {
             placeholderIconColor={colors.primary}
             placeholderBackgroundColor={colors.secondary}
             onExpand={() => setRoomImageViewer({
-              uri: localCoverUrl ?? signedCoverUrl!,
+              source: localCoverUrl ? { uri: localCoverUrl } : signedCoverSource!,
               title: resolvedRoomName,
             })}
             onPermanentError={() => recoverRoomCoverUrl(room?.cover_photo_url)}
@@ -2608,7 +2619,7 @@ export default function ItemsScreen() {
           currencyCode={resolvedPropertyCurrency}
           colors={colors}
           isNew={newItemIds.has(item.id)}
-          resolvedImageUrl={itemSignedUrls.get(item.image_url ?? item.photo_url ?? "") ?? null}
+          resolvedImageSource={itemSignedSources.get(item.image_url ?? item.photo_url ?? "") ?? null}
           onImagePermanentError={() => recoverItemImageUrl(item.image_url ?? item.photo_url)}
           selectionMode={selectionMode}
           isSelected={selectedItemIds.has(item.id)}
@@ -2627,7 +2638,7 @@ export default function ItemsScreen() {
         colors={colors}
         evidenceCount={evidenceCounts[item.id] ?? 0}
         isNew={newItemIds.has(item.id)}
-        resolvedImageUrl={itemSignedUrls.get(item.image_url ?? item.photo_url ?? "") ?? null}
+        resolvedImageSource={itemSignedSources.get(item.image_url ?? item.photo_url ?? "") ?? null}
         onImagePermanentError={() => recoverItemImageUrl(item.image_url ?? item.photo_url)}
         editingTarget={activeEdit?.itemId === item.id ? activeEdit.target : null}
         selectionMode={selectionMode}
@@ -2723,7 +2734,7 @@ export default function ItemsScreen() {
         }}
       />
       <ImageViewerModal
-        uris={roomImageViewer ? [roomImageViewer.uri] : []}
+        uris={roomImageViewer ? [roomImageViewer.source] : []}
         visible={!!roomImageViewer}
         title={roomImageViewer?.title ?? "Image preview"}
         onClose={() => setRoomImageViewer(null)}

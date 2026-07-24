@@ -12,6 +12,7 @@
  */
 
 import { supabase } from "@/lib/supabase";
+import { isDurableStoragePath } from "@/lib/image-cache-model";
 
 export const INVENTORY_PHOTOS_BUCKET = "inventory-photos";
 export const CLAIM_EVIDENCE_BUCKET = "claim-evidence";
@@ -49,16 +50,7 @@ function storageLogContext(bucket: string, pathOrUrl: string) {
  *   - blob:                  → browser/JS blob URI
  */
 export function isStoragePath(value: string | null | undefined): boolean {
-  if (!value) return false;
-  if (value.startsWith("http://") || value.startsWith("https://")) return false;
-  if (
-    value.startsWith("file://") ||
-    value.startsWith("ph://") ||
-    value.startsWith("content://") ||
-    value.startsWith("blob:")
-  )
-    return false;
-  return true;
+  return isDurableStoragePath(value);
 }
 
 /**

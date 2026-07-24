@@ -21,11 +21,20 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { ImageViewerModal } from "@/components/ImageViewerModal";
 import { useColors } from "@/hooks/useColors";
 import {
+  fetchSignedImageSource,
+  useSignedImageRecovery,
+} from "@/hooks/useSignedUrls";
+import {
   addItemEvidence,
   deleteItemEvidence,
   getEvidenceSignedUrl,
   loadItemEvidence,
 } from "@/lib/evidence-service";
+import {
+  signedImageQueryKey,
+  type CoverlyImageSource,
+} from "@/lib/image-cache-model";
+import { CLAIM_EVIDENCE_BUCKET } from "@/lib/storage-helpers";
 import {
   EVIDENCE_TYPE_LABEL,
   type ClaimEvidence,
@@ -103,10 +112,18 @@ export function ItemEvidenceSection({
   const [caption, setCaption] = useState("");
   const [saving, setSaving] = useState(false);
   const [evidenceSavedTick, setEvidenceSavedTick] = useState(false);
-  const [evidenceViewer, setEvidenceViewer] = useState<{ uri: string; title: string } | null>(null);
+  const [evidenceViewer, setEvidenceViewer] = useState<{
+    source: CoverlyImageSource;
+    reference: string;
+    title: string;
+  } | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const didAutoOpenRef = React.useRef(false);
+  const recoverEvidenceImage = useSignedImageRecovery(
+    [evidenceViewer?.reference],
+    CLAIM_EVIDENCE_BUCKET,
+  );
 
   React.useEffect(() => {
     if (!autoOpenAdd || didAutoOpenRef.current) return;
@@ -217,10 +234,21 @@ export function ItemEvidenceSection({
   const openEvidence = async (item: ClaimEvidence) => {
     setActionError(null);
     try {
-      const signedUrl = await getEvidenceSignedUrl(item.file_url);
       if (isImageEvidence(item.filename)) {
-        setEvidenceViewer({ uri: signedUrl, title: item.caption?.trim() || EVIDENCE_DISPLAY_LABEL[item.evidence_type] });
+        const source = await fetchSignedImageSource(
+          queryClient,
+          userId,
+          CLAIM_EVIDENCE_BUCKET,
+          item.file_url,
+        );
+        if (!source) throw new Error("Could not open this evidence file.");
+        setEvidenceViewer({
+          source,
+          reference: item.file_url,
+          title: item.caption?.trim() || EVIDENCE_DISPLAY_LABEL[item.evidence_type],
+        });
       } else {
+        const signedUrl = await getEvidenceSignedUrl(item.file_url);
         await WebBrowser.openBrowserAsync(signedUrl);
       }
     } catch (openError) {
@@ -241,12 +269,19 @@ export function ItemEvidenceSection({
             setDeletingId(item.id);
             setActionError(null);
             void deleteItemEvidence(itemId, item)
-              .then(() =>
-                Promise.all([
+              .then(() => {
+                queryClient.removeQueries({
+                  queryKey: signedImageQueryKey(
+                    userId,
+                    CLAIM_EVIDENCE_BUCKET,
+                    item.file_url,
+                  ),
+                });
+                return Promise.all([
                   queryClient.invalidateQueries({ queryKey }),
                   queryClient.invalidateQueries({ queryKey: ["room-evidence-counts"] }),
-                ]),
-              )
+                ]);
+              })
               .catch((deleteError) => {
                 setActionError(deleteError instanceof Error ? deleteError.message : "Could not delete evidence.");
               })
@@ -420,10 +455,11 @@ export function ItemEvidenceSection({
         </Pressable>
       </Modal>
       <ImageViewerModal
-        uris={evidenceViewer ? [evidenceViewer.uri] : []}
+        uris={evidenceViewer ? [evidenceViewer.source] : []}
         visible={!!evidenceViewer}
         title={evidenceViewer?.title ?? "Evidence image"}
         onClose={() => setEvidenceViewer(null)}
+        onPermanentError={() => recoverEvidenceImage(evidenceViewer?.reference)}
       />
     </>
   );
