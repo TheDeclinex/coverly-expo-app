@@ -7,6 +7,7 @@ import {
   buildFeedbackReportInsertPayload,
   createFeedbackId,
   createFeedbackScreenshotPath,
+  isFeedbackScreenshotWriteValueAllowed,
   parseFeedbackScreenshotValue,
   serializeError,
   summarizeFeedbackInsertPayload,
@@ -14,6 +15,7 @@ import {
   validateFeedbackForm,
   type FeedbackAdminStatus,
   type FeedbackFormState,
+  type FeedbackPriority,
 } from "@/lib/feedback-model";
 import { supabase } from "@/lib/supabase";
 
@@ -187,6 +189,9 @@ export async function submitFeedbackReport(input: FeedbackSubmitInput): Promise<
     input.screenshot.mimeType,
     input.screenshot.uri,
   );
+  if (!isFeedbackScreenshotWriteValueAllowed(uploadPath, input.userId)) {
+    throw new Error("Feedback screenshot path is outside the authenticated user namespace.");
+  }
 
   try {
     const contentType = screenshotMimeType(input.screenshot);
@@ -364,6 +369,20 @@ export async function updateFeedbackReportStatus(id: string, status: FeedbackAdm
     logFeedbackWarning("admin feedback status update failed", {
       feedbackId: id,
       status,
+    }, error);
+    throw error;
+  }
+}
+
+export async function updateFeedbackReportPriority(id: string, priority: FeedbackPriority): Promise<void> {
+  const { error } = await supabase.rpc("admin_update_feedback_priority", {
+    p_feedback_id: id,
+    p_priority: priority,
+  });
+  if (error) {
+    logFeedbackWarning("admin feedback priority update failed", {
+      feedbackId: id,
+      priority,
     }, error);
     throw error;
   }

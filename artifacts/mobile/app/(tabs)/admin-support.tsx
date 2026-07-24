@@ -16,15 +16,19 @@ import {
   feedbackAdminStatusOptions,
   feedbackCategoryLabel,
   feedbackPriorityLabel,
+  feedbackPriorityOptions,
   feedbackStatusLabel,
   feedbackTicketHasUnread,
   feedbackTypeLabel,
+  normalizeFeedbackPriority,
   serializeError,
   type FeedbackAdminStatus,
+  type FeedbackPriority,
 } from "@/lib/feedback-model";
 import {
   loadRecentFeedbackReports,
   type FeedbackReportRow,
+  updateFeedbackReportPriority,
   updateFeedbackReportStatus,
 } from "@/lib/feedback-service";
 
@@ -91,6 +95,17 @@ export default function AdminSupportScreen() {
     },
   });
 
+  const priorityMutation = useMutation({
+    mutationFn: ({ id, priority }: { id: string; priority: FeedbackPriority }) => updateFeedbackReportPriority(id, priority),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["admin-feedback-reports", session?.user.id] });
+    },
+    onError: (error) => {
+      if (__DEV__) console.warn("[adminFeedback] priority update failed", { error: serializeError(error) });
+      Alert.alert("Could not update priority", "Please try again.");
+    },
+  });
+
   if (isLoading) return <LoadingState />;
   if (!isAdmin) return <Redirect href={"/account" as Href} />;
 
@@ -143,10 +158,14 @@ export default function AdminSupportScreen() {
       <FeedbackTicketModal
         report={selectedReportFresh}
         visible={!!selectedReport}
+        isUpdatingPriority={priorityMutation.isPending}
         isUpdatingStatus={statusMutation.isPending}
         onClose={() => setSelectedReport(null)}
         onUpdateStatus={(status) => {
           if (selectedReportFresh) statusMutation.mutate({ id: selectedReportFresh.id, status });
+        }}
+        onUpdatePriority={(priority) => {
+          if (selectedReportFresh) priorityMutation.mutate({ id: selectedReportFresh.id, priority });
         }}
       />
     </>
@@ -202,40 +221,43 @@ function SupportTicketList({
 
   return (
     <View style={[styles.listCard, { backgroundColor: colors.card, borderColor: colors.border, borderRadius: colors.radius }]}>
-      {reports.map((report, index) => (
-        <Pressable
-          key={report.id}
-          accessibilityRole="button"
-          accessibilityLabel={`Review ${report.title ?? "feedback ticket"}`}
-          onPress={() => onSelect(report)}
-          style={({ pressed }) => [
-            styles.ticketRow,
-            index < reports.length - 1 && { borderBottomColor: colors.border, borderBottomWidth: StyleSheet.hairlineWidth },
-            { opacity: pressed ? 0.72 : 1 },
-          ]}
-        >
-          <View style={styles.ticketHeader}>
-            <Text style={[styles.ticketTitle, { color: colors.foreground }]} numberOfLines={1}>
-              {report.title ?? `${feedbackTypeLabel(report.feedback_type)} - ${ticketCategory(report)}`}
+      {reports.map((report, index) => {
+        const unread = ticketIsUnreadForAdmin(report);
+        return (
+          <Pressable
+            key={report.id}
+            accessibilityRole="button"
+            accessibilityLabel={`Review ${report.title ?? "feedback ticket"}${unread ? ", unread user reply" : ""}`}
+            onPress={() => onSelect(report)}
+            style={({ pressed }) => [
+              styles.ticketRow,
+              index < reports.length - 1 && { borderBottomColor: colors.border, borderBottomWidth: StyleSheet.hairlineWidth },
+              { opacity: pressed ? 0.72 : 1 },
+            ]}
+          >
+            <View style={styles.ticketHeader}>
+              <Text style={[styles.ticketTitle, { color: colors.foreground }]} numberOfLines={1}>
+                {report.title ?? `${feedbackTypeLabel(report.feedback_type)} - ${ticketCategory(report)}`}
+              </Text>
+              <Feather name="chevron-right" size={17} color={colors.mutedForeground} />
+            </View>
+            <Text style={[styles.ticketPreview, { color: colors.foreground }]} numberOfLines={2}>
+              {report.description ?? "No description supplied."}
             </Text>
-            <Feather name="chevron-right" size={17} color={colors.mutedForeground} />
-          </View>
-          <Text style={[styles.ticketPreview, { color: colors.foreground }]} numberOfLines={2}>
-            {report.description ?? "No description supplied."}
-          </Text>
-          <View style={styles.badgeRow}>
-            <Badge label={feedbackStatusLabel(report.status)} tone="status" />
-            <Badge label={feedbackPriorityLabel(report.severity)} tone="severity" />
-            <Badge label={feedbackTypeLabel(report.classification ?? report.feedback_type)} />
-            <Badge label={ticketCategory(report)} />
-            {report.screenshot_url ? <Badge label="Screenshot" tone="status" /> : null}
-          </View>
-          <Text style={[styles.ticketMeta, { color: colors.mutedForeground }]} numberOfLines={1}>
-            {report.user_email ?? "Unknown user"} - {formatFeedbackDate(report.created_at)}
-          </Text>
-          {ticketIsUnreadForAdmin(report) ? <Badge label="Unread reply" tone="severity" /> : null}
-        </Pressable>
-      ))}
+            <View style={styles.badgeRow}>
+              <Badge label={feedbackStatusLabel(report.status)} tone="status" />
+              <Badge label={feedbackPriorityLabel(report.severity)} tone="severity" />
+              <Badge label={feedbackTypeLabel(report.classification ?? report.feedback_type)} />
+              <Badge label={ticketCategory(report)} />
+              {report.screenshot_url ? <Badge label="Screenshot" tone="status" /> : null}
+            </View>
+            <Text style={[styles.ticketMeta, { color: colors.mutedForeground }]} numberOfLines={1}>
+              {report.user_email ?? "Unknown user"} - {formatFeedbackDate(report.created_at)}
+            </Text>
+            {unread ? <Badge label="Unread reply" tone="severity" /> : null}
+          </Pressable>
+        );
+      })}
     </View>
   );
 }
@@ -243,14 +265,18 @@ function SupportTicketList({
 function FeedbackTicketModal({
   report,
   visible,
+  isUpdatingPriority,
   isUpdatingStatus,
   onClose,
+  onUpdatePriority,
   onUpdateStatus,
 }: {
   report: FeedbackReportRow | null;
   visible: boolean;
+  isUpdatingPriority: boolean;
   isUpdatingStatus: boolean;
   onClose: () => void;
+  onUpdatePriority: (priority: FeedbackPriority) => void;
   onUpdateStatus: (status: FeedbackAdminStatus) => void;
 }) {
   const colors = useColors();
@@ -339,11 +365,40 @@ function FeedbackTicketModal({
                   );
                 })}
               </View>
+              <Text style={[styles.detailLabel, { color: colors.mutedForeground }]}>PRIORITY</Text>
+              <View style={styles.statusGrid}>
+                {feedbackPriorityOptions.map((priority) => {
+                  const active = normalizeFeedbackPriority(report.severity) === priority;
+                  return (
+                    <Pressable
+                      key={priority}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Set priority to ${feedbackPriorityLabel(priority)}`}
+                      accessibilityState={{ selected: active, disabled: isUpdatingPriority }}
+                      disabled={isUpdatingPriority}
+                      onPress={() => onUpdatePriority(priority)}
+                      style={({ pressed }) => [
+                        styles.statusChip,
+                        {
+                          borderColor: active ? colors.primary : colors.border,
+                          backgroundColor: active ? colors.accent : colors.background,
+                          opacity: pressed ? 0.72 : 1,
+                        },
+                      ]}
+                    >
+                      <Text style={[styles.statusChipText, { color: active ? colors.primary : colors.foreground }]}>
+                        {feedbackPriorityLabel(priority)}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
               <Text style={[styles.detailLabel, { color: colors.mutedForeground }]}>CLASSIFICATION</Text>
               <View style={styles.summaryBadges}>
                 <Badge label={feedbackTypeLabel(report.classification ?? report.feedback_type)} />
               </View>
               {isUpdatingStatus ? <Text style={[styles.ticketMeta, { color: colors.mutedForeground }]}>Updating status...</Text> : null}
+              {isUpdatingPriority ? <Text style={[styles.ticketMeta, { color: colors.mutedForeground }]}>Updating priority...</Text> : null}
             </View>
 
             <View style={[styles.detailCard, { backgroundColor: colors.card, borderColor: colors.border, borderRadius: colors.radius }]}>

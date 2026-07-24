@@ -25,7 +25,7 @@ import {
 } from "@/lib/barcode-verify";
 import type { InventoryItem } from "@/types";
 
-type ScanStage = "scanning" | "lookup" | "confirm" | BarcodeFailureKind | "saving";
+type ScanStage = "scanning" | "lookup" | "confirm" | BarcodeFailureKind | "saving" | "save-error";
 type SuggestedField = "name" | "brand" | "model" | "description";
 
 export interface BarcodeApplyValues {
@@ -160,8 +160,12 @@ export function BarcodeScanFlow({ visible, item, onClose, onApply, onTakePhoto }
       });
       onClose();
     } catch (saveError) {
-      setMessage(saveError instanceof Error ? saveError.message : "Could not update the item.");
-      setStage("error");
+      setMessage(
+        saveError instanceof Error && saveError.message
+          ? saveError.message
+          : "The matched barcode details could not be saved.",
+      );
+      setStage("save-error");
     }
   };
 
@@ -173,7 +177,7 @@ export function BarcodeScanFlow({ visible, item, onClose, onApply, onTakePhoto }
       onClose();
     } catch {
       setMessage("The barcode could not be saved. You can still close this screen and enter the item manually.");
-      setStage("service");
+      setStage("save-error");
     }
   };
 
@@ -350,6 +354,54 @@ export function BarcodeScanFlow({ visible, item, onClose, onApply, onTakePhoto }
                     </Pressable>
                   </View>
                 )}
+              </View>
+            ) : null}
+
+            {stage === "save-error" ? (
+              <View style={styles.centerState}>
+                <Feather name="save" size={30} color={colors.destructive} />
+                <Text style={[styles.stateTitle, { color: colors.foreground }]}>
+                  Couldn’t save barcode details
+                </Text>
+                <Text style={[styles.stateMessage, { color: colors.mutedForeground }]}>
+                  {message || "The item could not be updated. Your scanned barcode and product match are still available."}
+                </Text>
+                <Text style={[styles.barcodeText, { color: colors.mutedForeground }]}>{detectedBarcode}</Text>
+                {result ? (
+                  <Text style={[styles.suggestedValue, { color: colors.foreground }]} numberOfLines={2}>
+                    {result.productName ?? result.matchedProduct?.title ?? "Matched product"}
+                  </Text>
+                ) : null}
+                <View style={styles.fallbackActions}>
+                  {result ? (
+                    <Pressable
+                      accessibilityRole="button"
+                      accessibilityLabel="Retry saving barcode match"
+                      onPress={() => void applyMatch()}
+                      style={[styles.primaryButton, { backgroundColor: colors.primary }]}
+                    >
+                      <Feather name="refresh-cw" size={16} color={colors.primaryForeground} />
+                      <Text style={[styles.primaryButtonText, { color: colors.primaryForeground }]}>Retry</Text>
+                    </Pressable>
+                  ) : null}
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel="Save barcode and enter item manually"
+                    onPress={() => void keepBarcodeAndEnterManually()}
+                    style={[styles.secondaryButton, { borderColor: colors.border }]}
+                  >
+                    <Feather name="edit-3" size={16} color={colors.foreground} />
+                    <Text style={[styles.secondaryButtonText, { color: colors.foreground }]}>Enter manually</Text>
+                  </Pressable>
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel="Cancel barcode changes"
+                    onPress={onClose}
+                    style={[styles.secondaryButton, { borderColor: colors.border }]}
+                  >
+                    <Text style={[styles.secondaryButtonText, { color: colors.foreground }]}>Cancel</Text>
+                  </Pressable>
+                </View>
               </View>
             ) : null}
           </View>

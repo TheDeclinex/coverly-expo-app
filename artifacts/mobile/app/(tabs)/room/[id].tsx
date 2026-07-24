@@ -198,6 +198,7 @@ function ItemCard({
   isSelected = false,
   onToggleSelected,
   onOpenItem,
+  onScanRoom,
   onRepositionPin,
   onExpandImage,
 }: {
@@ -219,6 +220,7 @@ function ItemCard({
   isSelected?: boolean;
   onToggleSelected?: () => void;
   onOpenItem: (itemId: string) => void;
+  onScanRoom: () => void | Promise<void>;
   onRepositionPin: (item: InventoryItem, x: number, y: number) => Promise<void>;
   onExpandImage: (item: InventoryItem, uri: string) => void;
 }) {
@@ -1004,7 +1006,7 @@ function ItemCard({
         onApply={applyBarcodeMatch}
         onTakePhoto={() => {
           setBarcodeScanOpen(false);
-          void handleScanRoom();
+          void onScanRoom();
         }}
       />
     </>
@@ -2632,6 +2634,7 @@ export default function ItemsScreen() {
         isSelected={selectedItemIds.has(item.id)}
         onToggleSelected={() => toggleSelectedItem(item.id)}
         onOpenItem={clearNewItemOnOpen}
+        onScanRoom={handleScanRoom}
         onRepositionPin={repositionRoomItemPin}
         onExpandImage={openRoomItemImage}
         onBeginEdit={(target) => setActiveEdit({ itemId: item.id, target })}

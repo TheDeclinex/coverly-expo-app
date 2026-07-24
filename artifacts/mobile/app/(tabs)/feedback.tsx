@@ -25,6 +25,7 @@ import { useColors } from "@/hooks/useColors";
 import {
   feedbackCategoryLabel,
   feedbackPriorityLabel,
+  feedbackPriorityOptions,
   feedbackStatusLabel,
   feedbackTicketHasUnread,
   feedbackTypeLabel,
@@ -44,8 +45,6 @@ import {
 
 const typeOptions: FeedbackType[] = ["issue", "bug", "feature", "feedback"];
 const categoryOptions: FeedbackCategory[] = ["general", "scan", "pricing", "claim_pack", "billing", "account"];
-const priorityOptions: FeedbackPriority[] = ["normal", "low", "blocking"];
-
 export default function FeedbackScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
@@ -60,7 +59,7 @@ export default function FeedbackScreen() {
   }>();
   const [type, setType] = React.useState<FeedbackType>(typeOptions.includes(params.type as FeedbackType) ? params.type as FeedbackType : "issue");
   const [category, setCategory] = React.useState<FeedbackCategory>(categoryOptions.includes(params.category as FeedbackCategory) ? params.category as FeedbackCategory : "general");
-  const [priority, setPriority] = React.useState<FeedbackPriority>(priorityOptions.includes(params.priority as FeedbackPriority) ? params.priority as FeedbackPriority : "normal");
+  const [priority, setPriority] = React.useState<FeedbackPriority>(feedbackPriorityOptions.includes(params.priority as FeedbackPriority) ? params.priority as FeedbackPriority : "normal");
   const [message, setMessage] = React.useState(typeof params.message === "string" ? params.message : "");
   const [screenshot, setScreenshot] = React.useState<FeedbackScreenshotInput | null>(null);
   const [isPicking, setIsPicking] = React.useState(false);
@@ -210,7 +209,7 @@ export default function FeedbackScreen() {
 
         <OptionSection title="Priority">
           <ChipGroup
-            values={priorityOptions}
+            values={feedbackPriorityOptions}
             selected={priority}
             labelFor={feedbackPriorityLabel}
             onSelect={setPriority}

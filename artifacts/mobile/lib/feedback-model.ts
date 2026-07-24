@@ -1,6 +1,8 @@
 export type FeedbackType = "issue" | "bug" | "feature" | "feedback";
 export type FeedbackCategory = "general" | "scan" | "pricing" | "claim_pack" | "billing" | "account";
-export type FeedbackPriority = "low" | "normal" | "blocking";
+export type FeedbackPriority = "low" | "normal" | "high" | "blocking";
+export type FeedbackMessageSenderRole = "user" | "admin" | "system";
+export const feedbackPriorityOptions: FeedbackPriority[] = ["blocking", "high", "normal", "low"];
 export type FeedbackAdminStatus =
   | "new"
   | "under_investigation"
@@ -108,8 +110,28 @@ export function feedbackTypeToExistingColumn(value: FeedbackType): string {
 
 export function feedbackPriorityToSeverity(value: FeedbackPriority): string {
   if (value === "blocking") return "critical";
+  if (value === "high") return "high";
   if (value === "low") return "minor";
   return "moderate";
+}
+
+export function normalizeFeedbackPriority(
+  value: FeedbackPriority | string | null | undefined,
+): FeedbackPriority {
+  if (value === "blocking" || value === "critical") return "blocking";
+  if (value === "high") return "high";
+  if (value === "low" || value === "minor") return "low";
+  return "normal";
+}
+
+export function feedbackPrioritySortRank(
+  value: FeedbackPriority | string | null | undefined,
+): number {
+  const priority = normalizeFeedbackPriority(value);
+  if (priority === "blocking") return 4;
+  if (priority === "high") return 3;
+  if (priority === "normal") return 2;
+  return 1;
 }
 
 export function feedbackTitle(input: Pick<FeedbackFormState, "type" | "category">): string {
@@ -219,6 +241,18 @@ export function createFeedbackScreenshotPath(
   return `${safeUserId}/${safeFeedbackId}/screenshot.${extension}`;
 }
 
+export function isFeedbackScreenshotWriteValueAllowed(
+  storedValue: string | null | undefined,
+  userId: string,
+): boolean {
+  if (storedValue == null) return true;
+  const trimmed = storedValue.trim();
+  const safeUserId = userId.replace(/[^a-zA-Z0-9-]/g, "");
+  return Boolean(trimmed)
+    && !/^https?:\/\//i.test(trimmed)
+    && trimmed.startsWith(`${safeUserId}/`);
+}
+
 export function parseFeedbackScreenshotValue(
   storedValue: string,
   supabaseUrl = "",
@@ -322,6 +356,7 @@ export function feedbackCategoryLabel(value: FeedbackCategory | string | null | 
 
 export function feedbackPriorityLabel(value: FeedbackPriority | string | null | undefined): string {
   if (value === "blocking" || value === "critical") return "Blocking";
+  if (value === "high") return "High";
   if (value === "moderate") return "Normal";
   if (value === "minor") return "Low";
   if (value === "low") return "Low";
@@ -374,4 +409,13 @@ export function feedbackTicketHasUnread(
 
 export function isFeedbackAdminStatus(value: string): value is FeedbackAdminStatus {
   return feedbackAdminStatusOptions.includes(value as FeedbackAdminStatus);
+}
+
+export function feedbackMessageSenderLabel(
+  senderRole: FeedbackMessageSenderRole,
+  viewerRole: "user" | "admin",
+): string {
+  if (senderRole === "system") return "Status update";
+  if (senderRole === viewerRole) return "You";
+  return senderRole === "admin" ? "Coverly support" : "User";
 }

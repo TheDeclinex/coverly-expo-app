@@ -2,6 +2,8 @@ import { Feather } from "@expo/vector-icons";
 import React, { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
+  AppState,
+  type AppStateStatus,
   Modal,
   Pressable,
   ScrollView,
@@ -59,14 +61,67 @@ export function VoiceInputSheet({
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const processingRef = useRef(false);
   const visibleRef = useRef(visible);
+  const phaseRef = useRef<VoiceInputPhase>("permission");
+  const appStateRef = useRef<AppStateStatus>(AppState.currentState);
+  const permissionRefreshInFlightRef = useRef(false);
 
   useEffect(() => {
     visibleRef.current = visible;
+    return () => {
+      visibleRef.current = false;
+    };
   }, [visible]);
 
   useEffect(() => {
+    phaseRef.current = phase;
+  }, [phase]);
+
+  useEffect(() => {
+    const subscription = AppState.addEventListener("change", (nextState) => {
+      const previousState = appStateRef.current;
+      appStateRef.current = nextState;
+      const returnedToForeground = nextState === "active" && previousState !== "active";
+      const currentPhase = phaseRef.current;
+      const shouldPreservePhase = currentPhase === "recording"
+        || currentPhase === "processing"
+        || currentPhase === "review";
+
+      if (
+        !returnedToForeground
+        || !visibleRef.current
+        || shouldPreservePhase
+        || permissionRefreshInFlightRef.current
+      ) {
+        return;
+      }
+
+      permissionRefreshInFlightRef.current = true;
+      void voice.checkPermission()
+        .then((granted) => {
+          if (!visibleRef.current) return;
+          setErrorMessage(null);
+          setPhase(granted ? "ready" : "permission");
+        })
+        .catch(() => {
+          if (!visibleRef.current) return;
+          setPhase("error");
+          setErrorMessage(VOICE_EDIT_FALLBACK_MESSAGE);
+        })
+        .finally(() => {
+          permissionRefreshInFlightRef.current = false;
+        });
+    });
+
+    return () => {
+      subscription.remove();
+    };
+  }, [voice.checkPermission]);
+
+  useEffect(() => {
     if (!visible) return;
+    if (permissionRefreshInFlightRef.current) return;
     let cancelled = false;
+    permissionRefreshInFlightRef.current = true;
     setPhase("permission");
     setTranscript("");
     setChanges([]);
@@ -81,6 +136,9 @@ export function VoiceInputSheet({
           setPhase("error");
           setErrorMessage(VOICE_EDIT_FALLBACK_MESSAGE);
         }
+      })
+      .finally(() => {
+        permissionRefreshInFlightRef.current = false;
       });
     return () => {
       cancelled = true;

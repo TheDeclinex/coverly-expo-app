@@ -513,9 +513,9 @@ export default function ItemDetailScreen() {
               pathname: "/(tabs)/scan",
               params: {
                 roomId: item.room_id ?? "",
-                roomName: params.roomName ?? "",
+                roomName: roomName ?? item.room ?? "",
                 fileId: item.file_id,
-                fileName: params.fileName ?? "",
+                fileName: fileName ?? "",
               },
             } as Href);
           }}

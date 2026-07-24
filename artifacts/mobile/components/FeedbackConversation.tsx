@@ -6,6 +6,7 @@ import { ActivityIndicator, Pressable, StyleSheet, Text, TextInput, View } from 
 import { feedbackUnreadQueryKey } from "@/hooks/useFeedbackUnread";
 import { useAuth } from "@/context/AuthContext";
 import { useColors } from "@/hooks/useColors";
+import { feedbackMessageSenderLabel } from "@/lib/feedback-model";
 import {
   loadFeedbackMessages,
   markFeedbackTicketRead,
@@ -109,6 +110,9 @@ export function FeedbackConversation({
             if (message.sender_role === "system") {
               return (
                 <View key={message.id} style={[styles.systemMessage, { backgroundColor: colors.secondary }]}>
+                  <Text style={[styles.systemSender, { color: colors.mutedForeground }]}>
+                    {feedbackMessageSenderLabel(message.sender_role, viewerRole)}
+                  </Text>
                   <Text style={[styles.systemText, { color: colors.mutedForeground }]}>{message.body}</Text>
                 </View>
               );
@@ -124,7 +128,7 @@ export function FeedbackConversation({
                 ]}
               >
                 <Text style={[styles.sender, { color: mine ? colors.primary : colors.mutedForeground }]}>
-                  {message.sender_role === "admin" ? "Coverly support" : "You"}
+                  {feedbackMessageSenderLabel(message.sender_role, viewerRole)}
                 </Text>
                 <Text style={[styles.body, { color: colors.foreground }]}>{message.body}</Text>
                 <Text style={[styles.date, { color: colors.mutedForeground }]}>{messageDate(message.created_at)}</Text>
@@ -208,8 +212,9 @@ const styles = StyleSheet.create({
   sender: { fontSize: 10, fontFamily: "Inter_700Bold" },
   body: { fontSize: 13, lineHeight: 19, fontFamily: "Inter_400Regular" },
   date: { fontSize: 9, fontFamily: "Inter_400Regular" },
-  systemMessage: { alignSelf: "center", borderRadius: 999, paddingHorizontal: 11, paddingVertical: 6 },
-  systemText: { fontSize: 10, fontFamily: "Inter_600SemiBold" },
+  systemMessage: { alignSelf: "center", borderRadius: 12, paddingHorizontal: 11, paddingVertical: 6, gap: 2 },
+  systemSender: { fontSize: 9, textAlign: "center", fontFamily: "Inter_700Bold", textTransform: "uppercase", letterSpacing: 0.5 },
+  systemText: { fontSize: 10, textAlign: "center", fontFamily: "Inter_600SemiBold" },
   closed: { borderRadius: 10, padding: 12, flexDirection: "row", alignItems: "center", gap: 8 },
   composer: { gap: 9 },
   quickActions: { flexDirection: "row", flexWrap: "wrap", gap: 7 },

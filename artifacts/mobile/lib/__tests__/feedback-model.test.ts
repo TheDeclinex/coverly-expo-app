@@ -6,11 +6,14 @@ import {
   createFeedbackScreenshotPath,
   feedbackCategoryLabel,
   feedbackBuildDisplay,
+  feedbackMessageSenderLabel,
   feedbackPriorityLabel,
+  feedbackPrioritySortRank,
   feedbackStatusLabel,
   feedbackTicketHasUnread,
   feedbackTypeLabel,
   isFeedbackAdminStatus,
+  isFeedbackScreenshotWriteValueAllowed,
   serializeError,
   parseFeedbackScreenshotValue,
   summarizeFeedbackInsertPayload,
@@ -38,6 +41,23 @@ test("feedback screenshot path is scoped to user and feedback id", () => {
   assert.equal(
     createFeedbackScreenshotPath("user/123", "feedback:456", "screen.PNG", "image/png"),
     "user123/feedback456/screenshot.png",
+  );
+});
+
+test("new screenshot writes stay inside the authenticated user namespace", () => {
+  const userId = "22222222-2222-4222-8222-222222222222";
+  assert.equal(isFeedbackScreenshotWriteValueAllowed(null, userId), true);
+  assert.equal(
+    isFeedbackScreenshotWriteValueAllowed(`${userId}/ticket/screenshot.png`, userId),
+    true,
+  );
+  assert.equal(
+    isFeedbackScreenshotWriteValueAllowed("33333333-3333-4333-8333-333333333333/ticket/screenshot.png", userId),
+    false,
+  );
+  assert.equal(
+    isFeedbackScreenshotWriteValueAllowed("https://attacker.example/screenshot.png", userId),
+    false,
   );
 });
 
@@ -86,6 +106,11 @@ test("feedback labels are human readable", () => {
   assert.equal(feedbackTypeLabel("issue"), "Issue");
   assert.equal(feedbackCategoryLabel("claim_pack"), "Claim packs");
   assert.equal(feedbackPriorityLabel("critical"), "Blocking");
+  assert.equal(feedbackPriorityLabel("high"), "High");
+  assert.deepEqual(
+    ["blocking", "high", "normal", "low"].map(feedbackPrioritySortRank),
+    [4, 3, 2, 1],
+  );
   assert.equal(feedbackStatusLabel("under_investigation"), "Under investigation");
   assert.equal(isFeedbackAdminStatus("development"), true);
   assert.equal(isFeedbackAdminStatus("admin_only"), false);
@@ -109,6 +134,18 @@ test("screenshot values recover storage paths from legacy Supabase URLs", () => 
     ),
     { kind: "path", value: "user/ticket/screenshot.png" },
   );
+  assert.deepEqual(
+    parseFeedbackScreenshotValue("https://legacy.example/screenshots/ticket.png"),
+    { kind: "url", value: "https://legacy.example/screenshots/ticket.png" },
+  );
+});
+
+test("conversation sender labels depend on sender and viewer roles", () => {
+  assert.equal(feedbackMessageSenderLabel("admin", "admin"), "You");
+  assert.equal(feedbackMessageSenderLabel("user", "admin"), "User");
+  assert.equal(feedbackMessageSenderLabel("user", "user"), "You");
+  assert.equal(feedbackMessageSenderLabel("admin", "user"), "Coverly support");
+  assert.equal(feedbackMessageSenderLabel("system", "user"), "Status update");
 });
 
 test("unread state only follows messages from the opposite party", () => {
@@ -180,4 +217,23 @@ test("feedback insert payload is stable when screenshot is selected", () => {
       insertedColumns: Object.keys(screenshotSelectedPayload).sort(),
     },
   );
+});
+
+test("high priority is stored without rewriting existing severity values", () => {
+  const payload = buildFeedbackReportInsertPayload({
+    id: "11111111-1111-4111-8111-111111111111",
+    userId: "22222222-2222-4222-8222-222222222222",
+    form: {
+      type: "bug",
+      category: "scan",
+      priority: "high",
+      message: "Barcode saving fails after a successful lookup.",
+    },
+    now: "2026-07-24T00:00:00.000Z",
+    environment: "development",
+    deviceInfo: "ios",
+    osInfo: "ios 18",
+  });
+  assert.equal(payload.severity, "high");
+  assert.equal(payload.metadata_json.priority, "high");
 });
