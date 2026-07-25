@@ -77,8 +77,8 @@ export function AccountRow({
         {!!subtitle && <Text style={[styles.subtitle, { color: colors.mutedForeground }]}>{subtitle}</Text>}
       </View>
       {badgeLabel ? (
-        <View style={[styles.unreadBadge, { backgroundColor: colors.warning }]}>
-          <Text style={[styles.unreadBadgeText, { color: colors.warningForeground }]}>{badgeLabel}</Text>
+        <View style={[styles.unreadBadge, { backgroundColor: colors.primary }]}>
+          <Text style={[styles.unreadBadgeText, { color: colors.primaryForeground }]}>{badgeLabel}</Text>
         </View>
       ) : null}
       {!!value && <Text style={[styles.value, { color: colors.mutedForeground }]}>{value}</Text>}

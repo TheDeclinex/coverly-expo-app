@@ -74,7 +74,7 @@ test("property and portfolio totals do not combine currencies", () => {
 });
 
 test("forward migration contains all markets, backfills, server derivation, and preserved limits", () => {
-  const migration = source("supabase/migrations/20260717_global_market_foundation.sql");
+  const migration = source("supabase/migrations/20260717000000_global_market_foundation.sql");
   assert.match(migration, /AD:EUR[\s\S]*ZW:USD/);
   assert.match(migration, /SET country_code = 'NZ', currency_code = 'NZD'/);
   assert.match(migration, /unit_estimated_price = estimated_price,[\s\S]*estimated_price \*[\s\S]*GREATEST\(COALESCE\(quantity, 1\), 1\)/);
@@ -89,7 +89,7 @@ test("forward migration contains all markets, backfills, server derivation, and 
   assert.doesNotMatch(migration, /locale = values\.locale/);
   assert.doesNotMatch(migration, /inventory_item_valuations|current_valuation_id/);
 
-  const searchMigration = source("supabase/migrations/20260718_enable_global_replacement_search.sql");
+  const searchMigration = source("supabase/migrations/20260718000000_enable_global_replacement_search.sql");
   assert.match(searchMigration, /replacement_search_enabled = true/);
   assert.match(searchMigration, /serper_gl = lower\(country_code\)/);
   assert.match(searchMigration, /WHERE country_code = 'BG'/);

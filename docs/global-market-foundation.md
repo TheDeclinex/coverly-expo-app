@@ -51,7 +51,7 @@ Deployment order:
 
 1. Review these fixes and the final diff.
 2. Commit and push only after review approval.
-3. Open the target Supabase project's SQL Editor and apply the pending forward migrations in order. Existing global-market deployments need `supabase/migrations/20260718_enable_global_replacement_search.sql`; fresh environments should also retain the updated `20260717_global_market_foundation.sql` seed. Each file contains its own transaction and schema reload notification.
+3. Open the target Supabase project's SQL Editor and apply the pending forward migrations in order. Existing global-market deployments need `supabase/migrations/20260718000000_enable_global_replacement_search.sql`; fresh environments should also retain the updated `20260717000000_global_market_foundation.sql` seed. Each file contains its own transaction and schema reload notification.
 4. If a manual reload is needed after the transaction, run:
 
 ```sql

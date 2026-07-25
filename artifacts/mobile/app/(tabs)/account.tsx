@@ -159,7 +159,7 @@ export default function AccountScreen() {
             icon="message-square"
             title="Feedback & support"
             subtitle="Report an issue or read support replies"
-            tone="amber"
+            tone="teal"
             badgeCount={feedbackUnread.data?.userUnreadCount}
             onPress={() => router.push("/feedback" as Href)}
             last

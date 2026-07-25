@@ -10,11 +10,13 @@ The repository is now configured for three explicit application environments:
 | Internal preview | `preview` | `preview` | Development/preview project | Sandbox |
 | Store release | `production` | `production` | Production project | Production |
 
-Preview no longer consumes the EAS production environment. Preview and
-production must each set `EXPO_PUBLIC_EXPECTED_SUPABASE_PROJECT_REF`; the app
-rejects a Supabase URL whose project reference does not match. Production also
-rejects a non-production RevenueCat environment marker and treats billing gates
-as enabled even if the public gate flag is accidentally omitted.
+Preview no longer consumes the EAS production environment. Development and
+preview use Coverly QA (`vcddtypptyktdcfnkkia`); production uses Coverly PROD
+(`jqijavrugjidqzbbgpag`). Preview and production must each set
+`EXPO_PUBLIC_EXPECTED_SUPABASE_PROJECT_REF`; the app rejects a Supabase URL
+whose project reference does not match. Production also rejects a
+non-production RevenueCat environment marker and treats billing gates as
+enabled even if the public gate flag is accidentally omitted.
 
 Run this value-safe check from `artifacts/mobile` before any EAS build:
 
@@ -22,27 +24,18 @@ Run this value-safe check from `artifacts/mobile` before any EAS build:
 pnpm run verify:env
 ```
 
-The script does not print anon keys or RevenueCat SDK keys. A separate
-development Supabase project and the corresponding EAS/RevenueCat values still
-have to be created and configured manually. This repository does not create,
-link, migrate, or deploy either project automatically.
+The script does not print Supabase publishable keys or RevenueCat SDK keys.
+Database migrations, Function deployment, and environment promotion remain
+explicit CLI operations documented in `docs/supabase-environment-promotion.md`.
+RevenueCat SDK keys and server-side provider secrets still require secure
+per-environment configuration.
 
 ## Current decision
 
-Coverly now requires a distinct production Supabase project before public store
-release. Repository and EAS configuration are prepared for that separation, but
-project creation, migration promotion, function deployment, secrets, and smoke
-testing remain manual launch actions.
-
-The current Supabase project should be treated as a **production-candidate / pre-live environment**:
-
-* It is not yet serving public customers.
-* It does contain real app structure, test users, security settings, migrations, Edge Functions, storage policies, and live-like data.
-* Changes should still be handled carefully.
-
-Until the second project is configured, the current project remains a
-**production-candidate / pre-live environment**, not a verified separated
-production target.
+Coverly has distinct QA and Production Supabase projects. QA is reconstructed
+from the source-controlled migration chain and is the only backend target for
+development and preview testing. Production remains a protected promotion
+target and must not receive development writes.
 
 ## Current operating model
 
@@ -226,12 +219,12 @@ As of the July 2026 P0 hardening checkpoint:
 * Expo contains no direct `user_profiles` writes.
 * Profile changes use RPCs only.
 * Property allowance enforcement is defined in
-  `20260717_property_limits_by_plan.sql` and the country-aware create RPC in
-  `20260717_global_market_foundation.sql`.
+  `20260717010000_property_limits_by_plan.sql` and the country-aware create RPC in
+  `20260717000000_global_market_foundation.sql`.
 * Feedback screenshot namespace hardening is defined in
-  `20260724_feedback_screenshot_security_and_high_priority.sql`.
+  `20260724000000_feedback_screenshot_security_and_high_priority.sql`.
 * Atomic property deletion is defined in
-  `20260725_transactional_property_delete.sql`.
+  `20260725010000_transactional_property_delete.sql`.
 * Known remaining risks:
 
   * Generated Supabase database types are not yet present.

@@ -4,19 +4,19 @@ import { resolve } from "node:path";
 import test from "node:test";
 
 const migration = readFileSync(
-  resolve(process.cwd(), "../../supabase/migrations/20260723_feedback_conversations_and_build_context.sql"),
+  resolve(process.cwd(), "../../supabase/migrations/20260723000000_feedback_conversations_and_build_context.sql"),
   "utf8",
 );
 const unreadConversationMigration = readFileSync(
-  resolve(process.cwd(), "../../supabase/migrations/20260725_feedback_user_unread_conversations.sql"),
+  resolve(process.cwd(), "../../supabase/migrations/20260725000000_feedback_user_unread_conversations.sql"),
   "utf8",
 );
 const hardeningMigration = readFileSync(
-  resolve(process.cwd(), "../../supabase/migrations/20260724_feedback_screenshot_security_and_high_priority.sql"),
+  resolve(process.cwd(), "../../supabase/migrations/20260724000000_feedback_screenshot_security_and_high_priority.sql"),
   "utf8",
 );
 const baseFeedbackMigration = readFileSync(
-  resolve(process.cwd(), "../../supabase/migrations/20260627_feedback_reports_mobile.sql"),
+  resolve(process.cwd(), "../../supabase/migrations/20260627000000_feedback_reports_mobile.sql"),
   "utf8",
 );
 const adminSupportSource = readFileSync(
@@ -37,6 +37,14 @@ const feedbackUnreadHookSource = readFileSync(
 );
 const homeSource = readFileSync(
   resolve(process.cwd(), "app/(tabs)/index.tsx"),
+  "utf8",
+);
+const accountSource = readFileSync(
+  resolve(process.cwd(), "app/(tabs)/account.tsx"),
+  "utf8",
+);
+const accountMenuSource = readFileSync(
+  resolve(process.cwd(), "components/AccountMenu.tsx"),
   "utf8",
 );
 
@@ -101,6 +109,12 @@ test("home badge uses inset Coverly notification colours and bounded text", () =
   assert.match(homeSource, /right: 1[\s\S]*top: 1[\s\S]*minWidth: 15[\s\S]*height: 15/);
   assert.match(homeSource, /maxFontSizeMultiplier=\{1\.2\}/);
   assert.match(feedbackScreenSource, /unreadDot, \{ backgroundColor: colors\.primary \}/);
+  assert.match(
+    accountSource,
+    /title="Feedback & support"[\s\S]*tone="teal"[\s\S]*badgeCount=\{feedbackUnread\.data\?\.userUnreadCount\}/,
+  );
+  assert.match(accountMenuSource, /unreadBadge, \{ backgroundColor: colors\.primary \}/);
+  assert.match(accountMenuSource, /unreadBadgeText, \{ color: colors\.primaryForeground \}/);
 });
 
 test("status and classification are separate constrained fields", () => {

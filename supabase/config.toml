@@ -1,0 +1,87 @@
+# Reproducible Coverly Supabase configuration.
+# Remote promotion remains an explicit, project-ref-verified CLI operation.
+project_id = "coverly-expo-app"
+
+[api]
+enabled = true
+schemas = ["public", "graphql_public"]
+extra_search_path = ["public", "extensions"]
+max_rows = 1000
+
+[db]
+major_version = 17
+
+[db.migrations]
+enabled = true
+schema_paths = []
+
+[db.seed]
+enabled = false
+sql_paths = []
+
+[storage]
+enabled = true
+file_size_limit = "50MiB"
+
+[auth]
+enabled = true
+site_url = "https://www.coverly.nz"
+additional_redirect_urls = [
+  "https://app.coverly.nz/auth/callback",
+  "https://app.coverly.nz/reset-password",
+  "https://app.coverly.nz/callback",
+  "https://cloud.uibakery.io/share/OSjmPVZV0G/auth/callback",
+  "https://cloud.uibakery.io/share/OSjmPVZV0G/reset-password",
+  "https://cloud.uibakery.io/share/OSjmPVZV0G/callback",
+  "https://www.coverly.nz/auth/verified",
+  "https://www.coverly.nz/auth/verified/",
+  "https://www.coverly.nz/reset-password",
+  "http://localhost:3000/auth/callback",
+  "http://localhost:3000/reset-password",
+  "http://localhost:3000/callback",
+  "http://localhost:5173/auth/callback",
+  "http://localhost:5173/reset-password",
+  "http://localhost:5173/callback",
+]
+enable_signup = true
+enable_anonymous_sign_ins = false
+minimum_password_length = 6
+
+[auth.email]
+enable_signup = true
+double_confirm_changes = true
+enable_confirmations = true
+secure_password_change = false
+
+[functions.scan-room-photo]
+verify_jwt = false
+
+[functions.replacement-price-search]
+verify_jwt = true
+
+[functions.voice-describe]
+verify_jwt = true
+
+[functions.barcode-verify]
+verify_jwt = true
+
+[functions.voice-command]
+verify_jwt = true
+
+[functions.stripe-webhook]
+verify_jwt = false
+
+[functions.generate-claim-pack]
+verify_jwt = true
+
+[functions.revenuecat-webhook]
+verify_jwt = false
+
+[functions.replacement-search-refine]
+verify_jwt = true
+
+[functions.create-property]
+verify_jwt = false
+
+[functions.replacement-refinement-v2]
+verify_jwt = true

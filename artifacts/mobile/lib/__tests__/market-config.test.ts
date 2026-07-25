@@ -9,7 +9,7 @@ import { COUNTRY_CURRENCY_PAIRS, COUNTRY_OPTIONS, filterCountryOptions, MARKET_C
 
 type ComparableMarket = Omit<(typeof MARKET_CONFIGS)[number], "countryName">;
 const root = new URL("../../../../", import.meta.url);
-const migration = readFileSync(new URL("supabase/migrations/20260717_global_market_foundation.sql", root), "utf8");
+const migration = readFileSync(new URL("supabase/migrations/20260717000000_global_market_foundation.sql", root), "utf8");
 const countrySelectSource = readFileSync(new URL("artifacts/mobile/components/CountrySelect.tsx", root), "utf8");
 
 function comparable(market: (typeof MARKET_CONFIGS)[number]): ComparableMarket {

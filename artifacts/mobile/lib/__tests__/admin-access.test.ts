@@ -9,8 +9,8 @@ import { isAdminQueryKey, isAdminRoutePath } from "../admin-access.ts";
 const testDirectory = dirname(fileURLToPath(import.meta.url));
 const layoutSource = readFileSync(resolve(testDirectory, "../../app/(tabs)/_layout.tsx"), "utf8");
 const accountSource = readFileSync(resolve(testDirectory, "../../app/(tabs)/account.tsx"), "utf8");
-const adminMigration = readFileSync(resolve(testDirectory, "../../../../supabase/migrations/20260701_admin_mvp_v1.sql"), "utf8");
-const feedbackMigration = readFileSync(resolve(testDirectory, "../../../../supabase/migrations/20260627_feedback_reports_mobile.sql"), "utf8");
+const adminMigration = readFileSync(resolve(testDirectory, "../../../../supabase/migrations/20260701000000_admin_mvp_v1.sql"), "utf8");
+const feedbackMigration = readFileSync(resolve(testDirectory, "../../../../supabase/migrations/20260627000000_feedback_reports_mobile.sql"), "utf8");
 
 test("all current admin route shapes are recognized", () => {
   for (const path of ["/admin", "/admin-users", "/admin-user/123", "/admin-claim-pack/abc", "/admin-support"]) {

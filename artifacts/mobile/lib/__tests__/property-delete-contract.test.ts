@@ -5,7 +5,7 @@ import test from "node:test";
 
 const screen = readFileSync(resolve(process.cwd(), "app/(tabs)/edit-property/[id].tsx"), "utf8");
 const migration = readFileSync(
-  resolve(process.cwd(), "../../supabase/migrations/20260725_transactional_property_delete.sql"),
+  resolve(process.cwd(), "../../supabase/migrations/20260725010000_transactional_property_delete.sql"),
   "utf8",
 );
 

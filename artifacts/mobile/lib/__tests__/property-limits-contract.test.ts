@@ -5,8 +5,8 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 
 const testDirectory = dirname(fileURLToPath(import.meta.url));
-const migration = readFileSync(resolve(testDirectory, "../../../../supabase/migrations/20260717_property_limits_by_plan.sql"), "utf8");
-const marketMigration = readFileSync(resolve(testDirectory, "../../../../supabase/migrations/20260717_global_market_foundation.sql"), "utf8");
+const migration = readFileSync(resolve(testDirectory, "../../../../supabase/migrations/20260717010000_property_limits_by_plan.sql"), "utf8");
+const marketMigration = readFileSync(resolve(testDirectory, "../../../../supabase/migrations/20260717000000_global_market_foundation.sql"), "utf8");
 const edgeFunction = readFileSync(resolve(testDirectory, "../../../../supabase/functions/create-property/index.ts"), "utf8");
 const propertyService = readFileSync(resolve(testDirectory, "../property-service.ts"), "utf8");
 const adminService = readFileSync(resolve(testDirectory, "../admin-service.ts"), "utf8");
