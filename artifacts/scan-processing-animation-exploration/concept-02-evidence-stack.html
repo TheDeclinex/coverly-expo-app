@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Coverly Scan Exploration — Evidence Stack</title>
+  <title>Coverly Scan Exploration — Evidence Stack V2</title>
   <link rel="stylesheet" href="shared.css">
   <style>
     .stack-screen {
@@ -12,8 +12,41 @@
         linear-gradient(180deg, #fbfdf9 0%, #f7f2e9 100%);
     }
 
+    .stack-screen .brand-lockup {
+      align-items: center;
+      gap: 8px;
+    }
+
+    .coverly-brand-icon {
+      width: 30px;
+      height: 30px;
+      border-radius: 7px;
+      object-fit: cover;
+    }
+
+    .coverly-brand-copy {
+      display: grid;
+      gap: 0;
+    }
+
+    .coverly-brand-copy strong {
+      color: var(--ink);
+      font-size: 15px;
+      font-weight: 800;
+      letter-spacing: -.025em;
+      line-height: 17px;
+    }
+
+    .coverly-brand-copy small {
+      color: var(--muted);
+      font-size: 8px;
+      font-weight: 600;
+      letter-spacing: .01em;
+      line-height: 10px;
+    }
+
     .stack-heading {
-      margin-top: 29px;
+      margin-top: 28px;
     }
 
     .stack-stage {
@@ -37,23 +70,25 @@
       background: #d9e7e2;
       box-shadow: 0 17px 36px rgba(30, 63, 58, .15);
       transform-origin: 50% 110%;
-      transition: transform 950ms cubic-bezier(.2,.78,.2,1), opacity 700ms ease, filter 700ms ease;
+      transition:
+        transform 880ms cubic-bezier(.2,.78,.2,1),
+        opacity 680ms ease,
+        filter 680ms ease;
+      will-change: transform, opacity;
     }
 
     .evidence-card img {
       width: 100%;
       height: 100%;
       object-fit: cover;
-      transition: transform 6s ease;
+      transform: scale(1.01);
     }
 
     .evidence-card.card-0 {
       z-index: 5;
+      opacity: 1;
+      filter: none;
       transform: translate3d(0, 0, 0) rotate(0deg);
-    }
-
-    .evidence-card.card-0 img {
-      transform: scale(1.02);
     }
 
     .evidence-card.card-1 {
@@ -77,9 +112,17 @@
       transform: translate3d(-3px, 35px, -105px) rotate(-1.2deg);
     }
 
-    .evidence-card.is-sorting {
+    .evidence-card.is-leaving {
+      z-index: 7;
       opacity: 0;
-      transform: translate3d(102px, -28px, 55px) rotate(8deg) scale(.93);
+      filter: saturate(.8);
+      transform: translate3d(92px, -48px, 60px) rotate(7deg) scale(.94);
+      pointer-events: none;
+    }
+
+    .evidence-card.card-3.is-replenishing {
+      opacity: 0;
+      transform: translate3d(-34px, 42px, -125px) rotate(-5deg) scale(.96);
     }
 
     .card-glass {
@@ -90,14 +133,42 @@
       pointer-events: none;
     }
 
+    .single-analysis {
+      position: absolute;
+      z-index: 3;
+      inset: 0;
+      display: none;
+      overflow: hidden;
+      background: rgba(41, 187, 164, .015);
+      pointer-events: none;
+    }
+
+    .single-scan-wash {
+      position: absolute;
+      top: -48%;
+      left: -8%;
+      width: 116%;
+      height: 48%;
+      border-bottom: 1px solid rgba(223, 255, 248, .62);
+      background: linear-gradient(
+        180deg,
+        transparent 0%,
+        rgba(84, 213, 193, .035) 35%,
+        rgba(101, 225, 205, .23) 100%
+      );
+      box-shadow: 0 16px 34px rgba(47, 187, 165, .1);
+      animation: single-scan-sweep 3.2s cubic-bezier(.45,0,.55,1) infinite;
+    }
+
     .stack-badge {
       position: absolute;
-      z-index: 8;
+      z-index: 9;
       right: 2px;
       bottom: 31px;
       display: flex;
       align-items: center;
       gap: 8px;
+      min-height: 36px;
       padding: 10px 12px;
       border: 1px solid rgba(18,115,100,.12);
       border-radius: 15px;
@@ -127,15 +198,57 @@
       content: "";
     }
 
-    .stack-badge i::before { top: -4px; left: 2px; }
-    .stack-badge i::after { top: 2px; left: -4px; }
+    .stack-badge i::before {
+      top: -4px;
+      left: 2px;
+    }
+
+    .stack-badge i::after {
+      top: 2px;
+      left: -4px;
+    }
+
+    .stack-badge.is-single i {
+      width: 10px;
+      height: 10px;
+      border: 0;
+      border-radius: 50%;
+      background: var(--teal-500);
+      box-shadow: 0 0 0 5px rgba(39,179,160,.12);
+    }
+
+    .stack-badge.is-single i::before,
+    .stack-badge.is-single i::after {
+      display: none;
+    }
+
+    .stack-badge.is-single {
+      min-width: 146px;
+    }
+
+    .stack-badge [data-frame-label] {
+      display: inline-block;
+      transition: opacity 180ms ease, transform 180ms ease;
+    }
+
+    .stack-badge [data-frame-label].is-changing {
+      opacity: 0;
+      transform: translateY(3px);
+    }
+
+    .progress-region {
+      position: relative;
+      width: 278px;
+      height: 5px;
+      margin: 0 auto;
+    }
 
     .stack-progress {
       display: flex;
       align-items: center;
       gap: 5px;
-      width: 278px;
-      margin: 0 auto;
+      width: 100%;
+      height: 5px;
     }
 
     .stack-dot {
@@ -156,15 +269,120 @@
       transform: scaleY(1.55);
     }
 
-    .single-frame .card-1,
-    .single-frame .card-2,
-    .single-frame .card-3 {
+    .single-progress {
+      position: absolute;
+      inset: 1px 0 auto;
+      display: none;
+      height: 3px;
+      overflow: hidden;
+      border-radius: 999px;
+      background: rgba(10,112,98,.11);
+    }
+
+    .single-progress::after {
+      position: absolute;
+      inset: 0 auto 0 -34%;
+      width: 34%;
+      border-radius: inherit;
+      background: linear-gradient(90deg, transparent, var(--teal-500), transparent);
+      content: "";
+      animation: single-progress-drift 3s cubic-bezier(.45,0,.55,1) infinite;
+    }
+
+    .single-frame .evidence-card:not(.card-0) {
       opacity: 0;
-      transform: translate3d(0, 5px, -70px);
+      transform: translate3d(0, 8px, -80px);
+      pointer-events: none;
     }
 
     .single-frame .evidence-card.card-0 {
-      transform: translate3d(0, 0, 0) rotate(0) scale(1.02);
+      transform: translate3d(0, 0, 0) rotate(0) scale(1.015);
+    }
+
+    .single-frame .evidence-card.card-0 img {
+      animation: single-image-drift 6.8s ease-in-out infinite;
+    }
+
+    .single-frame .evidence-card.card-0 .single-analysis {
+      display: block;
+    }
+
+    .single-frame + .progress-region .stack-progress {
+      display: none;
+    }
+
+    .single-frame + .progress-region .single-progress {
+      display: block;
+    }
+
+    .reduce-motion .evidence-card {
+      transition: opacity 520ms ease !important;
+    }
+
+    .reduce-motion .evidence-card.is-leaving {
+      opacity: 0 !important;
+      transform: translate3d(0, 0, 0) !important;
+    }
+
+    .reduce-motion .evidence-card.card-3.is-replenishing {
+      transform: translate3d(-3px, 35px, -105px) rotate(-1.2deg) !important;
+    }
+
+    .reduce-motion .single-frame .evidence-card.card-0 img {
+      animation: none !important;
+      transform: scale(1.01) !important;
+    }
+
+    .reduce-motion .single-frame .single-analysis {
+      animation: reduced-single-glow 4.6s ease-in-out infinite !important;
+    }
+
+    .reduce-motion .single-scan-wash,
+    .reduce-motion .single-progress::after {
+      animation: none !important;
+    }
+
+    @keyframes single-scan-sweep {
+      0% {
+        opacity: 0;
+        transform: translateY(0);
+      }
+      6%, 88% {
+        opacity: 1;
+      }
+      100% {
+        opacity: 0;
+        transform: translateY(510px);
+      }
+    }
+
+    @keyframes single-image-drift {
+      0%, 100% {
+        transform: scale(1.01) translate3d(-.35%, 0, 0);
+      }
+      50% {
+        transform: scale(1.045) translate3d(.65%, -.35%, 0);
+      }
+    }
+
+    @keyframes single-progress-drift {
+      0% {
+        transform: translateX(0);
+      }
+      100% {
+        transform: translateX(400%);
+      }
+    }
+
+    @keyframes reduced-single-glow {
+      0%, 100% {
+        opacity: .28;
+        background: rgba(41, 187, 164, .02);
+      }
+      50% {
+        opacity: .62;
+        background: rgba(41, 187, 164, .09);
+      }
     }
   </style>
 </head>
@@ -172,26 +390,28 @@
   <main class="prototype-page">
     <nav class="prototype-topbar" aria-label="Concept navigation">
       <a class="back-link" href="index.html">← All concepts</a>
-      <span class="concept-index">Concept 02 of 06</span>
+      <span class="concept-index">Concept 02 of 06 · V2</span>
       <a class="next-link" href="concept-03-quiet-constellation.html">Next concept →</a>
     </nav>
+
     <div class="prototype-layout">
       <section class="concept-copy">
-        <p class="eyebrow">Tangible multi-image flow</p>
+        <p class="eyebrow">Selected direction · Refined</p>
         <h1>Evidence Stack</h1>
-        <p class="concept-summary">Submitted frames become a tactile stack of photo cards. Each analysed frame lifts away and settles behind the others, making multi-photo and video scans immediately understandable.</p>
+        <p class="concept-summary">Coverly calmly works down through a physical pile of submitted evidence. Analysed cards leave once, revealing the next image already waiting underneath.</p>
         <ul class="motion-notes" aria-label="Motion characteristics">
-          <li>Layered photo depth</li>
-          <li>Sequential card shuffle</li>
-          <li>Visual frame history</li>
+          <li>Causal card reveal</li>
+          <li>Honest single-image mode</li>
+          <li>Quiet rear replenishment</li>
         </ul>
+
         <div class="scenario-panel">
           <div class="scenario-label"><span>Preview scenario</span><span>Keys: 1 · 5 · 0</span></div>
           <div class="scenario-buttons">
-            <button class="scenario-button" data-count="1" aria-pressed="false"><span>Single Photo</span><small>1</small></button>
-            <button class="scenario-button is-active" data-count="5" aria-pressed="true"><span>Multi Photo</span><small>5</small></button>
-            <button class="scenario-button" data-count="10" aria-pressed="false"><span>Video</span><small>10</small></button>
-            <button class="scenario-button" data-count="1" aria-pressed="false"><span>Single Item</span><small>1</small></button>
+            <button class="scenario-button" data-count="1" data-scenario="single-photo" aria-pressed="false"><span>Single Photo</span><small>1</small></button>
+            <button class="scenario-button is-active" data-count="5" data-scenario="multi-photo" aria-pressed="true"><span>Multi Photo</span><small>5</small></button>
+            <button class="scenario-button" data-count="10" data-scenario="video" aria-pressed="false"><span>Video</span><small>10</small></button>
+            <button class="scenario-button" data-count="1" data-scenario="single-item" aria-pressed="false"><span>Single Item</span><small>1</small></button>
           </div>
           <label class="motion-toggle">
             <span>Preview reduced motion</span>
@@ -200,73 +420,226 @@
         </div>
       </section>
 
-      <section class="phone-shell" aria-label="Evidence Stack mobile prototype">
+      <section class="phone-shell" aria-label="Evidence Stack V2 mobile prototype">
         <div class="status-bar"><span>9:41</span><span class="status-icons">● ● ▰</span></div>
         <div class="app-screen stack-screen">
-          <div class="brand-lockup"><span class="brand-mark"></span><span>Coverly</span></div>
-          <h2 class="screen-heading stack-heading">Reviewing your images</h2>
+          <div class="brand-lockup">
+            <img class="coverly-brand-icon" src="../mobile/assets/brand/coverly-header-icon.png" alt="">
+            <span class="coverly-brand-copy"><strong>Coverly</strong><small>Know what you own</small></span>
+          </div>
+
+          <h2 class="screen-heading stack-heading">Analysing your scan</h2>
           <p class="screen-subheading" data-processing-message>Looking for individual items…</p>
 
           <div class="stack-stage" data-stack-stage>
-            <article class="evidence-card card-3" data-stack-card><img alt="" src="assets/room-04-home-office.jpg"><span class="card-glass"></span></article>
-            <article class="evidence-card card-2" data-stack-card><img alt="" src="assets/room-03-dining-room.jpg"><span class="card-glass"></span></article>
-            <article class="evidence-card card-1" data-stack-card><img alt="" src="assets/room-02-bedroom.jpg"><span class="card-glass"></span></article>
-            <article class="evidence-card card-0" data-stack-card><img alt="" src="assets/room-01-living-room.jpg"><span class="card-glass"></span></article>
-            <div class="stack-badge"><i></i><span>Checking image <span data-frame-current>1</span> of <span data-frame-total>5</span></span></div>
+            <article class="evidence-card card-0" data-stack-card>
+              <img alt="" src="assets/room-01-living-room.jpg">
+              <span class="card-glass"></span>
+              <span class="single-analysis">
+                <i class="single-scan-wash"></i>
+              </span>
+            </article>
+            <article class="evidence-card card-1" data-stack-card>
+              <img alt="" src="assets/room-02-bedroom.jpg">
+              <span class="card-glass"></span>
+              <span class="single-analysis"></span>
+            </article>
+            <article class="evidence-card card-2" data-stack-card>
+              <img alt="" src="assets/room-03-dining-room.jpg">
+              <span class="card-glass"></span>
+              <span class="single-analysis"></span>
+            </article>
+            <article class="evidence-card card-3" data-stack-card>
+              <img alt="" src="assets/room-04-home-office.jpg">
+              <span class="card-glass"></span>
+              <span class="single-analysis"></span>
+            </article>
+
+            <div class="stack-badge" data-stack-badge>
+              <i></i>
+              <span data-frame-label>Checking image <span data-frame-current>1</span> of <span data-frame-total>5</span></span>
+            </div>
           </div>
 
-          <div class="stack-progress" data-stack-progress aria-hidden="true"></div>
-          <div class="screen-footnote">Organising your visual evidence</div>
+          <div class="progress-region">
+            <div class="stack-progress" data-stack-progress aria-hidden="true"></div>
+            <div class="single-progress" aria-hidden="true"></div>
+          </div>
+
+          <div class="screen-footnote">Building your inventory</div>
         </div>
       </section>
     </div>
   </main>
+
   <script src="prototype.js"></script>
   <script>
     (function () {
       const stage = document.querySelector("[data-stack-stage]");
       const cards = Array.from(document.querySelectorAll("[data-stack-card]"));
       const progress = document.querySelector("[data-stack-progress]");
+      const badge = document.querySelector("[data-stack-badge]");
+      const frameLabel = document.querySelector("[data-frame-label]");
+      const roleClasses = ["card-0", "card-1", "card-2", "card-3"];
+      const singleStatusMessages = [
+        "Analysing image…",
+        "Detecting items…",
+        "Checking product details…",
+        "Estimating prices…",
+        "Building inventory…"
+      ];
+      let deck = cards.slice();
+      let lastIndex = 0;
+      let singleStatusIndex = 0;
+      let transitionTimers = [];
+
+      function scenarioName() {
+        const active = document.querySelector(".scenario-button.is-active");
+        return active ? active.dataset.scenario : "multi-photo";
+      }
+
+      function clearTransitionTimers() {
+        transitionTimers.forEach(function (timer) {
+          window.clearTimeout(timer);
+        });
+        transitionTimers = [];
+      }
+
+      function later(callback, delay) {
+        const timer = window.setTimeout(callback, delay);
+        transitionTimers.push(timer);
+      }
+
+      function setRole(card, roleIndex) {
+        roleClasses.forEach(function (role) {
+          card.classList.remove(role);
+        });
+        card.classList.add(roleClasses[roleIndex]);
+      }
+
+      function displayFrames(frame, scenario) {
+        if (scenario === "single-item") {
+          return [CoverlyPrototype.rooms[8]];
+        }
+        return frame.frames;
+      }
+
+      function renderStatus(frame, scenario) {
+        const single = frame.count === 1;
+        badge.classList.toggle("is-single", single);
+
+        if (single) {
+          frameLabel.textContent = singleStatusMessages[singleStatusIndex];
+          return;
+        }
+
+        const noun = scenario === "video" ? "frame" : "image";
+        frameLabel.innerHTML =
+          "Checking " + noun + " <span data-frame-current>" +
+          (frame.index + 1) +
+          "</span> of <span data-frame-total>" +
+          frame.count +
+          "</span>";
+      }
 
       function renderProgress(frame) {
         progress.innerHTML = "";
-        for (let i = 0; i < frame.count; i += 1) {
+        if (frame.count === 1) return;
+
+        for (let index = 0; index < frame.count; index += 1) {
           const dot = document.createElement("span");
           dot.className = "stack-dot";
-          if (i <= frame.index) dot.classList.add("is-seen");
-          if (i === frame.index) dot.classList.add("is-current");
+          if (index <= frame.index) dot.classList.add("is-seen");
+          if (index === frame.index) dot.classList.add("is-current");
           progress.appendChild(dot);
         }
       }
 
-      function arrangeCards(frame) {
-        stage.classList.toggle("single-frame", frame.count === 1);
-        cards.forEach(function (card, visualIndex) {
-          const offset = 3 - visualIndex;
-          const imageIndex = (frame.index + offset) % frame.count;
-          card.querySelector("img").src = frame.frames[imageIndex];
+      function initialiseDeck(frame) {
+        clearTransitionTimers();
+        const scenario = scenarioName();
+        const frames = displayFrames(frame, scenario);
+        const visibleLayers = Math.min(frame.count, cards.length);
+
+        deck = cards.slice();
+        cards.forEach(function (card, index) {
+          card.className = "evidence-card";
+          setRole(card, index);
+          card.style.display = index < visibleLayers ? "" : "none";
+          card.querySelector("img").src = frames[index % frames.length];
         });
-        const front = cards[3];
-        if (!frame.reduceMotion && frame.index !== 0) {
-          front.classList.add("is-sorting");
-          window.setTimeout(function () {
-            cards.forEach(function (card, visualIndex) {
-              const offset = 3 - visualIndex;
-              const imageIndex = (frame.index + offset) % frame.count;
-              card.querySelector("img").src = frame.frames[imageIndex];
-            });
-            front.classList.remove("is-sorting");
-          }, 620);
+
+        stage.classList.toggle("single-frame", frame.count === 1);
+        lastIndex = 0;
+        singleStatusIndex = 0;
+        renderStatus({ index: 0, count: frame.count }, scenario);
+        renderProgress({ index: 0, count: frame.count });
+      }
+
+      window.setInterval(function () {
+        if (!stage.classList.contains("single-frame")) return;
+
+        frameLabel.classList.add("is-changing");
+        window.setTimeout(function () {
+          singleStatusIndex = (singleStatusIndex + 1) % singleStatusMessages.length;
+          frameLabel.textContent = singleStatusMessages[singleStatusIndex];
+          frameLabel.classList.remove("is-changing");
+        }, 180);
+      }, 3200);
+
+      function transitionDeck(frame) {
+        const scenario = scenarioName();
+        if (frame.count === 1) {
+          renderStatus(frame, scenario);
+          return;
         }
-        renderProgress(frame);
+
+        const leavingCard = deck.shift();
+        leavingCard.classList.add("is-leaving");
+
+        later(function () {
+          deck.forEach(function (card, index) {
+            setRole(card, index);
+          });
+          renderStatus(frame, scenario);
+          renderProgress(frame);
+        }, frame.reduceMotion ? 80 : 170);
+
+        later(function () {
+          const rearIndex = (frame.index + deck.length) % frame.count;
+          leavingCard.className = "evidence-card card-3 is-replenishing";
+          leavingCard.querySelector("img").src = frame.frames[rearIndex];
+          leavingCard.style.display = "";
+          deck.push(leavingCard);
+
+          window.requestAnimationFrame(function () {
+            window.requestAnimationFrame(function () {
+              leavingCard.classList.remove("is-replenishing");
+            });
+          });
+        }, frame.reduceMotion ? 560 : 780);
       }
 
       CoverlyPrototype.boot({
-        interval: 3900,
+          interval: 3500,
         onScenario: function (frame) {
-          stage.classList.toggle("single-frame", frame.count === 1);
+          initialiseDeck({
+            index: 0,
+            count: frame.count,
+            frames: frame.frames,
+            reduceMotion: frame.reduceMotion
+          });
         },
-        onFrame: arrangeCards
+        onFrame: function (frame) {
+          if (frame.index === lastIndex) {
+            renderStatus(frame, scenarioName());
+            renderProgress(frame);
+            return;
+          }
+
+          transitionDeck(frame);
+          lastIndex = frame.index;
+        }
       });
     }());
   </script>

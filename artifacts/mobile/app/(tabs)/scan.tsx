@@ -2643,7 +2643,11 @@ export default function ScanScreen() {
     return (
       <>
         <Stack.Screen options={{ title: "Scanning…", headerShown: false }} />
-        <AiScanningOverlay images={images} onCancel={returnToScanTypeSelection} />
+        <AiScanningOverlay
+          images={images}
+          mode={selectedMode ?? "single_photo_room"}
+          onCancel={returnToScanTypeSelection}
+        />
       </>
     );
   }
