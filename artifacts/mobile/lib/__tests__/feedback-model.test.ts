@@ -6,6 +6,7 @@ import {
   createFeedbackScreenshotPath,
   feedbackCategoryLabel,
   feedbackBuildDisplay,
+  formatUnreadBadge,
   feedbackMessageSenderLabel,
   feedbackPriorityLabel,
   feedbackPrioritySortRank,
@@ -164,6 +165,26 @@ test("unread state only follows messages from the opposite party", () => {
   }), true);
 });
 
+test("viewing an unread user conversation clears its unread state", () => {
+  assert.equal(feedbackTicketHasUnread("user", {
+    userLastReadAt: "2026-07-23T10:00:00.000Z",
+    lastAdminMessageAt: "2026-07-23T10:01:00.000Z",
+  }), true);
+  assert.equal(feedbackTicketHasUnread("user", {
+    userLastReadAt: "2026-07-23T10:02:00.000Z",
+    lastAdminMessageAt: "2026-07-23T10:01:00.000Z",
+  }), false);
+});
+
+test("feedback unread badge handles absent, single-digit, and overflow counts", () => {
+  assert.equal(formatUnreadBadge(0), undefined);
+  assert.equal(formatUnreadBadge(-1), undefined);
+  assert.equal(formatUnreadBadge(1), "1");
+  assert.equal(formatUnreadBadge(9), "9");
+  assert.equal(formatUnreadBadge(10), "9+");
+  assert.equal(formatUnreadBadge(Number.NaN), undefined);
+});
+
 test("feedback insert payload is stable when screenshot is selected", () => {
   const baseInput = {
     id: "11111111-1111-4111-8111-111111111111",
@@ -198,6 +219,8 @@ test("feedback insert payload is stable when screenshot is selected", () => {
   assert.equal(textOnlyPayload.user_id, baseInput.userId);
   assert.equal(textOnlyPayload.screenshot_url, null);
   assert.equal(textOnlyPayload.app_build_number, "7");
+  assert.equal(textOnlyPayload.user_last_read_at, baseInput.now);
+  assert.equal("last_admin_message_at" in textOnlyPayload, false);
   assert.equal("screenshotRequested" in textOnlyPayload.metadata_json, false);
 
   assert.deepEqual(

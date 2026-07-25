@@ -1,7 +1,7 @@
 import { Feather } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { LinearGradient } from "expo-linear-gradient";
-import { Stack, router, type Href } from "expo-router";
+import { Stack, router, type Href, useFocusEffect } from "expo-router";
 import { useQuery } from "@tanstack/react-query";
 import React, { useMemo, useState } from "react";
 import {
@@ -469,6 +469,12 @@ export default function HomeScreen() {
   const [globalReadinessFilter, setGlobalReadinessFilter] = React.useState<GlobalReadinessFilter>("all");
   const [propertyAllowanceVisible, setPropertyAllowanceVisible] = React.useState(false);
 
+  useFocusEffect(
+    React.useCallback(() => {
+      if (session?.user.id) void feedbackUnread.refetch();
+    }, [feedbackUnread.refetch, session?.user.id]),
+  );
+
   const {
     data: properties,
     isLoading: propsLoading,
@@ -615,7 +621,7 @@ export default function HomeScreen() {
   const isLoading = propsLoading || itemsLoading || itemCountLoading;
   const homeError = propsError ?? itemsError ?? itemCountError;
   const homeRefetching =
-    isRefetching || itemsRefetching || itemCountRefetching || roomsRefetching;
+    isRefetching || itemsRefetching || itemCountRefetching || roomsRefetching || feedbackUnread.isRefetching;
 
   const refetchHome = async () => {
     await Promise.all([
@@ -623,6 +629,7 @@ export default function HomeScreen() {
       refetchItems(),
       refetchItemCount(),
       refetchRooms(),
+      feedbackUnread.refetch(),
       refreshAllowance(),
     ]);
   };
@@ -1102,8 +1109,13 @@ export default function HomeScreen() {
               >
                 <Feather name="user" size={18} color={colors.mutedForeground} />
                 {supportBadge ? (
-                  <View style={[styles.headerUnreadBadge, { backgroundColor: colors.warning }]}>
-                    <Text style={[styles.headerUnreadText, { color: colors.warningForeground }]}>{supportBadge}</Text>
+                  <View style={[styles.headerUnreadBadge, { backgroundColor: colors.primary }]}>
+                    <Text
+                      maxFontSizeMultiplier={1.2}
+                      style={[styles.headerUnreadText, { color: colors.primaryForeground }]}
+                    >
+                      {supportBadge}
+                    </Text>
                   </View>
                 ) : null}
               </Pressable>
@@ -1250,16 +1262,22 @@ const styles = StyleSheet.create({
   },
   headerUnreadBadge: {
     position: "absolute",
-    right: -4,
-    top: -5,
-    minWidth: 17,
-    height: 17,
-    borderRadius: 9,
-    paddingHorizontal: 4,
+    right: 1,
+    top: 1,
+    minWidth: 15,
+    height: 15,
+    borderRadius: 8,
+    paddingHorizontal: 3,
     alignItems: "center",
     justifyContent: "center",
   },
-  headerUnreadText: { fontSize: 8, fontFamily: "Inter_700Bold" },
+  headerUnreadText: {
+    fontSize: 8,
+    lineHeight: 10,
+    textAlign: "center",
+    includeFontPadding: false,
+    fontFamily: "Inter_700Bold",
+  },
   globalSearchBackdrop: {
     flex: 1,
     justifyContent: "flex-end",

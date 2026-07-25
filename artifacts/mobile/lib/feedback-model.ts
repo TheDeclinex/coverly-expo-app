@@ -407,6 +407,11 @@ export function feedbackTicketHasUnread(
   return new Date(messageAt).getTime() > new Date(readAt).getTime();
 }
 
+export function formatUnreadBadge(count: number): string | undefined {
+  if (!Number.isFinite(count) || count <= 0) return undefined;
+  return count > 9 ? "9+" : String(Math.floor(count));
+}
+
 export function isFeedbackAdminStatus(value: string): value is FeedbackAdminStatus {
   return feedbackAdminStatusOptions.includes(value as FeedbackAdminStatus);
 }

@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 
 import { useAuth } from "@/context/AuthContext";
+export { formatUnreadBadge } from "@/lib/feedback-model";
 import { loadFeedbackUnreadCounts } from "@/lib/feedback-service";
 
 export const feedbackUnreadQueryKey = (userId?: string | null) => [
@@ -15,14 +16,8 @@ export function useFeedbackUnread() {
     queryFn: loadFeedbackUnreadCounts,
     enabled: Boolean(session?.user.id),
     staleTime: 15_000,
-    refetchInterval: 30_000,
     refetchOnMount: "always",
     refetchOnWindowFocus: true,
     retry: 1,
   });
-}
-
-export function formatUnreadBadge(count: number): string | undefined {
-  if (count <= 0) return undefined;
-  return count > 9 ? "9+" : String(count);
 }

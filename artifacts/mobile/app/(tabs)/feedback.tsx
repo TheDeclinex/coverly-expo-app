@@ -364,7 +364,7 @@ function MyFeedbackList({
               >
                 <View style={styles.ticketCopy}>
                   <View style={styles.ticketTitleRow}>
-                    {unread ? <View style={[styles.unreadDot, { backgroundColor: colors.warning }]} /> : null}
+                    {unread ? <View style={[styles.unreadDot, { backgroundColor: colors.primary }]} /> : null}
                     <Text style={[styles.ticketTitle, { color: colors.foreground }]} numberOfLines={1}>
                       {report.title ?? feedbackTypeLabel(report.classification ?? report.feedback_type)}
                     </Text>

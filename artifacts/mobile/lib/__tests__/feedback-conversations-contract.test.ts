@@ -7,6 +7,10 @@ const migration = readFileSync(
   resolve(process.cwd(), "../../supabase/migrations/20260723_feedback_conversations_and_build_context.sql"),
   "utf8",
 );
+const unreadConversationMigration = readFileSync(
+  resolve(process.cwd(), "../../supabase/migrations/20260725_feedback_user_unread_conversations.sql"),
+  "utf8",
+);
 const hardeningMigration = readFileSync(
   resolve(process.cwd(), "../../supabase/migrations/20260724_feedback_screenshot_security_and_high_priority.sql"),
   "utf8",
@@ -17,6 +21,22 @@ const baseFeedbackMigration = readFileSync(
 );
 const adminSupportSource = readFileSync(
   resolve(process.cwd(), "app/(tabs)/admin-support.tsx"),
+  "utf8",
+);
+const feedbackConversationSource = readFileSync(
+  resolve(process.cwd(), "components/FeedbackConversation.tsx"),
+  "utf8",
+);
+const feedbackScreenSource = readFileSync(
+  resolve(process.cwd(), "app/(tabs)/feedback.tsx"),
+  "utf8",
+);
+const feedbackUnreadHookSource = readFileSync(
+  resolve(process.cwd(), "hooks/useFeedbackUnread.ts"),
+  "utf8",
+);
+const homeSource = readFileSync(
+  resolve(process.cwd(), "app/(tabs)/index.tsx"),
   "utf8",
 );
 
@@ -37,6 +57,50 @@ test("closed tickets are read-only and opposite-party unread state is database b
   assert.match(migration, /closed feedback tickets are read-only/);
   assert.match(migration, /fm\.sender_role = 'admin'[\s\S]*fr\.user_last_read_at/);
   assert.match(migration, /fm\.sender_role = 'user'[\s\S]*fr\.admin_last_read_at/);
+});
+
+test("user unread count is distinct conversations with admin or support-system activity", () => {
+  assert.match(
+    unreadConversationMigration,
+    /count\(DISTINCT fm\.ticket_id\)[\s\S]*fr\.user_id = auth\.uid\(\)::text[\s\S]*fm\.sender_role IN \('admin', 'system'\)[\s\S]*fr\.user_last_read_at/,
+  );
+  assert.match(
+    unreadConversationMigration,
+    /last_admin_message_at = v_now[\s\S]*latest_message_preview = left\(v_event, 180\)/,
+  );
+  assert.match(
+    unreadConversationMigration,
+    /WITH latest_admin_activity[\s\S]*WHERE sender_role IN \('admin', 'system'\)[\s\S]*UPDATE public\.feedback_reports/,
+  );
+});
+
+test("viewing one ticket marks only that ticket read and refreshes its account-scoped badge", () => {
+  assert.match(feedbackConversationSource, /markFeedbackTicketRead\(ticketId, viewerRole\)/);
+  assert.match(feedbackConversationSource, /feedbackUnreadQueryKey\(session\?\.user\.id\)/);
+  assert.doesNotMatch(feedbackConversationSource, /markAll|clearAll|feedback_mark_all/i);
+  assert.match(
+    unreadConversationMigration,
+    /p_viewer_role text[\s\S]*p_viewer_role = 'user'[\s\S]*v_owner_id <> auth\.uid\(\)::text[\s\S]*SET user_last_read_at = now\(\)[\s\S]*p_viewer_role = 'admin'[\s\S]*v_is_admin[\s\S]*SET admin_last_read_at = now\(\)/,
+  );
+});
+
+test("feedback badge cache and fetching stay scoped to the authenticated account", () => {
+  assert.match(
+    feedbackUnreadHookSource,
+    /feedbackUnreadQueryKey\(session\?\.user\.id\)/,
+  );
+  assert.match(feedbackUnreadHookSource, /enabled: Boolean\(session\?\.user\.id\)/);
+  assert.doesNotMatch(feedbackUnreadHookSource, /refetchInterval/);
+  assert.match(homeSource, /useFocusEffect\([\s\S]*feedbackUnread\.refetch\(\)/);
+  assert.match(homeSource, /refetchHome[\s\S]*feedbackUnread\.refetch\(\)/);
+});
+
+test("home badge uses inset Coverly notification colours and bounded text", () => {
+  assert.match(homeSource, /headerUnreadBadge, \{ backgroundColor: colors\.primary \}/);
+  assert.match(homeSource, /color: colors\.primaryForeground/);
+  assert.match(homeSource, /right: 1[\s\S]*top: 1[\s\S]*minWidth: 15[\s\S]*height: 15/);
+  assert.match(homeSource, /maxFontSizeMultiplier=\{1\.2\}/);
+  assert.match(feedbackScreenSource, /unreadDot, \{ backgroundColor: colors\.primary \}/);
 });
 
 test("status and classification are separate constrained fields", () => {

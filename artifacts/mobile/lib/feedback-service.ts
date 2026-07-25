@@ -343,9 +343,13 @@ export async function sendFeedbackMessage(ticketId: string, body: string): Promi
   return data as FeedbackMessageRow;
 }
 
-export async function markFeedbackTicketRead(ticketId: string): Promise<void> {
+export async function markFeedbackTicketRead(
+  ticketId: string,
+  viewerRole: "user" | "admin",
+): Promise<void> {
   const { error } = await supabase.rpc("feedback_mark_ticket_read", {
     p_ticket_id: ticketId,
+    p_viewer_role: viewerRole,
   });
   if (error) throw error;
 }

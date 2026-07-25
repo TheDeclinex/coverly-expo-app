@@ -50,7 +50,7 @@ export function FeedbackConversation({
 
   React.useEffect(() => {
     let active = true;
-    void markFeedbackTicketRead(ticketId)
+    void markFeedbackTicketRead(ticketId, viewerRole)
       .then(async () => {
         if (!active) return;
         await Promise.all([
@@ -65,7 +65,7 @@ export function FeedbackConversation({
     return () => {
       active = false;
     };
-  }, [queryClient, session?.user.id, ticketId]);
+  }, [queryClient, session?.user.id, ticketId, viewerRole]);
 
   const sendMutation = useMutation({
     mutationFn: () => sendFeedbackMessage(ticketId, draft),
