@@ -7,6 +7,10 @@ import {
 import React from "react";
 import {
   ActivityIndicator,
+  Alert,
+  AppState,
+  type AppStateStatus,
+  Linking,
   Modal,
   Pressable,
   StyleSheet,
@@ -53,8 +57,10 @@ function cleanSuggestion(value: string | null | undefined): string | undefined {
 export function BarcodeScanFlow({ visible, item, onClose, onApply, onTakePhoto }: BarcodeScanFlowProps) {
   const colors = useColors();
   const insets = useSafeAreaInsets();
-  const [permission, requestPermission] = useCameraPermissions();
+  const [permission, requestPermission, getPermission] = useCameraPermissions();
   const scanLockedRef = React.useRef(false);
+  const visibleRef = React.useRef(visible);
+  const appStateRef = React.useRef<AppStateStatus>(AppState.currentState);
   const [stage, setStage] = React.useState<ScanStage>("scanning");
   const [detectedBarcode, setDetectedBarcode] = React.useState("");
   const [result, setResult] = React.useState<BarcodeVerifySuccess | null>(null);
@@ -83,8 +89,20 @@ export function BarcodeScanFlow({ visible, item, onClose, onApply, onTakePhoto }
   }, []);
 
   React.useEffect(() => {
+    visibleRef.current = visible;
     if (visible) resetScan();
   }, [resetScan, visible]);
+
+  React.useEffect(() => {
+    const subscription = AppState.addEventListener("change", (nextState) => {
+      const previousState = appStateRef.current;
+      appStateRef.current = nextState;
+      if (visibleRef.current && nextState === "active" && previousState !== "active") {
+        void getPermission();
+      }
+    });
+    return () => subscription.remove();
+  }, [getPermission]);
 
   const handleDetected = React.useCallback(async ({ data }: BarcodeScanningResult) => {
     const barcode = data.trim();
@@ -114,7 +132,7 @@ export function BarcodeScanFlow({ visible, item, onClose, onApply, onTakePhoto }
         const failureKind = classifyBarcodeFailure(response.errorCode, response.error);
         setMessage(failureKind === "not-found"
           ? "We couldn’t find this barcode in the product database. This is common for some retailer and own-brand products. You can photograph the item or enter its details manually."
-          : response.error || barcodeFailureCopy(failureKind));
+          : barcodeFailureCopy(failureKind));
         setStage(failureKind);
         return;
       }
@@ -160,11 +178,10 @@ export function BarcodeScanFlow({ visible, item, onClose, onApply, onTakePhoto }
       });
       onClose();
     } catch (saveError) {
-      setMessage(
-        saveError instanceof Error && saveError.message
-          ? saveError.message
-          : "The matched barcode details could not be saved.",
-      );
+      if (__DEV__) console.warn("[barcode] matched details save failed", {
+        message: saveError instanceof Error ? saveError.message : "unknown",
+      });
+      setMessage("The matched barcode details could not be saved. Your existing item details were not changed.");
       setStage("save-error");
     }
   };
@@ -226,10 +243,20 @@ export function BarcodeScanFlow({ visible, item, onClose, onApply, onTakePhoto }
             Allow camera access to scan the product barcode.
           </Text>
           <Pressable
-            onPress={() => void requestPermission()}
+            onPress={() => {
+              if (permission.canAskAgain === false) {
+                void Linking.openSettings().catch(() => {
+                  Alert.alert("Could not open Settings", "Open your device settings and allow camera access for Coverly.");
+                });
+                return;
+              }
+              void requestPermission();
+            }}
             style={[styles.primaryButton, styles.permissionButton, { backgroundColor: colors.primary }]}
           >
-            <Text style={[styles.primaryButtonText, { color: colors.primaryForeground }]}>Allow camera</Text>
+            <Text style={[styles.primaryButtonText, { color: colors.primaryForeground }]}>
+              {permission.canAskAgain === false ? "Open Settings" : "Allow camera"}
+            </Text>
           </Pressable>
         </View>
       );

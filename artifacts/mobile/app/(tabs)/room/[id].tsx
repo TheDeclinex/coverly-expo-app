@@ -2030,7 +2030,10 @@ export default function ItemsScreen() {
         const diagnostic = formatUploadFailure(uploaded);
         if (__DEV__) console.warn("[roomCover] Upload diagnostic\n" + diagnostic);
         setLocalCoverUrl(previousLocalCoverUrl);
-        Alert.alert("Room cover upload failed", diagnostic);
+        Alert.alert(
+          "Room cover upload failed",
+          "The photo was not saved. Check your connection and try again.",
+        );
         return;
       }
       setLocalCoverUrl(uploaded.displayUrl ?? selectedUri);
@@ -2043,7 +2046,10 @@ export default function ItemsScreen() {
       if (updateError) {
         if (__DEV__) console.error("[roomCover] DB update error:", updateError);
         setLocalCoverUrl(previousLocalCoverUrl);
-        Alert.alert("Save failed", updateError.message);
+        Alert.alert(
+          "Save failed",
+          "Cover photo could not be saved. Please check your connection and try again.",
+        );
         return;
       }
       if (!updatedRows || updatedRows.length === 0) {
@@ -2189,7 +2195,11 @@ export default function ItemsScreen() {
       ]);
       showToast("Room cover removed");
     } catch (error) {
-      Alert.alert("Couldn't remove room cover", error instanceof Error ? error.message : "Please try again.");
+      if (__DEV__) console.warn("[roomCover] Remove failed", { error });
+      Alert.alert(
+        "Couldn't remove room cover",
+        "The cover photo was not removed. Check your connection and try again.",
+      );
     } finally {
       setCoverUploading(false);
     }

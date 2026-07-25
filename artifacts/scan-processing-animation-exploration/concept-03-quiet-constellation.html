@@ -1,0 +1,300 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Coverly Scan Exploration — Quiet Constellation</title>
+  <link rel="stylesheet" href="shared.css">
+  <style>
+    .constellation-screen {
+      background:
+        radial-gradient(circle at 50% 45%, rgba(112,213,195,.23), transparent 238px),
+        radial-gradient(circle at 12% 80%, rgba(226,219,193,.38), transparent 165px),
+        #fbfcf8;
+    }
+
+    .constellation-heading {
+      margin-top: 29px;
+      text-align: center;
+    }
+
+    .constellation-screen .screen-subheading {
+      text-align: center;
+    }
+
+    .constellation-stage {
+      position: relative;
+      z-index: 2;
+      width: 330px;
+      height: 420px;
+      margin: 22px auto 13px;
+    }
+
+    .orbit {
+      position: absolute;
+      top: 34px;
+      left: 14px;
+      width: 302px;
+      height: 302px;
+      border: 1px solid rgba(20,129,113,.13);
+      border-radius: 50%;
+      animation: orbit-breathe 6s ease-in-out infinite;
+    }
+
+    .orbit::before,
+    .orbit::after {
+      position: absolute;
+      border: 1px dashed rgba(20,129,113,.1);
+      border-radius: 50%;
+      content: "";
+    }
+
+    .orbit::before { inset: 28px; }
+    .orbit::after { inset: 66px; }
+
+    .constellation-photo {
+      position: absolute;
+      z-index: 4;
+      top: 82px;
+      left: 57px;
+      width: 216px;
+      height: 216px;
+      overflow: hidden;
+      border: 7px solid rgba(255,255,252,.95);
+      border-radius: 50%;
+      background: #dce8e4;
+      box-shadow: 0 22px 48px rgba(26,80,71,.18), 0 0 0 1px rgba(11,139,122,.08);
+    }
+
+    .constellation-photo img {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      opacity: 0;
+      transform: scale(1.08);
+      transition: opacity 1s ease, transform 5s ease;
+    }
+
+    .constellation-photo img.is-active {
+      opacity: 1;
+      transform: scale(1.02);
+    }
+
+    .constellation-photo::after {
+      position: absolute;
+      inset: 0;
+      border: 1px solid rgba(255,255,255,.72);
+      border-radius: 50%;
+      background: radial-gradient(circle at 48% 46%, transparent 48%, rgba(6,86,74,.14));
+      content: "";
+    }
+
+    .signal-node {
+      position: absolute;
+      z-index: 6;
+      display: grid;
+      width: 40px;
+      height: 40px;
+      place-items: center;
+      border: 5px solid rgba(255,255,252,.95);
+      border-radius: 50%;
+      background: #dfeee9 center/cover;
+      box-shadow: 0 8px 18px rgba(24,78,69,.13);
+      animation: node-float 5.4s ease-in-out infinite;
+      transition: opacity 400ms ease, transform 500ms ease;
+    }
+
+    .signal-node::after {
+      position: absolute;
+      width: 7px;
+      height: 7px;
+      border: 2px solid white;
+      border-radius: 50%;
+      background: var(--teal-600, #159b89);
+      box-shadow: 0 0 0 5px rgba(74,205,185,.16);
+      content: "";
+    }
+
+    .node-1 { top: 30px; left: 62px; animation-delay: -.8s; }
+    .node-2 { top: 82px; right: 6px; animation-delay: -2.3s; }
+    .node-3 { right: 33px; bottom: 72px; animation-delay: -3.6s; }
+    .node-4 { bottom: 58px; left: 47px; animation-delay: -1.4s; }
+    .node-5 { top: 143px; left: 0; animation-delay: -4.2s; }
+
+    .connection {
+      position: absolute;
+      z-index: 2;
+      height: 1px;
+      overflow: hidden;
+      background: rgba(17,141,123,.12);
+      transform-origin: left center;
+    }
+
+    .connection::after {
+      position: absolute;
+      inset: 0 auto 0 -40%;
+      width: 38%;
+      background: linear-gradient(90deg, transparent, rgba(44,190,168,.9), transparent);
+      content: "";
+      animation: signal-travel 3.8s ease-in-out infinite;
+    }
+
+    .line-1 { top: 71px; left: 94px; width: 92px; transform: rotate(51deg); }
+    .line-2 { top: 118px; left: 248px; width: 67px; transform: rotate(132deg); }
+    .line-3 { top: 277px; left: 230px; width: 71px; transform: rotate(46deg); }
+    .line-4 { top: 278px; left: 80px; width: 84px; transform: rotate(-47deg); }
+    .line-5 { top: 181px; left: 36px; width: 50px; transform: rotate(7deg); }
+
+    .constellation-label {
+      position: absolute;
+      z-index: 8;
+      bottom: 4px;
+      left: 50%;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 10px 13px;
+      border: 1px solid rgba(13,114,99,.12);
+      border-radius: 999px;
+      color: #47645f;
+      background: rgba(255,255,252,.85);
+      box-shadow: 0 10px 30px rgba(35,76,69,.08);
+      font-size: 9px;
+      font-weight: 750;
+      white-space: nowrap;
+      transform: translateX(-50%);
+      backdrop-filter: blur(10px);
+    }
+
+    .constellation-label i {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--teal-500);
+      box-shadow: 0 0 0 5px rgba(39,179,160,.12);
+    }
+
+    .constellation-progress {
+      width: 235px;
+      margin: 0 auto;
+    }
+
+    .single-frame .signal-node:not(.node-1),
+    .single-frame .connection:not(.line-1) {
+      opacity: .12;
+    }
+
+    @keyframes node-float {
+      0%, 100% { transform: translateY(-2px) scale(.96); }
+      50% { transform: translateY(5px) scale(1.03); }
+    }
+
+    @keyframes orbit-breathe {
+      0%, 100% { transform: rotate(-3deg) scale(.98); opacity: .68; }
+      50% { transform: rotate(3deg) scale(1.02); opacity: 1; }
+    }
+
+    @keyframes signal-travel {
+      0% { transform: translateX(0); opacity: 0; }
+      25% { opacity: 1; }
+      75% { opacity: 1; }
+      100% { transform: translateX(370%); opacity: 0; }
+    }
+  </style>
+</head>
+<body>
+  <main class="prototype-page">
+    <nav class="prototype-topbar" aria-label="Concept navigation">
+      <a class="back-link" href="index.html">← All concepts</a>
+      <span class="concept-index">Concept 03 of 06</span>
+      <a class="next-link" href="concept-04-inventory-weave.html">Next concept →</a>
+    </nav>
+    <div class="prototype-layout">
+      <section class="concept-copy">
+        <p class="eyebrow">Ambient intelligence</p>
+        <h1>Quiet Constellation</h1>
+        <p class="concept-summary">A central captured frame is surrounded by a gentle network of supporting images and travelling signals. It feels intelligent and connected, while remaining soft enough for repeated use.</p>
+        <ul class="motion-notes" aria-label="Motion characteristics">
+          <li>Orbiting frame cues</li>
+          <li>Travelling analysis signals</li>
+          <li>No technical counters required</li>
+        </ul>
+        <div class="scenario-panel">
+          <div class="scenario-label"><span>Preview scenario</span><span>Keys: 1 · 5 · 0</span></div>
+          <div class="scenario-buttons">
+            <button class="scenario-button" data-count="1" aria-pressed="false"><span>Single Photo</span><small>1</small></button>
+            <button class="scenario-button is-active" data-count="5" aria-pressed="true"><span>Multi Photo</span><small>5</small></button>
+            <button class="scenario-button" data-count="10" aria-pressed="false"><span>Video</span><small>10</small></button>
+            <button class="scenario-button" data-count="1" aria-pressed="false"><span>Single Item</span><small>1</small></button>
+          </div>
+          <label class="motion-toggle">
+            <span>Preview reduced motion</span>
+            <span class="toggle-control"><input type="checkbox" data-motion-toggle><span class="toggle-track"></span></span>
+          </label>
+        </div>
+      </section>
+
+      <section class="phone-shell" aria-label="Quiet Constellation mobile prototype">
+        <div class="status-bar"><span>9:41</span><span class="status-icons">● ● ▰</span></div>
+        <div class="app-screen constellation-screen">
+          <div class="brand-lockup"><span class="brand-mark"></span><span>Coverly</span></div>
+          <h2 class="screen-heading constellation-heading">Making sense of your space</h2>
+          <p class="screen-subheading" data-processing-message>Looking for individual items…</p>
+
+          <div class="constellation-stage" data-constellation>
+            <div class="orbit"></div>
+            <span class="connection line-1"></span><span class="connection line-2"></span>
+            <span class="connection line-3"></span><span class="connection line-4"></span><span class="connection line-5"></span>
+            <div class="constellation-photo">
+              <img class="is-active" data-main-layer alt="" src="assets/room-01-living-room.jpg">
+              <img data-main-layer alt="" src="assets/room-02-bedroom.jpg">
+            </div>
+            <span class="signal-node node-1" data-node></span>
+            <span class="signal-node node-2" data-node></span>
+            <span class="signal-node node-3" data-node></span>
+            <span class="signal-node node-4" data-node></span>
+            <span class="signal-node node-5" data-node></span>
+            <div class="constellation-label"><i></i><span>Connecting visual details</span></div>
+          </div>
+
+          <div class="constellation-progress indeterminate-track"></div>
+          <div class="screen-footnote">Building one clear inventory</div>
+        </div>
+      </section>
+    </div>
+  </main>
+  <script src="prototype.js"></script>
+  <script>
+    (function () {
+      const stage = document.querySelector("[data-constellation]");
+      const nodes = Array.from(document.querySelectorAll("[data-node]"));
+      const layers = Array.from(document.querySelectorAll("[data-main-layer]"));
+      let active = 0;
+
+      CoverlyPrototype.boot({
+        interval: 4800,
+        onScenario: function (frame) {
+          stage.classList.toggle("single-frame", frame.count === 1);
+          nodes.forEach(function (node, index) {
+            node.style.backgroundImage = "url('" + frame.frames[index % frame.count] + "')";
+          });
+        },
+        onFrame: function (frame) {
+          const next = active === 0 ? 1 : 0;
+          layers[next].src = frame.src;
+          nodes.forEach(function (node, index) {
+            node.style.backgroundImage = "url('" + frame.frames[(frame.index + index + 1) % frame.count] + "')";
+          });
+          window.requestAnimationFrame(function () {
+            layers[next].classList.add("is-active");
+            layers[active].classList.remove("is-active");
+            active = next;
+          });
+        }
+      });
+    }());
+  </script>
+</body>
+</html>

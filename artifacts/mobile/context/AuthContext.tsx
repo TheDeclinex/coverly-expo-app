@@ -28,10 +28,23 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [hasSeenOnboarding, setHasSeenOnboarding] = useState<boolean | null>(null);
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session: s } }) => {
-      setSession(s);
-      setLoading(false);
-    });
+    let active = true;
+    void supabase.auth.getSession()
+      .then(({ data: { session: nextSession }, error }) => {
+        if (!active) return;
+        if (error && __DEV__) {
+          console.warn("[auth] stored session could not be loaded", {
+            code: error.code ?? null,
+          });
+        }
+        setSession(error ? null : nextSession);
+      })
+      .catch(() => {
+        if (active) setSession(null);
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
 
     const {
       data: { subscription },
@@ -39,7 +52,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setSession(s);
     });
 
-    return () => subscription.unsubscribe();
+    return () => {
+      active = false;
+      subscription.unsubscribe();
+    };
   }, []);
 
   const userId = session?.user.id ?? null;
@@ -90,7 +106,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [userId]);
 
   const signOut = async () => {
-    await supabase.auth.signOut();
+    const { error } = await supabase.auth.signOut();
+    if (!error) return;
+
+    // A user must still be able to clear this device when the network or the
+    // remote session endpoint is unavailable. The server token will expire
+    // independently; no other account's cached data is retained by the app.
+    await supabase.auth.signOut({ scope: "local" });
   };
 
   const markOnboardingComplete = useCallback(async () => {

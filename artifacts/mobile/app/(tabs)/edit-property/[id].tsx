@@ -171,17 +171,14 @@ export default function EditPropertyScreen() {
           style: "destructive",
           onPress: async () => {
             setDeleting(true);
-            // Delete items and rooms first (Supabase RLS / FK may cascade; belt-and-braces)
-            await supabase.from("inventory_items").delete().eq("file_id", id);
-            await supabase.from("inventory_rooms").delete().eq("file_id", id);
-            const { error: dbError } = await supabase
-              .from("inventory_files")
-              .delete()
-              .eq("id", id);
+            const { error: dbError } = await supabase.rpc("delete_my_inventory_file", {
+              p_file_id: id,
+            });
             setDeleting(false);
             if (dbError) {
+              if (__DEV__) console.warn("[property] Delete failed", { dbError });
               await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-              setError(dbError.message);
+              setError("Could not delete this property. Check your connection and try again.");
               return;
             }
             await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);

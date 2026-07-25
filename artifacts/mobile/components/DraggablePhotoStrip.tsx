@@ -2,7 +2,7 @@ import { Feather } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import * as ImagePicker from "expo-image-picker";
 import React, { useCallback } from "react";
-import { Alert, Pressable, ScrollView, Text, TextInput, View } from "react-native";
+import { Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import Animated, {
   runOnJS,
@@ -14,6 +14,7 @@ import Animated, {
 import { useColors } from "@/hooks/useColors";
 import { useSignedImageRecovery, useSignedImageSource } from "@/hooks/useSignedUrls";
 import { ReliableImage } from "@/components/ReliableImage";
+import { requestImagePermission } from "@/lib/media-permissions";
 
 export interface PhotoEntry {
   url: string;
@@ -259,11 +260,7 @@ export function DraggablePhotoStrip({ photos, onChange, colors }: Props) {
   );
 
   const pickPhoto = async () => {
-    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (status !== "granted") {
-      Alert.alert("Permission needed", "Allow photo library access.");
-      return;
-    }
+    if (!await requestImagePermission("photo-library", "add photos")) return;
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
       quality: 0.8,
@@ -274,11 +271,7 @@ export function DraggablePhotoStrip({ photos, onChange, colors }: Props) {
   };
 
   const takePhoto = async () => {
-    const { status } = await ImagePicker.requestCameraPermissionsAsync();
-    if (status !== "granted") {
-      Alert.alert("Permission needed", "Allow camera access.");
-      return;
-    }
+    if (!await requestImagePermission("camera", "take photos")) return;
     const result = await ImagePicker.launchCameraAsync({
       quality: 0.8,
     });

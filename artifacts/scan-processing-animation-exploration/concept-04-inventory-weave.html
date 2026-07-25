@@ -1,0 +1,334 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Coverly Scan Exploration — Inventory Weave</title>
+  <link rel="stylesheet" href="shared.css">
+  <style>
+    .weave-screen {
+      background:
+        linear-gradient(145deg, rgba(255,255,252,.76), rgba(237,248,244,.82)),
+        repeating-linear-gradient(90deg, transparent 0 47px, rgba(23,110,98,.025) 47px 48px),
+        #f8faf6;
+    }
+
+    .weave-heading {
+      margin-top: 29px;
+    }
+
+    .weave-stage {
+      position: relative;
+      z-index: 2;
+      width: 328px;
+      height: 425px;
+      margin: 24px auto 11px;
+    }
+
+    .source-card {
+      position: absolute;
+      z-index: 6;
+      top: 5px;
+      left: 0;
+      width: 214px;
+      height: 276px;
+      overflow: hidden;
+      border: 6px solid #fffefa;
+      border-radius: 28px;
+      background: #dce8e3;
+      box-shadow: 0 18px 42px rgba(28,73,65,.16);
+    }
+
+    .source-card img {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      opacity: 0;
+      transform: scale(1.05);
+      transition: opacity 850ms ease, transform 5s ease;
+    }
+
+    .source-card img.is-active {
+      opacity: 1;
+      transform: scale(1);
+    }
+
+    .source-card::after {
+      position: absolute;
+      inset: 0;
+      background:
+        linear-gradient(110deg, transparent 37%, rgba(167,245,230,.18) 48%, transparent 59%),
+        linear-gradient(180deg, transparent 62%, rgba(7,50,44,.24));
+      background-size: 250% 100%, 100% 100%;
+      content: "";
+      animation: weave-glint 5s ease-in-out infinite;
+    }
+
+    .source-label {
+      position: absolute;
+      z-index: 8;
+      right: 12px;
+      bottom: 12px;
+      left: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      color: white;
+      font-size: 9px;
+      font-weight: 750;
+    }
+
+    .source-label span:last-child {
+      padding: 5px 8px;
+      border: 1px solid rgba(255,255,255,.32);
+      border-radius: 99px;
+      background: rgba(10,56,49,.38);
+      backdrop-filter: blur(8px);
+    }
+
+    .weave-thread {
+      position: absolute;
+      z-index: 3;
+      top: 112px;
+      left: 196px;
+      width: 100px;
+      height: 154px;
+    }
+
+    .thread-line {
+      position: absolute;
+      left: 0;
+      width: 100%;
+      height: 1px;
+      overflow: hidden;
+      background: linear-gradient(90deg, rgba(14,130,113,.25), rgba(14,130,113,.05));
+      transform-origin: left center;
+    }
+
+    .thread-line::after {
+      position: absolute;
+      inset: 0 auto 0 -30%;
+      width: 30%;
+      background: linear-gradient(90deg, transparent, var(--teal-500), transparent);
+      content: "";
+      animation: thread-flow 3.3s ease-in-out infinite;
+    }
+
+    .thread-1 { top: 0; transform: rotate(-15deg); }
+    .thread-2 { top: 44px; transform: rotate(0); animation-delay: -.6s; }
+    .thread-3 { top: 88px; transform: rotate(15deg); animation-delay: -1.2s; }
+    .thread-4 { top: 132px; transform: rotate(29deg); animation-delay: -1.8s; }
+
+    .cue-panel {
+      position: absolute;
+      z-index: 7;
+      right: 0;
+      bottom: 0;
+      width: 220px;
+      padding: 17px;
+      border: 1px solid rgba(17,111,98,.1);
+      border-radius: 25px;
+      background: rgba(255,255,252,.9);
+      box-shadow: 0 18px 44px rgba(28,72,64,.13);
+      backdrop-filter: blur(14px);
+    }
+
+    .cue-kicker {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 11px;
+      color: #7a8d89;
+      font-size: 8px;
+      font-weight: 850;
+      letter-spacing: .12em;
+      text-transform: uppercase;
+    }
+
+    .cue-kicker i {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--teal-500);
+      box-shadow: 0 0 0 5px rgba(39,179,160,.11);
+    }
+
+    .inventory-cue {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      min-height: 42px;
+      padding: 7px 9px;
+      border-radius: 13px;
+      opacity: .45;
+      transform: translateX(7px);
+      animation: cue-awaken 7.2s ease-in-out infinite;
+    }
+
+    .inventory-cue + .inventory-cue {
+      margin-top: 3px;
+    }
+
+    .inventory-cue:nth-of-type(2) { animation-delay: -5.4s; }
+    .inventory-cue:nth-of-type(3) { animation-delay: -3.6s; }
+    .inventory-cue:nth-of-type(4) { animation-delay: -1.8s; }
+
+    .cue-icon {
+      display: grid;
+      width: 29px;
+      height: 29px;
+      flex: 0 0 auto;
+      place-items: center;
+      border-radius: 10px;
+      color: var(--teal-800);
+      background: #e8f6f2;
+      font-size: 12px;
+    }
+
+    .cue-copy {
+      min-width: 0;
+      flex: 1;
+    }
+
+    .cue-copy strong {
+      display: block;
+      color: #34514c;
+      font-size: 10px;
+      font-weight: 750;
+    }
+
+    .cue-copy span {
+      display: block;
+      width: 72%;
+      height: 3px;
+      margin-top: 6px;
+      overflow: hidden;
+      border-radius: 99px;
+      background: rgba(16,116,101,.1);
+    }
+
+    .cue-copy span::after {
+      display: block;
+      width: 42%;
+      height: 100%;
+      border-radius: inherit;
+      background: rgba(36,174,153,.52);
+      content: "";
+      animation: cue-line 2.8s ease-in-out infinite;
+    }
+
+    .weave-progress {
+      width: 260px;
+      margin: 0 auto;
+    }
+
+    @keyframes weave-glint {
+      0%, 15% { background-position: 110% 0, 0 0; }
+      70%, 100% { background-position: -90% 0, 0 0; }
+    }
+
+    @keyframes thread-flow {
+      0% { transform: translateX(0); opacity: 0; }
+      25%, 75% { opacity: 1; }
+      100% { transform: translateX(430%); opacity: 0; }
+    }
+
+    @keyframes cue-awaken {
+      0%, 18%, 100% { opacity: .42; transform: translateX(7px); background: transparent; }
+      30%, 50% { opacity: 1; transform: translateX(0); background: rgba(231,247,242,.68); }
+      64% { opacity: .65; transform: translateX(0); background: transparent; }
+    }
+
+    @keyframes cue-line {
+      0%, 100% { transform: translateX(-20%); opacity: .35; }
+      50% { transform: translateX(120%); opacity: .85; }
+    }
+  </style>
+</head>
+<body>
+  <main class="prototype-page">
+    <nav class="prototype-topbar" aria-label="Concept navigation">
+      <a class="back-link" href="index.html">← All concepts</a>
+      <span class="concept-index">Concept 04 of 06</span>
+      <a class="next-link" href="concept-05-frame-river.html">Next concept →</a>
+    </nav>
+    <div class="prototype-layout">
+      <section class="concept-copy">
+        <p class="eyebrow">Image-to-inventory narrative</p>
+        <h1>Inventory Weave</h1>
+        <p class="concept-summary">Visual evidence flows into a softly structured inventory panel. Generic category cues wake in sequence, suggesting organisation without pretending that any item has already been confirmed.</p>
+        <ul class="motion-notes" aria-label="Motion characteristics">
+          <li>Image-to-structure story</li>
+          <li>Generic category cues</li>
+          <li>Flowing connection lines</li>
+        </ul>
+        <div class="scenario-panel">
+          <div class="scenario-label"><span>Preview scenario</span><span>Keys: 1 · 5 · 0</span></div>
+          <div class="scenario-buttons">
+            <button class="scenario-button" data-count="1" aria-pressed="false"><span>Single Photo</span><small>1</small></button>
+            <button class="scenario-button is-active" data-count="5" aria-pressed="true"><span>Multi Photo</span><small>5</small></button>
+            <button class="scenario-button" data-count="10" aria-pressed="false"><span>Video</span><small>10</small></button>
+            <button class="scenario-button" data-count="1" aria-pressed="false"><span>Single Item</span><small>1</small></button>
+          </div>
+          <label class="motion-toggle">
+            <span>Preview reduced motion</span>
+            <span class="toggle-control"><input type="checkbox" data-motion-toggle><span class="toggle-track"></span></span>
+          </label>
+        </div>
+      </section>
+
+      <section class="phone-shell" aria-label="Inventory Weave mobile prototype">
+        <div class="status-bar"><span>9:41</span><span class="status-icons">● ● ▰</span></div>
+        <div class="app-screen weave-screen">
+          <div class="brand-lockup"><span class="brand-mark"></span><span>Coverly</span></div>
+          <h2 class="screen-heading weave-heading">Building your inventory</h2>
+          <p class="screen-subheading" data-processing-message>Looking for individual items…</p>
+
+          <div class="weave-stage">
+            <div class="source-card">
+              <img class="is-active" data-weave-layer alt="" src="assets/room-01-living-room.jpg">
+              <img data-weave-layer alt="" src="assets/room-02-bedroom.jpg">
+              <div class="source-label"><span>Visual evidence</span><span><span data-frame-current>1</span> / <span data-frame-total>5</span></span></div>
+            </div>
+            <div class="weave-thread" aria-hidden="true">
+              <span class="thread-line thread-1"></span><span class="thread-line thread-2"></span>
+              <span class="thread-line thread-3"></span><span class="thread-line thread-4"></span>
+            </div>
+            <div class="cue-panel">
+              <div class="cue-kicker"><span>Organising cues</span><i></i></div>
+              <div class="inventory-cue"><span class="cue-icon">▰</span><span class="cue-copy"><strong>Furniture</strong><span></span></span></div>
+              <div class="inventory-cue"><span class="cue-icon">◫</span><span class="cue-copy"><strong>Electronics</strong><span></span></span></div>
+              <div class="inventory-cue"><span class="cue-icon">◇</span><span class="cue-copy"><strong>Homewares</strong><span></span></span></div>
+              <div class="inventory-cue"><span class="cue-icon">＋</span><span class="cue-copy"><strong>Details</strong><span></span></span></div>
+            </div>
+          </div>
+
+          <div class="weave-progress indeterminate-track"></div>
+          <div class="screen-footnote">Nothing is saved until you review it</div>
+        </div>
+      </section>
+    </div>
+  </main>
+  <script src="prototype.js"></script>
+  <script>
+    (function () {
+      const layers = Array.from(document.querySelectorAll("[data-weave-layer]"));
+      let active = 0;
+      CoverlyPrototype.boot({
+        interval: 4500,
+        onFrame: function (frame) {
+          const next = active === 0 ? 1 : 0;
+          layers[next].src = frame.src;
+          window.requestAnimationFrame(function () {
+            layers[next].classList.add("is-active");
+            layers[active].classList.remove("is-active");
+            active = next;
+          });
+        }
+      });
+    }());
+  </script>
+</body>
+</html>

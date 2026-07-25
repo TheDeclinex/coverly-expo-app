@@ -1,8 +1,38 @@
 # Coverly Dev/Prod Supabase Plan
 
+## Production-readiness update (2026-07-25)
+
+The repository is now configured for three explicit application environments:
+
+| App use | `EXPO_PUBLIC_APP_ENV` | EAS environment | Supabase | RevenueCat |
+| --- | --- | --- | --- | --- |
+| Local development | `development` | Local `.env.local` | Development project | Sandbox |
+| Internal preview | `preview` | `preview` | Development/preview project | Sandbox |
+| Store release | `production` | `production` | Production project | Production |
+
+Preview no longer consumes the EAS production environment. Preview and
+production must each set `EXPO_PUBLIC_EXPECTED_SUPABASE_PROJECT_REF`; the app
+rejects a Supabase URL whose project reference does not match. Production also
+rejects a non-production RevenueCat environment marker and treats billing gates
+as enabled even if the public gate flag is accidentally omitted.
+
+Run this value-safe check from `artifacts/mobile` before any EAS build:
+
+```powershell
+pnpm run verify:env
+```
+
+The script does not print anon keys or RevenueCat SDK keys. A separate
+development Supabase project and the corresponding EAS/RevenueCat values still
+have to be created and configured manually. This repository does not create,
+link, migrate, or deploy either project automatically.
+
 ## Current decision
 
-Coverly will not immediately invest in a full dev/prod Supabase split while the app is still pre-customer and not publicly live.
+Coverly now requires a distinct production Supabase project before public store
+release. Repository and EAS configuration are prepared for that separation, but
+project creation, migration promotion, function deployment, secrets, and smoke
+testing remain manual launch actions.
 
 The current Supabase project should be treated as a **production-candidate / pre-live environment**:
 
@@ -10,11 +40,14 @@ The current Supabase project should be treated as a **production-candidate / pre
 * It does contain real app structure, test users, security settings, migrations, Edge Functions, storage policies, and live-like data.
 * Changes should still be handled carefully.
 
-Full dev/prod separation is a **pre-launch requirement**, not an immediate requirement.
+Until the second project is configured, the current project remains a
+**production-candidate / pre-live environment**, not a verified separated
+production target.
 
 ## Current operating model
 
-For now, Coverly uses one Supabase environment with manual production-style discipline.
+While project separation is being completed, Coverly uses the current
+production-candidate environment with manual production-style discipline.
 
 Before any future Supabase SQL change:
 
@@ -182,11 +215,8 @@ Before applying any prod SQL:
 
 ## Current status
 
-As of the latest checkpoint:
+As of the July 2026 P0 hardening checkpoint:
 
-* Branch: `main`
-* Working tree: clean.
-* Local and origin main are aligned.
 * Security migration is present.
 * Profile/settings migration is present.
 * Profile/settings migration includes:
@@ -195,17 +225,20 @@ As of the latest checkpoint:
   * boolean `coalesce(..., false)` hardening
 * Expo contains no direct `user_profiles` writes.
 * Profile changes use RPCs only.
-* Tests passed:
-
-  * TypeScript
-  * Profile/settings tests
-  * Existing voice/update tests
+* Property allowance enforcement is defined in
+  `20260717_property_limits_by_plan.sql` and the country-aware create RPC in
+  `20260717_global_market_foundation.sql`.
+* Feedback screenshot namespace hardening is defined in
+  `20260724_feedback_screenshot_security_and_high_priority.sql`.
+* Atomic property deletion is defined in
+  `20260725_transactional_property_delete.sql`.
 * Known remaining risks:
 
   * Generated Supabase database types are not yet present.
   * Admin write RPCs still exist in production, although secured.
-  * Full dev/prod separation is not yet implemented.
   * Migrations still rely on careful manual promotion.
+  * The migration files above must be reviewed and applied in order to each
+    target project before a dependent mobile build is distributed.
 
 ## Recommended future task
 

@@ -223,16 +223,29 @@ export default function LoginScreen() {
     }
     setLoading(true);
     setError(null);
-    const { error: authError } = await supabase.auth.signInWithPassword({
-      email: normalizedEmail,
-      password,
-    });
-    setLoading(false);
-    if (authError) {
-      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-      setError(authError.message);
-    } else {
+    try {
+      const { error: authError } = await supabase.auth.signInWithPassword({
+        email: normalizedEmail,
+        password,
+      });
+      if (authError) {
+        await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+        const normalizedMessage = authError.message.toLowerCase();
+        setError(
+          normalizedMessage.includes("email not confirmed")
+            ? "Check your email and verify your account before signing in."
+            : normalizedMessage.includes("invalid login credentials")
+              ? "The email or password is incorrect."
+              : "We couldn't sign you in. Check your connection and try again.",
+        );
+        return;
+      }
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    } catch {
+      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      setError("We couldn't sign you in. Check your connection and try again.");
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -252,20 +265,26 @@ export default function LoginScreen() {
     }
     setLoading(true);
     setError(null);
-    const { data, error: authError } = await supabase.auth.signUp({
-      email: normalizedEmail,
-      password,
-      options: { emailRedirectTo: EMAIL_VERIFIED_URL },
-    });
-    setLoading(false);
-    if (authError) {
+    try {
+      const { data, error: authError } = await supabase.auth.signUp({
+        email: normalizedEmail,
+        password,
+        options: { emailRedirectTo: EMAIL_VERIFIED_URL },
+      });
+      if (authError) {
+        await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+        setError("We couldn't create your account. Check your details and try again.");
+      } else if (data.session) {
+        await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      } else {
+        await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        setAwaitConfirm(true);
+      }
+    } catch {
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-      setError(authError.message);
-    } else if (data.session) {
-      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    } else {
-      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      setAwaitConfirm(true);
+      setError("We couldn't create your account. Check your connection and try again.");
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -277,17 +296,23 @@ export default function LoginScreen() {
     }
     setLoading(true);
     setError(null);
-    const { error: authError } = await supabase.auth.resetPasswordForEmail(
-      normalizedEmail,
-      { redirectTo: PASSWORD_RESET_URL }
-    );
-    setLoading(false);
-    if (authError) {
+    try {
+      const { error: authError } = await supabase.auth.resetPasswordForEmail(
+        normalizedEmail,
+        { redirectTo: PASSWORD_RESET_URL }
+      );
+      if (authError) {
+        await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+        setError("We couldn't send a reset email right now. Check your connection and try again.");
+      } else {
+        await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        setResetSent(true);
+      }
+    } catch {
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
       setError("We couldn't send a reset email right now. Check your connection and try again.");
-    } else {
-      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      setResetSent(true);
+    } finally {
+      setLoading(false);
     }
   };
 

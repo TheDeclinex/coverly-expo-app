@@ -1,0 +1,267 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Coverly Scan Exploration — Focus Garden</title>
+  <link rel="stylesheet" href="shared.css">
+  <style>
+    .focus-screen {
+      background:
+        radial-gradient(circle at 84% 32%, rgba(212,230,203,.58), transparent 190px),
+        radial-gradient(circle at 16% 68%, rgba(114,214,196,.19), transparent 210px),
+        linear-gradient(180deg, #fffefa, #f5f8f2);
+    }
+
+    .focus-heading {
+      margin-top: 29px;
+    }
+
+    .focus-stage {
+      position: relative;
+      z-index: 2;
+      width: 320px;
+      height: 426px;
+      margin: 23px auto 10px;
+    }
+
+    .focus-backplate {
+      position: absolute;
+      top: 16px;
+      left: 10px;
+      width: 300px;
+      height: 355px;
+      border-radius: 37px;
+      background: rgba(222,239,233,.72);
+      transform: rotate(-2.5deg);
+      animation: backplate-drift 6s ease-in-out infinite;
+    }
+
+    .focus-photo {
+      position: absolute;
+      z-index: 4;
+      top: 4px;
+      left: 10px;
+      width: 300px;
+      height: 355px;
+      overflow: hidden;
+      border: 7px solid #fffefa;
+      border-radius: 35px;
+      background: #dce8e3;
+      box-shadow: 0 22px 50px rgba(29,75,66,.17);
+    }
+
+    .focus-photo img {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      opacity: 0;
+      transform: scale(1.04);
+      transition: opacity 950ms ease, transform 6s ease;
+    }
+
+    .focus-photo img.is-active {
+      opacity: 1;
+      transform: scale(1);
+    }
+
+    .focus-photo::after {
+      position: absolute;
+      inset: 0;
+      background: linear-gradient(180deg, transparent 58%, rgba(8,49,43,.21));
+      content: "";
+      pointer-events: none;
+    }
+
+    .focus-lens {
+      position: absolute;
+      z-index: 8;
+      top: 83px;
+      left: 46px;
+      width: 112px;
+      height: 92px;
+      overflow: hidden;
+      border: 2px solid rgba(236,255,251,.95);
+      border-radius: 24px;
+      background: rgba(103,211,192,.12);
+      box-shadow: 0 0 0 1px rgba(18,145,126,.48), 0 14px 32px rgba(17,97,84,.19), inset 0 0 35px rgba(102,224,204,.17);
+      animation: lens-path 9.6s cubic-bezier(.45,0,.55,1) infinite;
+    }
+
+    .focus-lens::before,
+    .focus-lens::after {
+      position: absolute;
+      border-color: rgba(255,255,255,.92);
+      border-style: solid;
+      content: "";
+    }
+
+    .focus-lens::before {
+      inset: 9px;
+      border-width: 1px 0;
+    }
+
+    .focus-lens::after {
+      inset: 0 14px;
+      border-width: 0 1px;
+    }
+
+    .focus-ripple {
+      position: absolute;
+      z-index: 7;
+      width: 18px;
+      height: 18px;
+      border: 2px solid rgba(221,255,248,.95);
+      border-radius: 50%;
+      background: rgba(13,145,125,.62);
+      box-shadow: 0 0 0 0 rgba(55,198,176,.28);
+      animation: garden-ripple 4.8s ease-out infinite;
+    }
+
+    .ripple-1 { top: 118px; left: 86px; }
+    .ripple-2 { top: 218px; right: 69px; animation-delay: -2.4s; }
+
+    .focus-note {
+      position: absolute;
+      z-index: 11;
+      right: 0;
+      bottom: 26px;
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      min-width: 183px;
+      padding: 11px 13px;
+      border: 1px solid rgba(17,111,98,.11);
+      border-radius: 17px;
+      color: #47615c;
+      background: rgba(255,255,252,.9);
+      box-shadow: 0 12px 32px rgba(29,75,66,.12);
+      font-size: 9px;
+      font-weight: 750;
+      backdrop-filter: blur(12px);
+    }
+
+    .focus-note i {
+      position: relative;
+      display: block;
+      width: 28px;
+      height: 28px;
+      border: 1px solid rgba(14,130,113,.18);
+      border-radius: 10px;
+      background: #e9f7f2;
+    }
+
+    .focus-note i::before,
+    .focus-note i::after {
+      position: absolute;
+      background: var(--teal-700);
+      content: "";
+    }
+
+    .focus-note i::before { top: 7px; bottom: 7px; left: 13px; width: 1px; }
+    .focus-note i::after { top: 13px; right: 7px; left: 7px; height: 1px; }
+
+    .focus-progress {
+      width: 254px;
+      margin: 0 auto;
+    }
+
+    @keyframes lens-path {
+      0%, 10% { transform: translate3d(0,0,0); }
+      27%, 37% { transform: translate3d(116px,24px,0); }
+      53%, 63% { transform: translate3d(82px,142px,0); }
+      80%, 90% { transform: translate3d(-8px,174px,0); }
+      100% { transform: translate3d(0,0,0); }
+    }
+
+    @keyframes garden-ripple {
+      0%, 10% { opacity: 0; transform: scale(.6); box-shadow: 0 0 0 0 rgba(55,198,176,.3); }
+      24%, 45% { opacity: 1; transform: scale(1); box-shadow: 0 0 0 19px rgba(55,198,176,0); }
+      60%, 100% { opacity: 0; transform: scale(.8); }
+    }
+
+    @keyframes backplate-drift {
+      0%, 100% { transform: rotate(-2.5deg) translateY(0); }
+      50% { transform: rotate(2deg) translateY(5px); }
+    }
+  </style>
+</head>
+<body>
+  <main class="prototype-page">
+    <nav class="prototype-topbar" aria-label="Concept navigation">
+      <a class="back-link" href="index.html">← All concepts</a>
+      <span class="concept-index">Concept 06 of 06</span>
+      <a class="next-link" href="concept-01-luminous-sweep.html">Loop to first →</a>
+    </nav>
+    <div class="prototype-layout">
+      <section class="concept-copy">
+        <p class="eyebrow">Attentive visual focus</p>
+        <h1>Focus Garden</h1>
+        <p class="concept-summary">A rounded focus window explores different areas of each frame, with brief ripples that feel curious and attentive. The motion is slow, organic, and intentionally non-technical.</p>
+        <ul class="motion-notes" aria-label="Motion characteristics">
+          <li>Roaming focus window</li>
+          <li>Organic attention ripples</li>
+          <li>Gentle frame replacement</li>
+        </ul>
+        <div class="scenario-panel">
+          <div class="scenario-label"><span>Preview scenario</span><span>Keys: 1 · 5 · 0</span></div>
+          <div class="scenario-buttons">
+            <button class="scenario-button" data-count="1" aria-pressed="false"><span>Single Photo</span><small>1</small></button>
+            <button class="scenario-button is-active" data-count="5" aria-pressed="true"><span>Multi Photo</span><small>5</small></button>
+            <button class="scenario-button" data-count="10" aria-pressed="false"><span>Video</span><small>10</small></button>
+            <button class="scenario-button" data-count="1" aria-pressed="false"><span>Single Item</span><small>1</small></button>
+          </div>
+          <label class="motion-toggle">
+            <span>Preview reduced motion</span>
+            <span class="toggle-control"><input type="checkbox" data-motion-toggle><span class="toggle-track"></span></span>
+          </label>
+        </div>
+      </section>
+
+      <section class="phone-shell" aria-label="Focus Garden mobile prototype">
+        <div class="status-bar"><span>9:41</span><span class="status-icons">● ● ▰</span></div>
+        <div class="app-screen focus-screen">
+          <div class="brand-lockup"><span class="brand-mark"></span><span>Coverly</span></div>
+          <h2 class="screen-heading focus-heading">Looking closely</h2>
+          <p class="screen-subheading" data-processing-message>Looking for individual items…</p>
+
+          <div class="focus-stage">
+            <div class="focus-backplate"></div>
+            <div class="focus-photo">
+              <img class="is-active" data-focus-layer alt="" src="assets/room-01-living-room.jpg">
+              <img data-focus-layer alt="" src="assets/room-02-bedroom.jpg">
+              <span class="focus-ripple ripple-1"></span><span class="focus-ripple ripple-2"></span>
+              <span class="focus-lens"></span>
+            </div>
+            <div class="focus-note"><i></i><span>Examining visual details<br><span class="frame-context">Frame <span data-frame-current>1</span> of <span data-frame-total>5</span></span></span></div>
+          </div>
+
+          <div class="focus-progress indeterminate-track"></div>
+          <div class="screen-footnote">You’ll confirm everything next</div>
+        </div>
+      </section>
+    </div>
+  </main>
+  <script src="prototype.js"></script>
+  <script>
+    (function () {
+      const layers = Array.from(document.querySelectorAll("[data-focus-layer]"));
+      let active = 0;
+      CoverlyPrototype.boot({
+        interval: 5000,
+        onFrame: function (frame) {
+          const next = active === 0 ? 1 : 0;
+          layers[next].src = frame.src;
+          window.requestAnimationFrame(function () {
+            layers[next].classList.add("is-active");
+            layers[active].classList.remove("is-active");
+            active = next;
+          });
+        }
+      });
+    }());
+  </script>
+</body>
+</html>

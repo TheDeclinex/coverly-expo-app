@@ -1,9 +1,14 @@
 import { friendlyNetworkErrorMessage } from "@/lib/network-errors";
-import { debugSupabaseHost, debugSupabaseProjectRef, supabase } from "@/lib/supabase";
+import {
+  debugExpectedSupabaseProjectRef,
+  debugSupabaseHost,
+  debugSupabaseProjectRef,
+  debugSupabaseProjectRefMatchesExpected,
+  supabase,
+} from "@/lib/supabase";
 import type { ClaimPackGenerateDraftPayload } from "@/lib/claim-pack-selection-model";
 
 export const CLAIM_PACK_GENERATE_FUNCTION_NAME = "generate-claim-pack";
-const EXPECTED_SUPABASE_PROJECT_REF = "jqijavrugjidqzbbgpag";
 
 export interface GenerateClaimPackPdfSuccess {
   success: true;
@@ -43,6 +48,7 @@ export interface ClaimPackPdfDiagnosticsContext {
   hasEvidence?: boolean | null;
   functionName?: string;
   supabaseProjectRef?: string | null;
+  expectedSupabaseProjectRef?: string | null;
   supabaseProjectRefMatchesExpected?: boolean | null;
   supabaseHost?: string | null;
   status?: number | null;
@@ -126,7 +132,7 @@ function baseClaimPackDiagnostics(payload?: ClaimPackGenerateDraftPayload | null
     selectedItemCount: payload?.selectedItemIds.length ?? null,
     functionName: CLAIM_PACK_GENERATE_FUNCTION_NAME,
     supabaseProjectRef: debugSupabaseProjectRef,
-    supabaseProjectRefMatchesExpected: debugSupabaseProjectRef === EXPECTED_SUPABASE_PROJECT_REF,
+    supabaseProjectRefMatchesExpected: debugSupabaseProjectRefMatchesExpected,
     supabaseHost: debugSupabaseHost,
   };
 }
@@ -149,8 +155,9 @@ export function logClaimPackPdfDiagnostic(
   logClaimPackExport(stage, {
     functionName: CLAIM_PACK_GENERATE_FUNCTION_NAME,
     supabaseProjectRef: debugSupabaseProjectRef,
-    supabaseProjectRefMatchesExpected: debugSupabaseProjectRef === EXPECTED_SUPABASE_PROJECT_REF,
+    supabaseProjectRefMatchesExpected: debugSupabaseProjectRefMatchesExpected,
     supabaseHost: debugSupabaseHost,
+    expectedSupabaseProjectRef: debugExpectedSupabaseProjectRef,
     ...details,
   });
 }

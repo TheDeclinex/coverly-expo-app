@@ -42,6 +42,7 @@ import {
   type FeedbackReportRow,
   type FeedbackScreenshotInput,
 } from "@/lib/feedback-service";
+import { requestImagePermission } from "@/lib/media-permissions";
 
 const typeOptions: FeedbackType[] = ["issue", "bug", "feature", "feedback"];
 const categoryOptions: FeedbackCategory[] = ["general", "scan", "pricing", "claim_pack", "billing", "account"];
@@ -78,11 +79,7 @@ export default function FeedbackScreen() {
     setInlineError(null);
     setIsPicking(true);
     try {
-      const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
-      if (!permission.granted) {
-        setInlineError("Photo access is needed to attach a screenshot.");
-        return;
-      }
+      if (!await requestImagePermission("photo-library", "attach a screenshot")) return;
 
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ["images"],

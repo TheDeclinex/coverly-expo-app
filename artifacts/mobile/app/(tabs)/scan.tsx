@@ -17,6 +17,7 @@ import {
   FlatList,
   InteractionManager,
   KeyboardAvoidingView,
+  Linking,
   Modal,
   Platform,
   Pressable,
@@ -38,6 +39,7 @@ import { useAuth } from "@/context/AuthContext";
 import { useEntitlements } from "@/context/EntitlementsContext";
 import { useColors } from "@/hooks/useColors";
 import { buildItemInsertPayload } from "@/lib/item-insert-helpers";
+import { getInstalledAppContext } from "@/lib/app-build-context";
 import { formatCurrencyFull } from "@/lib/inventory-mappers";
 import {
   SCAN_LIBRARY_IMAGE_CONVERSION_ERROR,
@@ -50,6 +52,7 @@ import {
   runAiScan,
   validateScanInput,
 } from "@/lib/scan-service";
+import { publicScanFailureMessage } from "@/lib/scan-errors";
 import { normalizeLimitError, type NormalizedLimitError } from "@/lib/limit-errors";
 import { buildManualScanValuePatch } from "@/lib/replacement-value";
 import {
@@ -215,6 +218,60 @@ function scanLog(message: string, details?: Record<string, unknown>) {
   } else {
     console.info(`[Scan] ${message}`);
   }
+}
+
+function reportScanFailure(
+  reason: string,
+  mode: ScanMode | null,
+  scanImages: ScanEncodedImage[],
+  status?: number | null,
+) {
+  const app = getInstalledAppContext();
+  console.warn("[ScanFailure]", {
+    reason,
+    mode,
+    imageCount: scanImages.length,
+    images: scanImages.map(safeImageDiagnostics),
+    status: status ?? null,
+    platform: app.platform,
+    osVersion: app.osVersion,
+    appVersion: app.appVersion,
+    buildNumber: app.buildNumber,
+    deviceModel: app.deviceModel,
+  });
+}
+
+function createScanUsageIdempotencyKey(): string {
+  const randomPart =
+    typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+      ? crypto.randomUUID()
+      : Math.random().toString(36).slice(2);
+  return `scan:${Date.now()}:${randomPart}`;
+}
+
+function showScanPermissionHelp(
+  source: "camera" | "photo library",
+  canAskAgain: boolean,
+) {
+  const label = source === "camera" ? "camera" : "photo library";
+  const message = canAskAgain
+    ? `Allow ${label} access to continue with the scan.`
+    : `${source === "camera" ? "Camera" : "Photo library"} access is turned off for Coverly. Open Settings to allow access, then return and try again.`;
+  Alert.alert(
+    "Permission needed",
+    message,
+    canAskAgain
+      ? [{ text: "OK" }]
+      : [
+          { text: "Cancel", style: "cancel" },
+          {
+            text: "Open Settings",
+            onPress: () => void Linking.openSettings().catch(() => {
+              Alert.alert("Settings unavailable", "Open your device settings and allow access for Coverly.");
+            }),
+          },
+        ],
+  );
 }
 
 function uriScheme(uri: string | null | undefined): string | null {
@@ -523,9 +580,11 @@ function scanSaveErrorMessage(stage: ScanSaveStage, error: unknown, itemName?: s
     return "Photo upload failed while saving this item. Please try again.";
   }
   if (stage === "db-insert") {
-    if (isTimeoutMessage(message)) return "Item save timed out. Please try again.";
-    if (isNetworkFailureMessage(message)) return "Network request failed while saving item.";
-    return itemName ? `Failed to save "${itemName}": ${message}` : `Item save failed: ${message}`;
+    if (isTimeoutMessage(message)) return "Item save timed out. This item may not have saved; check the room before retrying.";
+    if (isNetworkFailureMessage(message)) return "The connection was interrupted while saving this item. Check the room before retrying.";
+    return itemName
+      ? `Couldn’t save “${itemName}”. Check the room, then try again.`
+      : "The item could not be saved. Check the room, then try again.";
   }
   if (stage === "room-refresh") {
     return "The item may have saved, but refresh timed out. Pull to refresh or reopen the room.";
@@ -534,7 +593,7 @@ function scanSaveErrorMessage(stage: ScanSaveStage, error: unknown, itemName?: s
     if (isTimeoutMessage(message)) return "Item save timed out. Please try again.";
     if (isNetworkFailureMessage(message)) return "Network request failed while saving item.";
   }
-  return message;
+  return "The scan result could not be saved. Check the room, then try again.";
 }
 
 async function insertScanReviewItem(
@@ -672,15 +731,26 @@ export default function ScanScreen() {
   const videoProcessingRef = useRef<{ key: string; sessionId: number } | null>(null);
   const videoProcessingSessionRef = useRef(0);
   const scanAttemptRef = useRef(0);
+  const scanSubmissionInFlightRef = useRef<number | null>(null);
+  const scanUsageIdempotencyKeyRef = useRef<string | null>(null);
+  const screenMountedRef = useRef(true);
   const saveAllInFlightRef = useRef(false);
   const completionNavigationRef = useRef(false);
   const restoredAndroidScanStateRef = useRef(false);
 
-  useEffect(() => () => {
-    if (multiPhotoCameraTimerRef.current) {
-      clearTimeout(multiPhotoCameraTimerRef.current);
-    }
-    multiPhotoCameraInteractionRef.current?.cancel();
+  useEffect(() => {
+    screenMountedRef.current = true;
+    return () => {
+      screenMountedRef.current = false;
+      scanAttemptRef.current += 1;
+      scanSubmissionInFlightRef.current = null;
+      videoProcessingSessionRef.current += 1;
+      videoProcessingRef.current = null;
+      if (multiPhotoCameraTimerRef.current) {
+        clearTimeout(multiPhotoCameraTimerRef.current);
+      }
+      multiPhotoCameraInteractionRef.current?.cancel();
+    };
   }, []);
 
   const persistAndroidScanState = async (reason: string) => {
@@ -818,6 +888,8 @@ export default function ScanScreen() {
 
   const clearCaptureState = () => {
     scanAttemptRef.current += 1;
+    scanSubmissionInFlightRef.current = null;
+    scanUsageIdempotencyKeyRef.current = null;
     videoProcessingSessionRef.current += 1;
     videoProcessingRef.current = null;
     completionNavigationRef.current = false;
@@ -905,9 +977,9 @@ export default function ScanScreen() {
       setMultiPhotoPromptVisible(true);
       return;
     }
-    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (status !== "granted") {
-      Alert.alert("Permission needed", "Allow photo library access to continue.");
+    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (permission.status !== "granted") {
+      showScanPermissionHelp("photo library", permission.canAskAgain !== false);
       return;
     }
     scanLog("image processing started", { source: "library", mode });
@@ -919,6 +991,7 @@ export default function ScanScreen() {
       quality: 1,
       base64: false,
     });
+    if (!screenMountedRef.current) return;
     scanLog("image picker returned", {
       source: "library",
       mode,
@@ -939,6 +1012,8 @@ export default function ScanScreen() {
         setScanError(SCAN_LIBRARY_IMAGE_CONVERSION_ERROR);
         return;
       }
+      if (!screenMountedRef.current) return;
+      scanUsageIdempotencyKeyRef.current = null;
       scanLog("photo captured", {
         source: "library",
         imageCount: picked.length,
@@ -978,9 +1053,9 @@ export default function ScanScreen() {
     // On web the camera/file prompt must be opened directly from the mode-card
     // click. Awaiting a permission request first causes browsers to block it.
     if (Platform.OS !== "web") {
-      const { status } = await ImagePicker.requestCameraPermissionsAsync();
-      if (status !== "granted") {
-        Alert.alert("Permission needed", "Allow camera access to continue.");
+      const permission = await ImagePicker.requestCameraPermissionsAsync();
+      if (permission.status !== "granted") {
+        showScanPermissionHelp("camera", permission.canAskAgain !== false);
         return;
       }
     }
@@ -990,6 +1065,7 @@ export default function ScanScreen() {
       quality: 0.8,
       base64: false,
     });
+    if (!screenMountedRef.current) return;
     scanLog("image picker returned", {
       source: "camera",
       mode,
@@ -1000,11 +1076,13 @@ export default function ScanScreen() {
     if (!result.canceled && result.assets[0]?.uri) {
       const a = result.assets[0];
       const capturedImage = await imageFromPickerAsset(a, "camera", 0);
+      if (!screenMountedRef.current) return;
       if (!capturedImage) {
         setScanError("Could not prepare the captured photo for scanning. Please try again.");
         return;
       }
       const capturedImages = [capturedImage];
+      scanUsageIdempotencyKeyRef.current = null;
       scanLog("photo captured", {
         source: "camera",
         imageCount: capturedImages.length,
@@ -1112,18 +1190,21 @@ export default function ScanScreen() {
         maxFrames: MAX_VIDEO_SCAN_FRAMES,
       });
       const frames = await extractVideoFrames(asset.uri, asset.duration);
-      if (videoProcessingRef.current?.sessionId !== sessionId) return;
+      if (!screenMountedRef.current || videoProcessingRef.current?.sessionId !== sessionId) return;
       scanLog("video frame extraction completed", {
         sessionId,
         frameCount: frames.length,
         images: frames.map(safeImageDiagnostics),
       });
+      scanUsageIdempotencyKeyRef.current = null;
       setImages(frames);
       await handleStartScan("video_room", frames);
     } catch (error) {
       if (__DEV__) console.error("[Scan] video frame extraction failed", error);
+      reportScanFailure("video_frame_extraction_failed", "video_room", []);
+      if (!screenMountedRef.current) return;
       setScanStatus("error");
-      setScanError(error instanceof Error ? error.message : "Could not prepare video frames. Try a shorter or clearer video.");
+      setScanError("Could not prepare video frames. No scan was submitted. Try a shorter or clearer video.");
     } finally {
       if (videoProcessingRef.current?.sessionId === sessionId) {
         videoProcessingRef.current = null;
@@ -1137,9 +1218,9 @@ export default function ScanScreen() {
       return;
     }
     try {
-      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-      if (status !== "granted") {
-        Alert.alert("Permission needed", "Allow photo library access to choose a video.");
+      const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (permission.status !== "granted") {
+        showScanPermissionHelp("photo library", permission.canAskAgain !== false);
         return;
       }
       const result = await ImagePicker.launchImageLibraryAsync({
@@ -1147,6 +1228,7 @@ export default function ScanScreen() {
         quality: 0.8,
         allowsMultipleSelection: false,
       });
+      if (!screenMountedRef.current) return;
       scanLog("image picker returned", {
         source: "video_library",
         mode: "video_room",
@@ -1175,9 +1257,9 @@ export default function ScanScreen() {
     setScanError(null);
     try {
       if (Platform.OS !== "web") {
-        const { status } = await ImagePicker.requestCameraPermissionsAsync();
-        if (status !== "granted") {
-          Alert.alert("Permission needed", "Allow camera access to record video.");
+        const permission = await ImagePicker.requestCameraPermissionsAsync();
+        if (permission.status !== "granted") {
+          showScanPermissionHelp("camera", permission.canAskAgain !== false);
           return;
         }
       }
@@ -1186,6 +1268,7 @@ export default function ScanScreen() {
         quality: 0.8,
         videoMaxDuration: VIDEO_SCAN_USED_SECONDS,
       });
+      if (!screenMountedRef.current) return;
       scanLog("image picker returned", {
         source: "video_camera",
         mode: "video_room",
@@ -1358,6 +1441,7 @@ export default function ScanScreen() {
     message: string,
     scanImages: ScanEncodedImage[],
     reason: string,
+    status?: number | null,
   ) => {
     const compatibilityReason = compatibilityReasonFor(scanImages, reason);
     scanLog("scan failure surfaced", {
@@ -1366,6 +1450,7 @@ export default function ScanScreen() {
       canRetryCompatibility: Boolean(compatibilityReason),
       imageCount: scanImages.length,
     });
+    reportScanFailure(reason, selectedMode, scanImages, status);
     setScanStatus("error");
     setScanError(compatibilityReason ? COMPATIBILITY_ERROR_COPY : message);
     setCompatibilityPrompt(
@@ -1387,6 +1472,18 @@ export default function ScanScreen() {
     if (!selectedRoomId) { setScanError("Select a room."); return; }
     if (scanImages.length === 0) { setScanError("Add at least one photo."); return; }
     if (!aiScanEntitlementCheckedRef.current && !enforce("ai_scan")) return;
+    if (scanSubmissionInFlightRef.current !== null) {
+      scanLog("duplicate scan start ignored", {
+        mode,
+        activeAttemptId: scanSubmissionInFlightRef.current,
+      });
+      return;
+    }
+
+    const scanAttemptId = scanAttemptRef.current + 1;
+    scanAttemptRef.current = scanAttemptId;
+    scanSubmissionInFlightRef.current = scanAttemptId;
+    try {
 
     setScanError(null);
     setCompatibilityPrompt(null);
@@ -1429,13 +1526,14 @@ export default function ScanScreen() {
       roomId: selectedRoomId,
       roomName: getDestRoomName(selectedRoomId) ?? undefined,
       images: imagesForScan,
+      usageIdempotencyKey:
+        scanUsageIdempotencyKeyRef.current
+        ?? (scanUsageIdempotencyKeyRef.current = createScanUsageIdempotencyKey()),
     };
 
     const validationError = validateScanInput(input);
     if (validationError) { setScanError(validationError); return; }
 
-    const scanAttemptId = scanAttemptRef.current + 1;
-    scanAttemptRef.current = scanAttemptId;
     setScanStatus("scanning");
     void persistAndroidScanState("scan_started").catch((error) => {
       scanLog("android scan state persist failed", { message: errorMessage(error) });
@@ -1451,7 +1549,9 @@ export default function ScanScreen() {
       const expectedNetworkFailure = /timed out|network request failed|network request timed out|failed to fetch/i.test(message);
       if (__DEV__ && !expectedNetworkFailure) console.error("[Scan] unexpected scan failure", error);
       showRecoverableScanError(
-        expectedNetworkFailure ? "We couldn't complete the scan. Check your connection and try again." : message,
+        expectedNetworkFailure
+          ? publicScanFailureMessage({ errorCode: "SCAN_NETWORK_ERROR" })
+          : publicScanFailureMessage({ errorCode: "UNEXPECTED_SCAN_ERROR" }),
         imagesForScan,
         expectedNetworkFailure ? "scan_request_network_failure" : "scan_request_unexpected_failure",
       );
@@ -1459,8 +1559,9 @@ export default function ScanScreen() {
     }
 
     if (result.status === "not_configured") {
+      reportScanFailure("scan_not_configured", mode, imagesForScan);
       setScanStatus("error");
-      setScanError("AI scan is not available right now. Please try again later.");
+      setScanError("AI scan is not available right now. No items were saved. Please try again later.");
       return;
     }
 
@@ -1483,20 +1584,21 @@ export default function ScanScreen() {
           : result.httpStatus === 402
             ? "scan_entitlement_error"
             : result.errorCode ?? "scan_result_error";
-      const message = result.errorMessage ?? "AI scan failed. No items were saved. Please try again.";
+      const message = publicScanFailureMessage(result);
       if (result.httpStatus === 401 || result.httpStatus === 403) {
+        reportScanFailure("scan_auth_error", mode, imagesForScan, result.httpStatus);
         setScanStatus("error");
-        setScanError(message || "You must be signed in to scan items.");
+        setScanError(message);
         setCompatibilityPrompt(null);
         return;
       }
-      showRecoverableScanError(message, imagesForScan, String(statusReason));
+      showRecoverableScanError(message, imagesForScan, String(statusReason), result.httpStatus);
       return;
     }
 
     if (result.items.length === 0) {
       showRecoverableScanError(
-        "No items were detected. Try a clearer shot or a different angle.",
+        "The photo was scanned, but no items were detected or saved. Try a clearer shot or a different angle.",
         imagesForScan,
         "no_usable_items",
       );
@@ -1536,10 +1638,15 @@ export default function ScanScreen() {
         message: errorMessage(error),
       });
       showRecoverableScanError(
-        "Coverly found scan results but had trouble saving them. Try again in compatibility mode or choose a photo from gallery.",
+        "Coverly found scan results but could not finish saving them. Review the room before retrying so you do not create duplicates.",
         imagesForScan,
         "auto_save_transition_failed",
       );
+    }
+    } finally {
+      if (scanSubmissionInFlightRef.current === scanAttemptId) {
+        scanSubmissionInFlightRef.current = null;
+      }
     }
   };
 
@@ -1889,6 +1996,9 @@ export default function ScanScreen() {
   };
 
   const resetScan = () => {
+    scanAttemptRef.current += 1;
+    scanSubmissionInFlightRef.current = null;
+    scanUsageIdempotencyKeyRef.current = null;
     if (multiPhotoCameraTimerRef.current) {
       clearTimeout(multiPhotoCameraTimerRef.current);
       multiPhotoCameraTimerRef.current = null;

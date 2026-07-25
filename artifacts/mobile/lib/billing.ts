@@ -9,6 +9,10 @@ import {
   type RevenueCatEntitlementConfig,
   type RevenueCatPlanState,
 } from "@/lib/billing-entitlements";
+import {
+  resolveAppEnvironment,
+  revenueCatEnvironmentIssue,
+} from "@/lib/runtime-config";
 
 export type BillingResult<T> =
   | { ok: true; value: T }
@@ -24,7 +28,18 @@ function envValue(value: string | undefined) {
 
 export const revenueCatPlusEntitlementId = envValue(process.env.EXPO_PUBLIC_REVENUECAT_PLUS_ENTITLEMENT_ID);
 export const revenueCatFamilyEntitlementId = envValue(process.env.EXPO_PUBLIC_REVENUECAT_FAMILY_ENTITLEMENT_ID);
-export const billingGatesEnabled = process.env.EXPO_PUBLIC_BILLING_GATES_ENABLED === "true";
+const billingAppEnvironment = resolveAppEnvironment(process.env.EXPO_PUBLIC_APP_ENV, __DEV__);
+const configuredRevenueCatEnvironment = envValue(process.env.EXPO_PUBLIC_REVENUECAT_ENV);
+const revenueCatConfigurationIssue = revenueCatEnvironmentIssue(
+  billingAppEnvironment,
+  configuredRevenueCatEnvironment ?? undefined,
+);
+// A production binary must never become permissive because a public flag was
+// omitted. Missing store configuration then blocks purchasing with a clear
+// setup error instead of silently unlocking paid features.
+export const billingGatesEnabled =
+  billingAppEnvironment === "production"
+  || process.env.EXPO_PUBLIC_BILLING_GATES_ENABLED === "true";
 export const revenueCatEntitlementConfig: RevenueCatEntitlementConfig = {
   plusEntitlementId: revenueCatPlusEntitlementId,
   familyEntitlementId: revenueCatFamilyEntitlementId,
@@ -43,6 +58,8 @@ function billingDiagnostic(event: string, details: Record<string, unknown> = {})
   console.info(`[billing] ${event}`, {
     platform: Platform.OS,
     hasApiKey: Boolean(apiKey()),
+    appEnvironment: billingAppEnvironment,
+    revenueCatEnvironment: configuredRevenueCatEnvironment,
     plusEntitlementConfigured: Boolean(revenueCatEntitlementConfig.plusEntitlementId),
     familyEntitlementConfigured: Boolean(revenueCatEntitlementConfig.familyEntitlementId),
     ...details,
@@ -115,6 +132,10 @@ export const billingAvailability = {
 };
 
 export async function configureBilling(userId: string): Promise<BillingResult<void>> {
+  if (revenueCatConfigurationIssue) {
+    billingDiagnostic("configure blocked by environment mismatch");
+    return { ok: false, error: revenueCatConfigurationIssue };
+  }
   const key = apiKey();
   if (!key) {
     billingDiagnostic("configure skipped");
@@ -135,7 +156,7 @@ export async function configureBilling(userId: string): Promise<BillingResult<vo
       return { ok: true, value: undefined };
     } catch (error) {
       billingDiagnostic("configure failed", { message: error instanceof Error ? error.message : "unknown" });
-      return { ok: false, error: error instanceof Error ? error.message : "Native purchases are unavailable in this build." };
+      return { ok: false, error: "Purchases are unavailable right now. Please try again." };
     }
   });
 }
@@ -163,7 +184,10 @@ export async function loadOffering(): Promise<BillingResult<PurchasesOffering | 
       });
     }
     return { ok: true, value: offering };
-  } catch (error) { return { ok: false, error: error instanceof Error ? error.message : "Could not load subscription options." }; }
+  } catch (error) {
+    billingDiagnostic("offering load failed", { message: error instanceof Error ? error.message : "unknown" });
+    return { ok: false, error: "Could not load subscription options. Check your connection and try again." };
+  }
 }
 
 export async function loadCustomerInfo(): Promise<BillingResult<CustomerInfo>> {
@@ -175,7 +199,7 @@ export async function loadCustomerInfo(): Promise<BillingResult<CustomerInfo>> {
   }
   catch (error) {
     billingDiagnostic("customer info failed", { message: error instanceof Error ? error.message : "unknown" });
-    return { ok: false, error: error instanceof Error ? error.message : "Could not refresh purchases." };
+    return { ok: false, error: "Could not refresh purchases. Check your connection and try again." };
   }
 }
 
@@ -186,7 +210,7 @@ export async function addCustomerInfoListener(listener: CustomerInfoUpdateListen
     return { ok: true, value: () => { Purchases.removeCustomerInfoUpdateListener(listener); } };
   } catch (error) {
     billingDiagnostic("customer info listener failed", { message: error instanceof Error ? error.message : "unknown" });
-    return { ok: false, error: error instanceof Error ? error.message : "Could not listen for purchase updates." };
+    return { ok: false, error: "Purchase updates are temporarily unavailable." };
   }
 }
 
@@ -201,13 +225,27 @@ export async function buyPackage(pkg: PurchasesPackage): Promise<BillingResult<C
     const value = error as { code?: string; userCancelled?: boolean | null; message?: string };
     const { PURCHASES_ERROR_CODE } = await sdk().catch(() => ({ PURCHASES_ERROR_CODE: null }));
     const cancelled = value.userCancelled === true || value.code === PURCHASES_ERROR_CODE?.PURCHASE_CANCELLED_ERROR;
-    return { ok: false, cancelled, error: value.message ?? "Purchase could not be completed." };
+    billingDiagnostic("purchase failed", {
+      cancelled,
+      code: value.code ?? null,
+      message: value.message ?? "unknown",
+    });
+    return {
+      ok: false,
+      cancelled,
+      error: cancelled
+        ? "Purchase cancelled."
+        : "Purchase could not be completed. Check your connection and try again.",
+    };
   }
 }
 
 export async function restoreBilling(): Promise<BillingResult<CustomerInfo>> {
   try { const { Purchases } = await sdk(); return { ok: true, value: await Purchases.restorePurchases() }; }
-  catch (error) { return { ok: false, error: error instanceof Error ? error.message : "Purchases could not be restored." }; }
+  catch (error) {
+    billingDiagnostic("restore failed", { message: error instanceof Error ? error.message : "unknown" });
+    return { ok: false, error: "Purchases could not be restored. Check your connection and try again." };
+  }
 }
 
 export function resolveCustomerPlan(customerInfo: CustomerInfo | null): RevenueCatPlanState {

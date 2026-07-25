@@ -1,0 +1,300 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Coverly Scan Exploration — Frame River</title>
+  <link rel="stylesheet" href="shared.css">
+  <style>
+    .river-screen {
+      background:
+        radial-gradient(circle at 52% 44%, rgba(109,210,192,.21), transparent 225px),
+        linear-gradient(180deg, #fffefa 0%, #f4f9f6 100%);
+    }
+
+    .river-heading {
+      margin-top: 29px;
+    }
+
+    .river-stage {
+      position: relative;
+      z-index: 2;
+      width: 340px;
+      height: 427px;
+      margin: 20px auto 11px;
+      overflow: hidden;
+    }
+
+    .river-stage::before,
+    .river-stage::after {
+      position: absolute;
+      z-index: 10;
+      top: 0;
+      bottom: 0;
+      width: 42px;
+      content: "";
+      pointer-events: none;
+    }
+
+    .river-stage::before { left: 0; background: linear-gradient(90deg, #f8fbf7, transparent); }
+    .river-stage::after { right: 0; background: linear-gradient(-90deg, #f8fbf7, transparent); }
+
+    .river-track {
+      position: absolute;
+      top: 19px;
+      left: 50%;
+      width: 810px;
+      height: 316px;
+      transform: translateX(-50%);
+    }
+
+    .river-card {
+      position: absolute;
+      top: 23px;
+      left: 50%;
+      width: 236px;
+      height: 286px;
+      overflow: hidden;
+      border: 6px solid #fffefa;
+      border-radius: 29px;
+      background: #d7e6e1;
+      box-shadow: 0 20px 45px rgba(28,74,66,.18);
+      opacity: 0;
+      transition: transform 1s cubic-bezier(.2,.75,.2,1), opacity 700ms ease, filter 700ms ease;
+    }
+
+    .river-card img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+
+    .river-card.position-center {
+      z-index: 5;
+      opacity: 1;
+      transform: translateX(-50%) translateZ(0) scale(1);
+    }
+
+    .river-card.position-left {
+      z-index: 3;
+      opacity: .58;
+      filter: saturate(.65);
+      transform: translateX(calc(-50% - 215px)) scale(.76) rotate(-2.5deg);
+    }
+
+    .river-card.position-right {
+      z-index: 3;
+      opacity: .58;
+      filter: saturate(.65);
+      transform: translateX(calc(-50% + 215px)) scale(.76) rotate(2.5deg);
+    }
+
+    .river-card.position-far {
+      z-index: 1;
+      opacity: 0;
+      transform: translateX(calc(-50% + 340px)) scale(.64);
+    }
+
+    .river-card::after {
+      position: absolute;
+      inset: 0;
+      background: linear-gradient(180deg, transparent 66%, rgba(9,50,44,.2));
+      content: "";
+    }
+
+    .river-focus {
+      position: absolute;
+      z-index: 8;
+      top: 23px;
+      left: 50%;
+      width: 236px;
+      height: 286px;
+      border: 1px solid rgba(84,215,195,.5);
+      border-radius: 29px;
+      box-shadow: 0 0 0 7px rgba(255,255,252,.44), 0 0 35px rgba(39,179,160,.12);
+      transform: translateX(-50%);
+      pointer-events: none;
+    }
+
+    .river-focus::before {
+      position: absolute;
+      top: -7px;
+      left: 50%;
+      width: 44px;
+      height: 3px;
+      border-radius: 99px;
+      background: var(--teal-500);
+      box-shadow: 0 0 16px rgba(39,179,160,.54);
+      content: "";
+      transform: translateX(-50%);
+      animation: focus-soften 2.8s ease-in-out infinite;
+    }
+
+    .filmstrip {
+      position: absolute;
+      z-index: 12;
+      right: 10px;
+      bottom: 35px;
+      left: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      min-height: 48px;
+      padding: 7px 12px;
+      overflow: hidden;
+      border: 1px solid rgba(16,112,98,.1);
+      border-radius: 17px;
+      background: rgba(255,255,252,.86);
+      box-shadow: 0 10px 28px rgba(28,74,66,.09);
+      backdrop-filter: blur(10px);
+    }
+
+    .film-thumb {
+      position: relative;
+      width: 24px;
+      height: 31px;
+      flex: 0 0 auto;
+      overflow: hidden;
+      border: 2px solid white;
+      border-radius: 7px;
+      background: #dbe8e4 center/cover;
+      box-shadow: 0 2px 7px rgba(28,74,66,.11);
+      opacity: .45;
+      transition: width 450ms ease, opacity 450ms ease, transform 450ms ease, box-shadow 450ms ease;
+    }
+
+    .film-thumb.is-current {
+      width: 39px;
+      opacity: 1;
+      transform: translateY(-3px);
+      box-shadow: 0 5px 13px rgba(20,101,89,.18), 0 0 0 1px var(--teal-500);
+    }
+
+    .film-thumb.is-seen {
+      opacity: .72;
+    }
+
+    .river-caption {
+      position: absolute;
+      z-index: 14;
+      bottom: 5px;
+      left: 50%;
+      color: #738783;
+      font-size: 9px;
+      font-weight: 750;
+      transform: translateX(-50%);
+    }
+
+    .river-progress {
+      width: 254px;
+      margin: 0 auto;
+    }
+
+    .single-frame .river-card:not(.position-center) {
+      opacity: 0;
+    }
+
+    @keyframes focus-soften {
+      0%, 100% { opacity: .45; transform: translateX(-50%) scaleX(.8); }
+      50% { opacity: 1; transform: translateX(-50%) scaleX(1.08); }
+    }
+  </style>
+</head>
+<body>
+  <main class="prototype-page">
+    <nav class="prototype-topbar" aria-label="Concept navigation">
+      <a class="back-link" href="index.html">← All concepts</a>
+      <span class="concept-index">Concept 05 of 06</span>
+      <a class="next-link" href="concept-06-focus-garden.html">Next concept →</a>
+    </nav>
+    <div class="prototype-layout">
+      <section class="concept-copy">
+        <p class="eyebrow">Continuous frame journey</p>
+        <h1>Frame River</h1>
+        <p class="concept-summary">Captured frames drift through a calm horizontal current, moving from supporting context into a focused centre and onward. A compact filmstrip preserves orientation for long video scans.</p>
+        <ul class="motion-notes" aria-label="Motion characteristics">
+          <li>Depth carousel</li>
+          <li>Continuous multi-frame flow</li>
+          <li>Compact visual timeline</li>
+        </ul>
+        <div class="scenario-panel">
+          <div class="scenario-label"><span>Preview scenario</span><span>Keys: 1 · 5 · 0</span></div>
+          <div class="scenario-buttons">
+            <button class="scenario-button" data-count="1" aria-pressed="false"><span>Single Photo</span><small>1</small></button>
+            <button class="scenario-button is-active" data-count="5" aria-pressed="true"><span>Multi Photo</span><small>5</small></button>
+            <button class="scenario-button" data-count="10" aria-pressed="false"><span>Video</span><small>10</small></button>
+            <button class="scenario-button" data-count="1" aria-pressed="false"><span>Single Item</span><small>1</small></button>
+          </div>
+          <label class="motion-toggle">
+            <span>Preview reduced motion</span>
+            <span class="toggle-control"><input type="checkbox" data-motion-toggle><span class="toggle-track"></span></span>
+          </label>
+        </div>
+      </section>
+
+      <section class="phone-shell" aria-label="Frame River mobile prototype">
+        <div class="status-bar"><span>9:41</span><span class="status-icons">● ● ▰</span></div>
+        <div class="app-screen river-screen">
+          <div class="brand-lockup"><span class="brand-mark"></span><span>Coverly</span></div>
+          <h2 class="screen-heading river-heading">Following every frame</h2>
+          <p class="screen-subheading" data-processing-message>Looking for individual items…</p>
+
+          <div class="river-stage" data-river-stage>
+            <div class="river-track">
+              <article class="river-card position-left" data-river-card><img alt="" src="assets/room-05-kitchen.jpg"></article>
+              <article class="river-card position-center" data-river-card><img alt="" src="assets/room-01-living-room.jpg"></article>
+              <article class="river-card position-right" data-river-card><img alt="" src="assets/room-02-bedroom.jpg"></article>
+              <article class="river-card position-far" data-river-card><img alt="" src="assets/room-03-dining-room.jpg"></article>
+              <div class="river-focus"></div>
+            </div>
+            <div class="filmstrip" data-filmstrip aria-hidden="true"></div>
+            <div class="river-caption">Frame <span data-frame-current>1</span> of <span data-frame-total>5</span> in focus</div>
+          </div>
+
+          <div class="river-progress indeterminate-track"></div>
+          <div class="screen-footnote">Reviewing the whole scene, gently</div>
+        </div>
+      </section>
+    </div>
+  </main>
+  <script src="prototype.js"></script>
+  <script>
+    (function () {
+      const stage = document.querySelector("[data-river-stage]");
+      const cards = Array.from(document.querySelectorAll("[data-river-card]"));
+      const strip = document.querySelector("[data-filmstrip]");
+      const slotClasses = ["position-center", "position-right", "position-far", "position-left"];
+      const slotOffsets = [0, 1, 2, -1];
+
+      function renderStrip(frame) {
+        strip.innerHTML = "";
+        frame.frames.forEach(function (src, index) {
+          const thumb = document.createElement("span");
+          thumb.className = "film-thumb";
+          thumb.style.backgroundImage = "url('" + src + "')";
+          if (index < frame.index) thumb.classList.add("is-seen");
+          if (index === frame.index) thumb.classList.add("is-current");
+          strip.appendChild(thumb);
+        });
+      }
+
+      CoverlyPrototype.boot({
+        interval: 3600,
+        onScenario: function (frame) {
+          stage.classList.toggle("single-frame", frame.count === 1);
+        },
+        onFrame: function (frame) {
+          cards.forEach(function (card, index) {
+            const slot = ((index - frame.index) % cards.length + cards.length) % cards.length;
+            card.className = "river-card " + slotClasses[slot];
+            const imageIndex = (frame.index + slotOffsets[slot] + frame.count) % frame.count;
+            card.querySelector("img").src = frame.frames[imageIndex];
+          });
+          renderStrip(frame);
+        }
+      });
+    }());
+  </script>
+</body>
+</html>

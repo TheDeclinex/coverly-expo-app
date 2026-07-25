@@ -20,7 +20,8 @@ This checklist is for preparing Coverly Expo builds for Android internal testing
 
 - Work from `C:\Users\User\Documents\GitHub\coverly-expo-app\artifacts\mobile`.
 - Confirm `.env.local` or EAS environment variables are set for the intended backend.
-- Confirm `EXPO_PUBLIC_APP_ENV=production` for preview and production EAS profiles.
+- Confirm `EXPO_PUBLIC_APP_ENV=preview` for internal preview builds and
+  `EXPO_PUBLIC_APP_ENV=production` only for store builds.
 - Confirm Supabase URL and anon key point at the intended project.
 - Confirm no service-role keys or server secrets are present in mobile env files.
 - Confirm RevenueCat keys are present before testing paid entitlement behaviour.
@@ -30,10 +31,14 @@ This checklist is for preparing Coverly Expo builds for Android internal testing
 
 ## EAS environment variables
 
-Both `preview` and `production` build profiles use the EAS `production` environment. Confirm these variable names exist in EAS before standalone Android/iOS builds:
+The `preview` profile uses the EAS `preview` environment and the `production`
+profile uses the EAS `production` environment. They must not share backend or
+RevenueCat values. Confirm these variable names exist in each intended EAS
+environment before standalone Android/iOS builds:
 
 - `EXPO_PUBLIC_SUPABASE_URL`
 - `EXPO_PUBLIC_SUPABASE_ANON_KEY`
+- `EXPO_PUBLIC_EXPECTED_SUPABASE_PROJECT_REF` (must match the URL)
 - `EXPO_PUBLIC_APP_ENV`
 - `EXPO_PUBLIC_PRIVACY_URL`
 - `EXPO_PUBLIC_TERMS_URL`
@@ -42,16 +47,25 @@ Both `preview` and `production` build profiles use the EAS `production` environm
 - `EXPO_PUBLIC_REVENUECAT_PLUS_ENTITLEMENT_ID` (`Coverly Plus`)
 - `EXPO_PUBLIC_REVENUECAT_FAMILY_ENTITLEMENT_ID` (`Coverly Family`)
 - `EXPO_PUBLIC_REVENUECAT_OFFERING_ID`
+- `EXPO_PUBLIC_REVENUECAT_ENV` (`sandbox` for preview, `production` for production)
 - `EXPO_PUBLIC_BILLING_GATES_ENABLED`
 
 Do not commit real values to the repo. Keep local values in `.env.local` and cloud build values in EAS.
 
 Expo public variables are bundled into the app binary and are not private secrets. They are fine for Supabase anon keys, public legal links, RevenueCat public SDK keys, and feature flags; never put service-role keys or server-side API secrets in an `EXPO_PUBLIC_` variable.
 
-Value-free verification examples:
+Run the value-safe repository check before a build. It reports hosts, public
+environment labels, and presence booleans, but never prints keys:
+
+```powershell
+pnpm --filter @workspace/mobile run verify:env
+```
+
+Value-free EAS verification examples:
 
 ```powershell
 eas env:list --environment production
+eas env:list --environment preview
 eas env:create --environment production --name EXPO_PUBLIC_SUPABASE_URL --value "<public Supabase URL>"
 eas env:create --environment production --name EXPO_PUBLIC_SUPABASE_ANON_KEY --value "<public Supabase anon key>"
 ```
@@ -84,7 +98,9 @@ eas build --platform android --profile preview
 Expected behaviour:
 
 - Produces an Android APK for internal installation.
-- Uses `EXPO_PUBLIC_APP_ENV=production`.
+- Uses `EXPO_PUBLIC_APP_ENV=preview`.
+- Uses the preview Supabase project and RevenueCat sandbox configuration.
+- Fails startup/env verification if the URL and expected project ref disagree.
 - Does not submit to Google Play.
 - Keeps production auto-increment settings untouched.
 
@@ -127,6 +143,7 @@ Before building for TestFlight:
 - Confirm camera, photo, and microphone permission copy is final enough for review.
 - Confirm privacy and terms URLs are live.
 - Confirm RevenueCat iOS products and entitlement are configured if billing gates are enabled.
+- Confirm `EXPO_PUBLIC_REVENUECAT_ENV=production`; a sandbox marker is rejected.
 
 Submit only when explicitly ready:
 

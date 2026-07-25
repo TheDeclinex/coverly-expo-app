@@ -42,6 +42,7 @@ import {
   useSignedImageSource,
   useSignedImageSources,
 } from "@/hooks/useSignedUrls";
+import { requestImagePermission } from "@/lib/media-permissions";
 import {
   buildSparklinePoints,
   calcPropertyStats,
@@ -1968,16 +1969,7 @@ export default function PropertyDetailScreen() {
     if (coverPhotoUploading) return;
     // Native cover capture opens the camera directly. Web retains the file
     // picker because browser camera support varies by device and permissions.
-    if (Platform.OS !== "web") {
-      const { status } = await ImagePicker.requestCameraPermissionsAsync();
-      if (status !== "granted") {
-        Alert.alert(
-          "Permission needed",
-          "Allow camera access to take a property cover photo."
-        );
-        return;
-      }
-    }
+    if (!await requestImagePermission("camera", "take a property cover photo")) return;
     const pickerOptions: ImagePicker.ImagePickerOptions = {
       mediaTypes: ["images"],
       quality: 0.85,
@@ -2005,7 +1997,10 @@ export default function PropertyDetailScreen() {
         const diagnostic = formatUploadFailure(uploaded);
         if (__DEV__) console.warn("[propertyCover] Upload diagnostic\n" + diagnostic);
         setLocalCoverUrl(null);
-        Alert.alert("Property cover upload failed", diagnostic);
+        Alert.alert(
+          "Property cover upload failed",
+          "The photo was not saved. Check your connection and try again.",
+        );
         return;
       }
       // Show immediately via the 1-hr signed URL while the DB write is in-flight.
@@ -2019,7 +2014,10 @@ export default function PropertyDetailScreen() {
       if (updateError) {
         if (__DEV__) console.error("[propertyCover] DB update error:", updateError);
         setLocalCoverUrl(null);
-        Alert.alert("Save failed", updateError.message);
+        Alert.alert(
+          "Save failed",
+          "Cover photo could not be saved. Please check your connection and try again.",
+        );
         return;
       }
       if (!updatedRows || updatedRows.length === 0) {

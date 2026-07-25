@@ -18,7 +18,14 @@
 
 import { friendlyNetworkErrorMessage } from "@/lib/network-errors";
 import { uploadScanPhoto } from "@/lib/photo-upload";
-import { anonKey, debugSupabaseUrl, supabase } from "@/lib/supabase";
+import { publicScanFailureMessage } from "@/lib/scan-errors";
+import {
+  anonKey,
+  debugExpectedSupabaseProjectRef,
+  debugSupabaseProjectRefMatchesExpected,
+  debugSupabaseUrl,
+  supabase,
+} from "@/lib/supabase";
 import type { ScanDetectedItem, ScanEncodedImage, ScanInput, ScanResult } from "@/types/scan";
 
 /**
@@ -26,7 +33,6 @@ import type { ScanDetectedItem, ScanEncodedImage, ScanInput, ScanResult } from "
  * Set to null to show the "not configured" state without throwing.
  */
 const SCAN_EDGE_FUNCTION_NAME: string | null = "scan-room-photo";
-const EXPECTED_SCAN_PROJECT_REF = "jqijavrugjidqzbbgpag";
 const SCAN_INVOKE_TIMEOUT_MS = 90_000;
 const VIDEO_SCAN_INVOKE_TIMEOUT_MS = 120_000;
 
@@ -151,19 +157,31 @@ function scanNetworkFailureMessage(error: unknown): string | null {
   return null;
 }
 
-function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  const timeout = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => {
-      const error = new Error(`${label} timed out after ${Math.round(timeoutMs / 1000)} seconds.`);
-      error.name = "ScanTimeoutError";
-      reject(error);
-    }, timeoutMs);
-  });
+async function fetchWithTimeout(
+  url: string,
+  init: RequestInit,
+  timeoutMs: number,
+  label: string,
+): Promise<Response> {
+  const controller = new AbortController();
+  let timedOut = false;
+  const timer = setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, timeoutMs);
 
-  return Promise.race([promise, timeout]).finally(() => {
-    if (timer) clearTimeout(timer);
-  });
+  try {
+    return await fetch(url, { ...init, signal: controller.signal });
+  } catch (error) {
+    if (timedOut) {
+      const timeoutError = new Error(`${label} timed out after ${Math.round(timeoutMs / 1000)} seconds.`);
+      timeoutError.name = "ScanTimeoutError";
+      throw timeoutError;
+    }
+    throw error;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 
@@ -344,7 +362,7 @@ export async function runAiScan(input: ScanInput): Promise<ScanResult> {
     });
 
     const supabaseHost = new URL(debugSupabaseUrl).host;
-    const usesExpectedProject = supabaseHost.startsWith(`${EXPECTED_SCAN_PROJECT_REF}.`);
+    const usesExpectedProject = debugSupabaseProjectRefMatchesExpected;
     const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
     const accessToken = sessionData.session?.access_token;
     const userId = sessionData.session?.user.id;
@@ -370,6 +388,7 @@ export async function runAiScan(input: ScanInput): Promise<ScanResult> {
         status: "error",
         items: [],
         errorMessage: imagePayload.errorMessage,
+        errorCode: "SCAN_UPLOAD_FAILED",
       };
     }
 
@@ -392,13 +411,13 @@ export async function runAiScan(input: ScanInput): Promise<ScanResult> {
       legacyBase64ImageCount: productionPayload.images.filter((image) => !!image.imageBase64).length,
       approxBase64Chars: productionPayload.images.reduce((sum, img) => sum + (img.imageBase64?.length ?? 0), 0),
       supabaseHost,
-      expectedProjectRef: EXPECTED_SCAN_PROJECT_REF,
+      expectedProjectRef: debugExpectedSupabaseProjectRef,
       usesExpectedProject,
     });
 
-    if (!usesExpectedProject) {
+    if (usesExpectedProject === false) {
       if (__DEV__) console.warn("[Scan] Supabase project ref mismatch", {
-        expectedProjectRef: EXPECTED_SCAN_PROJECT_REF,
+        expectedProjectRef: debugExpectedSupabaseProjectRef,
         supabaseHost,
       });
     }
@@ -413,8 +432,9 @@ export async function runAiScan(input: ScanInput): Promise<ScanResult> {
       timeoutMs,
     });
 
-    const response = await withTimeout(
-      fetch(functionUrl, {
+    const response = await fetchWithTimeout(
+      functionUrl,
+      {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -422,7 +442,7 @@ export async function runAiScan(input: ScanInput): Promise<ScanResult> {
           Authorization: `Bearer ${accessToken}`,
         },
         body: requestBody,
-      }),
+      },
       timeoutMs,
       "scan-room-photo invoke"
     );
@@ -454,7 +474,8 @@ export async function runAiScan(input: ScanInput): Promise<ScanResult> {
       return {
         status: "error",
         items: [],
-        errorMessage: `Scan failed with an invalid response (${response.status}).`,
+        errorMessage: publicScanFailureMessage({ httpStatus: response.status }),
+        errorCode: "INVALID_SCAN_RESPONSE",
         httpStatus: response.status,
         responseBody: responseText,
       };
@@ -476,7 +497,11 @@ export async function runAiScan(input: ScanInput): Promise<ScanResult> {
       return {
         status: "error",
         items: [],
-        errorMessage: data?.message ?? data?.errorCode ?? `Scan failed (${response.status}).`,
+        errorMessage: publicScanFailureMessage({
+          errorCode: data?.errorCode,
+          errorMessage: data?.message,
+          httpStatus: response.status,
+        }),
         errorCode: data?.errorCode,
         httpStatus: response.status,
         responseBody: data,
@@ -496,7 +521,10 @@ export async function runAiScan(input: ScanInput): Promise<ScanResult> {
       return {
         status: "error",
         items: [],
-        errorMessage: data.message ?? data.errorCode ?? "Scan failed",
+        errorMessage: publicScanFailureMessage({
+          errorCode: data.errorCode,
+          errorMessage: data.message,
+        }),
         errorCode: data.errorCode,
         responseBody: data,
       };
@@ -576,10 +604,15 @@ export async function runAiScan(input: ScanInput): Promise<ScanResult> {
       scanLog("function invoke ended with expected network failure", {
         message: err instanceof Error ? err.message : String(err),
       });
+      const timedOut = err instanceof Error && err.name === "ScanTimeoutError";
       return {
         status: "error",
         items: [],
-        errorMessage: expectedMessage,
+        errorMessage: publicScanFailureMessage({
+          errorCode: timedOut ? "SCAN_TIMEOUT" : "SCAN_NETWORK_ERROR",
+          errorMessage: expectedMessage,
+        }),
+        errorCode: timedOut ? "SCAN_TIMEOUT" : "SCAN_NETWORK_ERROR",
       };
     }
 
@@ -587,7 +620,8 @@ export async function runAiScan(input: ScanInput): Promise<ScanResult> {
     return {
       status: "error",
       items: [],
-      errorMessage: err instanceof Error ? err.message : "Unknown scan error",
+      errorMessage: publicScanFailureMessage({ errorCode: "UNEXPECTED_SCAN_ERROR" }),
+      errorCode: "UNEXPECTED_SCAN_ERROR",
     };
   }
 }

@@ -28,3 +28,16 @@ test("lookup failure states remain distinct from save failures", () => {
   assert.match(source, /stage === "service"/);
   assert.match(source, /stage === "save-error"/);
 });
+
+test("permanently denied camera access opens Settings and refreshes on foreground return", () => {
+  assert.match(source, /permission\.canAskAgain === false/);
+  assert.match(source, /Linking\.openSettings\(\)/);
+  assert.match(source, /AppState\.addEventListener\("change"/);
+  assert.match(source, /nextState === "active" && previousState !== "active"/);
+  assert.match(source, /void getPermission\(\)/);
+});
+
+test("barcode provider and save errors are not rendered verbatim", () => {
+  assert.doesNotMatch(source, /response\.error \|\| barcodeFailureCopy/);
+  assert.match(source, /Your existing item details were not changed/);
+});

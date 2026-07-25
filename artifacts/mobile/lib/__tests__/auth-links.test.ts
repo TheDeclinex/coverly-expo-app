@@ -79,6 +79,14 @@ test("sign-up and forgot-password requests use explicit HTTPS redirects", () => 
   assert.doesNotMatch(loginSource, /resetPasswordForEmail\(\s*email\.trim\(\)\s*\)/);
 });
 
+test("auth submissions always release loading and do not render raw provider errors", () => {
+  const loginSource = readFromTestDirectory("../../app/login.tsx");
+  assert.match(loginSource, /const handleLogin = async \(\) => \{[\s\S]*finally \{[\s\S]*setLoading\(false\)/);
+  assert.match(loginSource, /const handleSignUp = async \(\) => \{[\s\S]*finally \{[\s\S]*setLoading\(false\)/);
+  assert.match(loginSource, /const handleForgotPassword = async \(\) => \{[\s\S]*finally \{[\s\S]*setLoading\(false\)/);
+  assert.doesNotMatch(loginSource, /setError\(authError\.message\)/);
+});
+
 test("auth routes keep recovery on its dedicated screen and wait for onboarding before entry", () => {
   const verifiedSource = readFromTestDirectory("../../app/auth/verified.tsx");
   const resetSource = readFromTestDirectory("../../app/reset-password.tsx");

@@ -1,0 +1,528 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Coverly — Scan Processing Animation Exploration</title>
+  <link rel="stylesheet" href="shared.css">
+  <style>
+    .gallery-page {
+      width: min(1240px, calc(100% - 32px));
+      margin: 0 auto;
+      padding: 54px 0 80px;
+    }
+
+    .gallery-header {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(280px, 430px);
+      gap: 50px;
+      align-items: end;
+      margin-bottom: 40px;
+    }
+
+    .gallery-brand {
+      display: inline-flex;
+      align-items: center;
+      gap: 9px;
+      margin-bottom: 28px;
+      font-size: 14px;
+      font-weight: 850;
+    }
+
+    .gallery-header h1 {
+      max-width: 700px;
+      margin: 0;
+      color: #14332f;
+      font-size: clamp(44px, 6vw, 78px);
+      font-weight: 720;
+      letter-spacing: -.06em;
+      line-height: .96;
+    }
+
+    .gallery-intro {
+      margin: 0;
+      color: var(--slate);
+      font-size: 16px;
+      line-height: 1.75;
+    }
+
+    .gallery-note {
+      display: flex;
+      align-items: flex-start;
+      gap: 11px;
+      margin-top: 20px;
+      padding: 14px 15px;
+      border: 1px solid rgba(16,112,98,.11);
+      border-radius: 16px;
+      color: #47625d;
+      background: rgba(255,255,252,.6);
+      font-size: 11px;
+      font-weight: 650;
+      line-height: 1.55;
+    }
+
+    .gallery-note i {
+      width: 8px;
+      height: 8px;
+      margin-top: 4px;
+      flex: 0 0 auto;
+      border-radius: 50%;
+      background: var(--teal-500);
+      box-shadow: 0 0 0 5px rgba(39,179,160,.12);
+    }
+
+    .concept-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 18px;
+    }
+
+    .concept-card {
+      position: relative;
+      overflow: hidden;
+      border: 1px solid rgba(17,95,84,.11);
+      border-radius: 26px;
+      background: rgba(255,255,252,.78);
+      box-shadow: 0 14px 35px rgba(32,67,61,.07);
+      transition: transform 260ms ease, box-shadow 260ms ease, border-color 260ms ease;
+    }
+
+    .concept-card:hover {
+      border-color: rgba(11,139,122,.28);
+      box-shadow: 0 22px 48px rgba(32,67,61,.12);
+      transform: translateY(-4px);
+    }
+
+    .card-visual {
+      position: relative;
+      height: 238px;
+      overflow: hidden;
+      background:
+        radial-gradient(circle at 50% 46%, rgba(94,207,188,.24), transparent 145px),
+        linear-gradient(150deg, #f8f7f0, #eef8f4);
+    }
+
+    .mini-phone {
+      position: absolute;
+      top: 22px;
+      left: 50%;
+      width: 122px;
+      height: 242px;
+      overflow: hidden;
+      border: 4px solid #1b2926;
+      border-radius: 23px 23px 0 0;
+      background: #fffefa;
+      box-shadow: 0 12px 30px rgba(28,70,63,.16);
+      transform: translateX(-50%);
+    }
+
+    .mini-phone::before {
+      position: absolute;
+      z-index: 8;
+      top: 4px;
+      left: 50%;
+      width: 35px;
+      height: 9px;
+      border-radius: 99px;
+      background: #1b2926;
+      content: "";
+      transform: translateX(-50%);
+    }
+
+    .mini-head {
+      position: absolute;
+      top: 24px;
+      left: 12px;
+      width: 58px;
+      height: 6px;
+      border-radius: 99px;
+      background: #2c4c47;
+    }
+
+    .mini-sub {
+      position: absolute;
+      top: 35px;
+      left: 12px;
+      width: 79px;
+      height: 3px;
+      border-radius: 99px;
+      background: #b8c8c3;
+    }
+
+    .mini-photo {
+      position: absolute;
+      top: 57px;
+      left: 12px;
+      width: 90px;
+      height: 112px;
+      overflow: hidden;
+      border: 3px solid white;
+      border-radius: 15px;
+      background: url("assets/room-01-living-room.jpg") center/cover;
+      box-shadow: 0 8px 17px rgba(26,72,64,.15);
+    }
+
+    .mini-sweep {
+      position: absolute;
+      top: -28%;
+      left: 0;
+      width: 100%;
+      height: 28%;
+      border-bottom: 1px solid white;
+      background: linear-gradient(180deg, transparent, rgba(75,220,196,.5));
+      animation: mini-sweep 3.8s ease-in-out infinite;
+    }
+
+    .mini-card-a,
+    .mini-card-b {
+      position: absolute;
+      top: 62px;
+      left: 16px;
+      width: 84px;
+      height: 106px;
+      border: 3px solid white;
+      border-radius: 13px;
+      background: url("assets/room-03-dining-room.jpg") center/cover;
+      box-shadow: 0 8px 16px rgba(26,72,64,.14);
+    }
+
+    .mini-card-a { transform: rotate(-6deg) translate(-4px,4px); }
+    .mini-card-b {
+      background-image: url("assets/room-02-bedroom.jpg");
+      animation: mini-shuffle 4s ease-in-out infinite;
+    }
+
+    .mini-orbit {
+      position: absolute;
+      top: 57px;
+      left: 17px;
+      width: 82px;
+      height: 82px;
+      border: 1px solid rgba(11,139,122,.25);
+      border-radius: 50%;
+      animation: mini-orbit 6s linear infinite;
+    }
+
+    .mini-orbit::before,
+    .mini-orbit::after {
+      position: absolute;
+      width: 13px;
+      height: 13px;
+      border: 2px solid white;
+      border-radius: 50%;
+      background: var(--teal-500);
+      box-shadow: 0 2px 7px rgba(20,80,70,.18);
+      content: "";
+    }
+
+    .mini-orbit::before { top: 3px; left: 5px; }
+    .mini-orbit::after { right: -3px; bottom: 11px; }
+
+    .mini-round-photo {
+      position: absolute;
+      top: 72px;
+      left: 33px;
+      width: 50px;
+      height: 50px;
+      border: 3px solid white;
+      border-radius: 50%;
+      background: url("assets/room-04-home-office.jpg") center/cover;
+      box-shadow: 0 7px 16px rgba(24,75,66,.16);
+    }
+
+    .mini-cues {
+      position: absolute;
+      top: 106px;
+      right: 7px;
+      width: 62px;
+      padding: 6px;
+      border: 1px solid rgba(13,112,96,.1);
+      border-radius: 11px;
+      background: rgba(255,255,252,.92);
+      box-shadow: 0 7px 16px rgba(24,75,66,.12);
+    }
+
+    .mini-cues i {
+      display: block;
+      height: 8px;
+      margin: 3px 0;
+      border-radius: 4px;
+      background: #e1f3ed;
+      animation: mini-cue 3.6s ease-in-out infinite;
+    }
+
+    .mini-cues i:nth-child(2) { animation-delay: -1.2s; }
+    .mini-cues i:nth-child(3) { animation-delay: -2.4s; }
+
+    .mini-river {
+      position: absolute;
+      top: 68px;
+      left: 50%;
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      transform: translateX(-50%);
+      animation: mini-river 5s ease-in-out infinite;
+    }
+
+    .mini-river i {
+      display: block;
+      width: 34px;
+      height: 66px;
+      flex: 0 0 auto;
+      border: 2px solid white;
+      border-radius: 9px;
+      background-position: center;
+      background-size: cover;
+      box-shadow: 0 5px 12px rgba(24,75,66,.12);
+      opacity: .55;
+      transform: scale(.83);
+    }
+
+    .mini-river i:nth-child(1) { background-image: url("assets/room-01-living-room.jpg"); }
+    .mini-river i:nth-child(2) { background-image: url("assets/room-05-kitchen.jpg"); opacity: 1; transform: scale(1); }
+    .mini-river i:nth-child(3) { background-image: url("assets/room-07-entryway.jpg"); }
+
+    .mini-lens {
+      position: absolute;
+      top: 75px;
+      left: 23px;
+      width: 36px;
+      height: 30px;
+      border: 1px solid white;
+      border-radius: 9px;
+      background: rgba(45,187,165,.2);
+      box-shadow: 0 0 0 1px var(--teal-500), 0 5px 12px rgba(24,75,66,.18);
+      animation: mini-lens 5s ease-in-out infinite;
+    }
+
+    .mini-progress {
+      position: absolute;
+      top: 188px;
+      left: 21px;
+      width: 80px;
+      height: 3px;
+      overflow: hidden;
+      border-radius: 99px;
+      background: #dce9e5;
+    }
+
+    .mini-progress::after {
+      display: block;
+      width: 35%;
+      height: 100%;
+      border-radius: inherit;
+      background: var(--teal-500);
+      content: "";
+      animation: mini-progress 2.8s ease-in-out infinite;
+    }
+
+    .card-body {
+      padding: 23px 23px 22px;
+    }
+
+    .card-number {
+      color: var(--teal-800);
+      font-size: 9px;
+      font-weight: 850;
+      letter-spacing: .15em;
+      text-transform: uppercase;
+    }
+
+    .card-body h2 {
+      margin: 8px 0 8px;
+      color: #183934;
+      font-size: 22px;
+      font-weight: 740;
+      letter-spacing: -.035em;
+    }
+
+    .card-body p {
+      min-height: 60px;
+      margin: 0;
+      color: var(--slate);
+      font-size: 12px;
+      line-height: 1.65;
+    }
+
+    .card-footer {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-top: 18px;
+      padding-top: 15px;
+      border-top: 1px solid rgba(17,95,84,.09);
+    }
+
+    .card-tags {
+      display: flex;
+      gap: 5px;
+    }
+
+    .card-tags span {
+      padding: 5px 7px;
+      border-radius: 99px;
+      color: #617872;
+      background: #edf5f2;
+      font-size: 8px;
+      font-weight: 750;
+    }
+
+    .open-link {
+      color: var(--teal-800);
+      font-size: 11px;
+      font-weight: 800;
+      text-decoration: none;
+      white-space: nowrap;
+    }
+
+    .open-link::after {
+      display: inline-block;
+      margin-left: 5px;
+      content: "→";
+      transition: transform 180ms ease;
+    }
+
+    .concept-card:hover .open-link::after {
+      transform: translateX(3px);
+    }
+
+    @keyframes mini-sweep {
+      0% { transform: translateY(0); opacity: 0; }
+      18%, 75% { opacity: 1; }
+      100% { transform: translateY(160px); opacity: 0; }
+    }
+
+    @keyframes mini-shuffle {
+      0%, 18%, 100% { transform: rotate(2deg) translate(0,0); }
+      43% { transform: rotate(7deg) translate(32px,-10px); opacity: .4; }
+      58% { transform: rotate(-2deg) translate(-2px,3px); opacity: 1; }
+    }
+
+    @keyframes mini-orbit { to { transform: rotate(360deg); } }
+
+    @keyframes mini-cue {
+      0%, 100% { background: #e1f3ed; transform: translateX(0); }
+      50% { background: #85d7c9; transform: translateX(-4px); }
+    }
+
+    @keyframes mini-river {
+      0%, 100% { transform: translateX(-50%) translateX(-9px); }
+      50% { transform: translateX(-50%) translateX(9px); }
+    }
+
+    @keyframes mini-lens {
+      0%, 100% { transform: translate(0,0); }
+      35% { transform: translate(43px,18px); }
+      70% { transform: translate(17px,61px); }
+    }
+
+    @keyframes mini-progress {
+      0% { transform: translateX(-100%); }
+      100% { transform: translateX(300%); }
+    }
+
+    @media (max-width: 980px) {
+      .concept-grid { grid-template-columns: repeat(2, 1fr); }
+      .gallery-header { grid-template-columns: 1fr; gap: 22px; }
+    }
+
+    @media (max-width: 640px) {
+      .gallery-page { width: min(100% - 20px, 430px); padding-top: 30px; }
+      .concept-grid { grid-template-columns: 1fr; }
+      .gallery-header h1 { font-size: 47px; }
+      .gallery-brand { margin-bottom: 22px; }
+    }
+  </style>
+</head>
+<body>
+  <main class="gallery-page">
+    <header class="gallery-header">
+      <div>
+        <div class="gallery-brand"><span class="brand-mark"></span><span>Coverly</span></div>
+        <p class="eyebrow">Phase 1 · Design exploration</p>
+        <h1>Scan processing, reimagined.</h1>
+      </div>
+      <div>
+        <p class="gallery-intro">Six distinct animated directions for the moment Coverly turns visual evidence into a useful household inventory. Open any concept to test single photo, multi-photo, and ten-frame video scenarios.</p>
+        <div class="gallery-note"><i></i><span>These are local design prototypes only. They do not connect to scan logic, save data, or represent confirmed AI detections.</span></div>
+      </div>
+    </header>
+
+    <section class="concept-grid" aria-label="Scan processing animation concepts">
+      <article class="concept-card">
+        <div class="card-visual">
+          <div class="mini-phone"><span class="mini-head"></span><span class="mini-sub"></span><div class="mini-photo"><span class="mini-sweep"></span></div><span class="mini-progress"></span></div>
+        </div>
+        <div class="card-body">
+          <span class="card-number">Concept 01</span>
+          <h2>Luminous Sweep</h2>
+          <p>A central photo, quiet scanning light, and temporary focus points make the analysis action clear at a glance.</p>
+          <div class="card-footer"><span class="card-tags"><span>Direct</span><span>Image-led</span></span><a class="open-link" href="concept-01-luminous-sweep.html">Open prototype</a></div>
+        </div>
+      </article>
+
+      <article class="concept-card">
+        <div class="card-visual">
+          <div class="mini-phone"><span class="mini-head"></span><span class="mini-sub"></span><span class="mini-card-a"></span><span class="mini-card-b"></span><span class="mini-progress"></span></div>
+        </div>
+        <div class="card-body">
+          <span class="card-number">Concept 02</span>
+          <h2>Evidence Stack</h2>
+          <p>Tactile photo cards shuffle in depth, making the relationship between submitted images and active processing unmistakable.</p>
+          <div class="card-footer"><span class="card-tags"><span>Tactile</span><span>Multi-frame</span></span><a class="open-link" href="concept-02-evidence-stack.html">Open prototype</a></div>
+        </div>
+      </article>
+
+      <article class="concept-card">
+        <div class="card-visual">
+          <div class="mini-phone"><span class="mini-head"></span><span class="mini-sub"></span><span class="mini-orbit"></span><span class="mini-round-photo"></span><span class="mini-progress"></span></div>
+        </div>
+        <div class="card-body">
+          <span class="card-number">Concept 03</span>
+          <h2>Quiet Constellation</h2>
+          <p>A soft network of frames and travelling signals gives the process an intelligent, connected character without sci-fi styling.</p>
+          <div class="card-footer"><span class="card-tags"><span>Ambient</span><span>AI cue</span></span><a class="open-link" href="concept-03-quiet-constellation.html">Open prototype</a></div>
+        </div>
+      </article>
+
+      <article class="concept-card">
+        <div class="card-visual">
+          <div class="mini-phone"><span class="mini-head"></span><span class="mini-sub"></span><div class="mini-photo"></div><span class="mini-cues"><i></i><i></i><i></i></span><span class="mini-progress"></span></div>
+        </div>
+        <div class="card-body">
+          <span class="card-number">Concept 04</span>
+          <h2>Inventory Weave</h2>
+          <p>Captured imagery flows into generic category cues, telling the strongest story of visual evidence becoming organised inventory.</p>
+          <div class="card-footer"><span class="card-tags"><span>Narrative</span><span>Transformative</span></span><a class="open-link" href="concept-04-inventory-weave.html">Open prototype</a></div>
+        </div>
+      </article>
+
+      <article class="concept-card">
+        <div class="card-visual">
+          <div class="mini-phone"><span class="mini-head"></span><span class="mini-sub"></span><span class="mini-river"><i></i><i></i><i></i></span><span class="mini-progress"></span></div>
+        </div>
+        <div class="card-body">
+          <span class="card-number">Concept 05</span>
+          <h2>Frame River</h2>
+          <p>A depth carousel carries visual evidence through a focused centre, supported by a compact timeline for longer scans.</p>
+          <div class="card-footer"><span class="card-tags"><span>Continuous</span><span>Video-ready</span></span><a class="open-link" href="concept-05-frame-river.html">Open prototype</a></div>
+        </div>
+      </article>
+
+      <article class="concept-card">
+        <div class="card-visual">
+          <div class="mini-phone"><span class="mini-head"></span><span class="mini-sub"></span><div class="mini-photo"><span class="mini-lens"></span></div><span class="mini-progress"></span></div>
+        </div>
+        <div class="card-body">
+          <span class="card-number">Concept 06</span>
+          <h2>Focus Garden</h2>
+          <p>A slow roaming focus window and organic ripples suggest attentive visual inspection with a softer, more human rhythm.</p>
+          <div class="card-footer"><span class="card-tags"><span>Organic</span><span>Calm</span></span><a class="open-link" href="concept-06-focus-garden.html">Open prototype</a></div>
+        </div>
+      </article>
+    </section>
+  </main>
+</body>
+</html>

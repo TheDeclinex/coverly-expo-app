@@ -2,12 +2,31 @@ import "react-native-url-polyfill/auto";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { createClient } from "@supabase/supabase-js";
 
-const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL;
-const supabaseAnonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY;
+import {
+  resolveAppEnvironment,
+  supabaseProjectRefFromUrl,
+  validateBackendRuntimeConfig,
+} from "@/lib/runtime-config";
 
-if (!supabaseUrl || !supabaseAnonKey) {
+const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL ?? "";
+const supabaseAnonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? "";
+const expectedSupabaseProjectRef =
+  process.env.EXPO_PUBLIC_EXPECTED_SUPABASE_PROJECT_REF?.trim().toLowerCase() || null;
+export const runtimeAppEnvironment = resolveAppEnvironment(
+  process.env.EXPO_PUBLIC_APP_ENV,
+  __DEV__,
+);
+
+const runtimeConfigurationIssues = validateBackendRuntimeConfig({
+  appEnvironment: runtimeAppEnvironment,
+  supabaseUrl,
+  supabaseAnonKey,
+  expectedSupabaseProjectRef,
+});
+
+if (runtimeConfigurationIssues.length > 0) {
   throw new Error(
-    "Missing EXPO_PUBLIC_SUPABASE_URL or EXPO_PUBLIC_SUPABASE_ANON_KEY environment variables."
+    `Invalid Coverly backend configuration: ${runtimeConfigurationIssues.join(" ")}`
   );
 }
 
@@ -36,7 +55,11 @@ export const debugSupabaseHost: string | null = (() => {
   }
 })();
 export const debugSupabaseProjectRef: string | null = debugSupabaseHost?.endsWith(".supabase.co")
-  ? debugSupabaseHost.split(".")[0] || null
+  ? supabaseProjectRefFromUrl(supabaseUrl)
+  : null;
+export const debugExpectedSupabaseProjectRef: string | null = expectedSupabaseProjectRef;
+export const debugSupabaseProjectRefMatchesExpected: boolean | null = expectedSupabaseProjectRef
+  ? debugSupabaseProjectRef === expectedSupabaseProjectRef
   : null;
 // Exported for use in authenticated fetch calls (e.g. test button)
 export const anonKey: string = supabaseAnonKey;

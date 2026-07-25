@@ -65,6 +65,21 @@ test("legacy screenshots remain readable and admins retain storage access", () =
   );
 });
 
+test("storage writes and reads stay inside the owner namespace without update or delete grants", () => {
+  assert.match(baseFeedbackMigration, /feedback screenshots upload own[\s\S]*FOR INSERT[\s\S]*auth\.uid\(\)::text = \(storage\.foldername\(name\)\)\[1\]/);
+  assert.match(baseFeedbackMigration, /feedback screenshots read own[\s\S]*FOR SELECT[\s\S]*auth\.uid\(\)::text = \(storage\.foldername\(name\)\)\[1\]/);
+  assert.match(baseFeedbackMigration, /feedback screenshots read admin[\s\S]*FOR SELECT[\s\S]*up\.app_role = 'admin'/);
+  const screenshotPolicySection = baseFeedbackMigration.match(
+    /feedback screenshots upload own[\s\S]*?CREATE OR REPLACE FUNCTION public\.admin_update_feedback_status/,
+  )?.[0] ?? "";
+  assert.doesNotMatch(screenshotPolicySection, /FOR UPDATE|FOR DELETE/);
+});
+
+test("feedback report reads and screenshot attachment updates enforce ticket ownership", () => {
+  assert.match(baseFeedbackMigration, /feedback reports mobile select own[\s\S]*USING \(auth\.uid\(\)::text = user_id\)/);
+  assert.match(hardeningMigration, /feedback reports mobile attach screenshot own[\s\S]*USING \(auth\.uid\(\)::text = user_id\)[\s\S]*WITH CHECK \([\s\S]*auth\.uid\(\)::text = user_id/);
+});
+
 test("high priority is accepted between blocking and normal", () => {
   assert.match(hardeningMigration, /severity IN \('minor', 'moderate', 'high', 'critical'\)/);
   assert.match(hardeningMigration, /feedback_reports_severity_check/);

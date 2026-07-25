@@ -29,6 +29,7 @@ import { useAuth } from "@/context/AuthContext";
 import { useColors } from "@/hooks/useColors";
 import { formatCurrencyFull } from "@/lib/inventory-mappers";
 import { buildItemInsertPayload } from "@/lib/item-insert-helpers";
+import { requestImagePermission } from "@/lib/media-permissions";
 import { moneyDisplayToken } from "@/lib/money";
 import { parseReplacementPriceInput, resolveReviewedValueCurrency, resolveValueMarket, supportedCurrencyCode } from "@/lib/replacement-value";
 import { stageRecentItemBatch } from "@/lib/recent-items";
@@ -211,11 +212,7 @@ export default function AddItemScreen() {
   const purchaseCurrencyToken = moneyDisplayToken(purchaseCurrency, selectedFile?.currency_code);
 
   const pickPhoto = async () => {
-    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (status !== "granted") {
-      Alert.alert("Permission needed", "Allow photo library access to add photos.");
-      return;
-    }
+    if (!await requestImagePermission("photo-library", "add photos")) return;
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
       quality: 0.8,
@@ -226,11 +223,7 @@ export default function AddItemScreen() {
   };
 
   const takePhoto = async () => {
-    const { status } = await ImagePicker.requestCameraPermissionsAsync();
-    if (status !== "granted") {
-      Alert.alert("Permission needed", "Allow camera access to take photos.");
-      return;
-    }
+    if (!await requestImagePermission("camera", "take photos")) return;
     const result = await ImagePicker.launchCameraAsync({
       quality: 0.8,
     });
@@ -357,9 +350,10 @@ export default function AddItemScreen() {
       const { path, uploadErrMsg } = await uploadPhoto(photoUri, selectedFileId);
       uploadedPhotoUrl = path;
       if (!path) {
-        setPhotoWarning(
-          `Photo upload failed: ${uploadErrMsg ?? "unknown error"} — item will be saved without a photo.`
-        );
+        if (__DEV__ && uploadErrMsg) {
+          console.warn("[addItem] Photo upload failed", { diagnostic: uploadErrMsg });
+        }
+        setPhotoWarning("The photo could not be uploaded. The item will be saved without it.");
       }
     }
 

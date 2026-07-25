@@ -8,7 +8,6 @@ import {
   ActivityIndicator,
   Alert,
   Modal,
-  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -34,6 +33,7 @@ import {
   signedImageQueryKey,
   type CoverlyImageSource,
 } from "@/lib/image-cache-model";
+import { requestImagePermission } from "@/lib/media-permissions";
 import { CLAIM_EVIDENCE_BUCKET } from "@/lib/storage-helpers";
 import {
   EVIDENCE_TYPE_LABEL,
@@ -158,15 +158,11 @@ export function ItemEvidenceSection({
 
   const pickImage = async (camera: boolean) => {
     setActionError(null);
-    if (Platform.OS !== "web") {
-      const permission = camera
-        ? await ImagePicker.requestCameraPermissionsAsync()
-        : await ImagePicker.requestMediaLibraryPermissionsAsync();
-      if (permission.status !== "granted") {
-        setActionError(`Allow ${camera ? "camera" : "photo library"} access to add evidence.`);
-        return;
-      }
-    }
+    const allowed = await requestImagePermission(
+      camera ? "camera" : "photo-library",
+      "add evidence",
+    );
+    if (!allowed) return;
 
     const result = camera
       ? await ImagePicker.launchCameraAsync({ quality: 0.85 })

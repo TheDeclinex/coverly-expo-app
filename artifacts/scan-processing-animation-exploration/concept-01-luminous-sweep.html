@@ -1,0 +1,244 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Coverly Scan Exploration — Luminous Sweep</title>
+  <link rel="stylesheet" href="shared.css">
+  <style>
+    .sweep-screen {
+      background:
+        radial-gradient(circle at 50% 39%, rgba(116, 220, 201, .19), transparent 220px),
+        linear-gradient(180deg, #fffefa 0%, #f6fbf8 72%, #eef8f4 100%);
+    }
+
+    .sweep-heading {
+      margin-top: 30px;
+    }
+
+    .scan-stage {
+      position: relative;
+      z-index: 2;
+      width: 306px;
+      height: 374px;
+      margin: 31px auto 24px;
+    }
+
+    .scan-halo {
+      position: absolute;
+      inset: 26px -16px -16px;
+      border-radius: 52px;
+      background: rgba(101, 211, 193, .16);
+      filter: blur(28px);
+      animation: halo-breathe 4.8s ease-in-out infinite;
+    }
+
+    .photo-window {
+      position: absolute;
+      inset: 0;
+      overflow: hidden;
+      border: 1px solid rgba(255,255,255,.82);
+      border-radius: 34px;
+      background: #dce9e5;
+      box-shadow: 0 24px 55px rgba(20, 72, 64, .18), 0 2px 7px rgba(20, 72, 64, .08);
+    }
+
+    .photo-layer {
+      position: absolute;
+      inset: -1px;
+      width: calc(100% + 2px);
+      height: calc(100% + 2px);
+      object-fit: cover;
+      opacity: 0;
+      transform: scale(1.035);
+      transition: opacity 950ms ease, transform 6s ease;
+    }
+
+    .photo-layer.is-active {
+      opacity: 1;
+      transform: scale(1);
+    }
+
+    .photo-wash {
+      position: absolute;
+      inset: 0;
+      background: linear-gradient(180deg, rgba(7,55,49,.02), transparent 52%, rgba(6,57,49,.17));
+      pointer-events: none;
+    }
+
+    .scan-band {
+      position: absolute;
+      z-index: 4;
+      top: -26%;
+      left: -6%;
+      width: 112%;
+      height: 26%;
+      border-bottom: 1px solid rgba(206,255,246,.92);
+      background: linear-gradient(180deg, transparent, rgba(76,214,192,.06) 52%, rgba(119,235,217,.32));
+      box-shadow: 0 18px 36px rgba(39,179,160,.15);
+      animation: sweep-down 5.6s cubic-bezier(.45,0,.55,1) infinite;
+      pointer-events: none;
+    }
+
+    .focus-point {
+      position: absolute;
+      z-index: 5;
+      width: 9px;
+      height: 9px;
+      border: 2px solid rgba(245,255,252,.92);
+      border-radius: 50%;
+      background: rgba(11,139,122,.88);
+      box-shadow: 0 0 0 0 rgba(80, 218, 197, .36);
+      opacity: 0;
+      animation: point-discover 5.6s ease-in-out infinite;
+    }
+
+    .focus-point::after {
+      position: absolute;
+      inset: -8px;
+      border: 1px solid rgba(210,255,247,.7);
+      border-radius: inherit;
+      content: "";
+    }
+
+    .point-a { top: 29%; left: 24%; animation-delay: .5s; }
+    .point-b { top: 47%; right: 21%; animation-delay: 1.75s; }
+    .point-c { bottom: 24%; left: 42%; animation-delay: 3s; }
+
+    .corner {
+      position: absolute;
+      z-index: 6;
+      width: 27px;
+      height: 27px;
+      border-color: rgba(226,255,249,.92);
+      border-style: solid;
+      opacity: .82;
+    }
+
+    .corner.tl { top: 14px; left: 14px; border-width: 2px 0 0 2px; border-radius: 8px 0 0; }
+    .corner.tr { top: 14px; right: 14px; border-width: 2px 2px 0 0; border-radius: 0 8px 0 0; }
+    .corner.bl { bottom: 14px; left: 14px; border-width: 0 0 2px 2px; border-radius: 0 0 0 8px; }
+    .corner.br { right: 14px; bottom: 14px; border-width: 0 2px 2px 0; border-radius: 0 0 8px; }
+
+    .frame-pill {
+      position: absolute;
+      z-index: 8;
+      right: 14px;
+      bottom: 14px;
+      padding: 7px 10px;
+      border: 1px solid rgba(255,255,255,.36);
+      border-radius: 999px;
+      color: white;
+      background: rgba(13,50,45,.56);
+      box-shadow: 0 5px 15px rgba(0,0,0,.1);
+      font-size: 9px;
+      font-weight: 750;
+      backdrop-filter: blur(10px);
+    }
+
+    .sweep-progress {
+      width: 278px;
+      margin: 0 auto;
+    }
+
+    @keyframes sweep-down {
+      0% { transform: translateY(0); opacity: 0; }
+      8% { opacity: 1; }
+      76% { opacity: 1; }
+      88%, 100% { transform: translateY(500px); opacity: 0; }
+    }
+
+    @keyframes point-discover {
+      0%, 15%, 65%, 100% { opacity: 0; transform: scale(.65); box-shadow: 0 0 0 0 rgba(80,218,197,.2); }
+      24%, 48% { opacity: 1; transform: scale(1); box-shadow: 0 0 0 13px rgba(80,218,197,0); }
+    }
+
+    @keyframes halo-breathe {
+      0%, 100% { opacity: .5; transform: scale(.95); }
+      50% { opacity: 1; transform: scale(1.04); }
+    }
+  </style>
+</head>
+<body>
+  <main class="prototype-page">
+    <nav class="prototype-topbar" aria-label="Concept navigation">
+      <a class="back-link" href="index.html">← All concepts</a>
+      <span class="concept-index">Concept 01 of 06</span>
+      <a class="next-link" href="concept-02-evidence-stack.html">Next concept →</a>
+    </nav>
+
+    <div class="prototype-layout">
+      <section class="concept-copy">
+        <p class="eyebrow">Image-led analysis</p>
+        <h1>Luminous Sweep</h1>
+        <p class="concept-summary">A calm pool of light moves through each captured image while temporary focus points suggest attentive analysis—direct, legible, and distinctly scan-like without becoming technical.</p>
+        <ul class="motion-notes" aria-label="Motion characteristics">
+          <li>Soft crossfade</li>
+          <li>Vertical light sweep</li>
+          <li>Decorative focus pulses</li>
+        </ul>
+
+        <div class="scenario-panel">
+          <div class="scenario-label"><span>Preview scenario</span><span>Keys: 1 · 5 · 0</span></div>
+          <div class="scenario-buttons">
+            <button class="scenario-button" data-count="1" aria-pressed="false"><span>Single Photo</span><small>1</small></button>
+            <button class="scenario-button is-active" data-count="5" aria-pressed="true"><span>Multi Photo</span><small>5</small></button>
+            <button class="scenario-button" data-count="10" aria-pressed="false"><span>Video</span><small>10</small></button>
+            <button class="scenario-button" data-count="1" aria-pressed="false"><span>Single Item</span><small>1</small></button>
+          </div>
+          <label class="motion-toggle">
+            <span>Preview reduced motion</span>
+            <span class="toggle-control"><input type="checkbox" data-motion-toggle><span class="toggle-track"></span></span>
+          </label>
+        </div>
+      </section>
+
+      <section class="phone-shell" aria-label="Luminous Sweep mobile prototype">
+        <div class="status-bar"><span>9:41</span><span class="status-icons">● ● ▰</span></div>
+        <div class="app-screen sweep-screen">
+          <div class="brand-lockup"><span class="brand-mark"></span><span>Coverly</span></div>
+          <h2 class="screen-heading sweep-heading">Analysing your room</h2>
+          <p class="screen-subheading" data-processing-message>Looking for individual items…</p>
+
+          <div class="scan-stage">
+            <div class="scan-halo"></div>
+            <div class="photo-window">
+              <img class="photo-layer is-active" data-photo-layer alt="" src="assets/room-01-living-room.jpg">
+              <img class="photo-layer" data-photo-layer alt="" src="assets/room-02-bedroom.jpg">
+              <div class="photo-wash"></div>
+              <div class="scan-band"></div>
+              <i class="focus-point point-a"></i>
+              <i class="focus-point point-b"></i>
+              <i class="focus-point point-c"></i>
+              <i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
+              <span class="frame-pill">Frame <span data-frame-current>1</span> of <span data-frame-total>5</span></span>
+            </div>
+          </div>
+
+          <div class="sweep-progress indeterminate-track"></div>
+          <div class="screen-footnote">Your images stay private to your inventory</div>
+        </div>
+      </section>
+    </div>
+  </main>
+  <script src="prototype.js"></script>
+  <script>
+    (function () {
+      const layers = Array.from(document.querySelectorAll("[data-photo-layer]"));
+      let active = 0;
+      CoverlyPrototype.boot({
+        interval: 4400,
+        onFrame: function (frame) {
+          const next = active === 0 ? 1 : 0;
+          layers[next].src = frame.src;
+          window.requestAnimationFrame(function () {
+            layers[next].classList.add("is-active");
+            layers[active].classList.remove("is-active");
+            active = next;
+          });
+        }
+      });
+    }());
+  </script>
+</body>
+</html>

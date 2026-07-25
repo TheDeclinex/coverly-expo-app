@@ -197,7 +197,10 @@ export const ItemMaintenanceForm = React.forwardRef<ItemMaintenanceFormHandle, {
       if (savedFlashTimer.current) clearTimeout(savedFlashTimer.current);
       savedFlashTimer.current = setTimeout(() => setSavedFlash(false), 1200);
       showToast("Item updated");
-    } catch (failure) { setError(failure instanceof Error ? failure.message : "Could not save changes."); }
+    } catch (failure) {
+      if (__DEV__) console.warn("[itemMaintenance] Save failed", { failure });
+      setError("Could not save changes. Check your connection and try again.");
+    }
     finally { setSaving(false); }
   }, [draft, item, photos, photosModified, propertyMarket?.country_code, propertyMarket?.currency_code, purchaseCurrency, queryClient, replacementCurrency, rooms, saving, session?.user.id, showToast, storedPurchaseCurrency, storedReplacementCurrency]);
 

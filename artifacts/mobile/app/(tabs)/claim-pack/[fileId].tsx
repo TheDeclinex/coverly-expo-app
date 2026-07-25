@@ -107,9 +107,7 @@ function safeClaimPackExportError(error: unknown): string {
       if (/entitlement|payment|required|subscription|plan|402|claim.pack.*limit/i.test(message)) {
         return "Claim pack generation reached Coverly, but PDF export needs paid access. You can keep editing this draft or view plan options.";
       }
-      return message
-        ? `Claim pack generation reached Coverly but returned an error: ${message}`
-        : "Claim pack generation reached Coverly but returned an error. Please try again.";
+      return "Claim pack generation reached Coverly but could not finish. Your draft is still saved; please try the export again.";
     }
     if (error.diagnostics.reason === "unexpected_response") {
       return "Claim pack generation returned an unexpected response. Please try again.";
