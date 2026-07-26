@@ -2759,8 +2759,59 @@ export default function PropertyDetailScreen() {
             <View style={{ paddingHorizontal: 16, paddingTop: 8 }}>
               <EmptyState
                 icon="layers"
-                title="No rooms found"
-                subtitle="Tap Add room to start organizing this property."
+                title="Add your first room"
+                subtitle="Organise this property room by room, then scan or add the items inside."
+                action={
+                  <View style={styles.emptyRoomActions}>
+                    <Pressable
+                      accessibilityRole="button"
+                      accessibilityLabel="Add room"
+                      onPress={() => {
+                        setAddRoomName("");
+                        setAddRoomType(null);
+                        setAddRoomError(null);
+                        setAddRoomVisible(true);
+                      }}
+                      style={({ pressed }) => [
+                        styles.emptyRoomPrimaryAction,
+                        {
+                          backgroundColor: colors.primary,
+                          borderRadius: colors.radius,
+                          opacity: pressed ? 0.82 : 1,
+                        },
+                      ]}
+                    >
+                      <Feather name="plus" size={17} color={colors.primaryForeground} />
+                      <Text style={[styles.emptyRoomActionText, { color: colors.primaryForeground }]}>
+                        Add room
+                      </Text>
+                    </Pressable>
+                    <Pressable
+                      accessibilityRole="button"
+                      accessibilityLabel="Scan items"
+                      onPress={() =>
+                        router.push({
+                          pathname: "/(tabs)/scan",
+                          params: { fileId: id, fileName: property?.name ?? name },
+                        })
+                      }
+                      style={({ pressed }) => [
+                        styles.emptyRoomSecondaryAction,
+                        {
+                          backgroundColor: colors.card,
+                          borderColor: colors.border,
+                          borderRadius: colors.radius,
+                          opacity: pressed ? 0.76 : 1,
+                        },
+                      ]}
+                    >
+                      <Feather name="zap" size={17} color={colors.primary} />
+                      <Text style={[styles.emptyRoomActionText, { color: colors.primary }]}>
+                        Scan items
+                      </Text>
+                    </Pressable>
+                  </View>
+                }
               />
             </View>
           }
@@ -3009,6 +3060,31 @@ export default function PropertyDetailScreen() {
 // ─── Styles ───────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
+  emptyRoomActions: {
+    width: "100%",
+    maxWidth: 360,
+    alignSelf: "center",
+    gap: 10,
+  },
+  emptyRoomPrimaryAction: {
+    minHeight: 50,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+  },
+  emptyRoomSecondaryAction: {
+    minHeight: 48,
+    borderWidth: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+  },
+  emptyRoomActionText: {
+    fontSize: 15,
+    fontFamily: "Inter_700Bold",
+  },
   // Insight card — teal gradient, donut + sparkline
   insightCard: {
     padding: 16,

@@ -12,7 +12,6 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   AccessibilityInfo,
   Image,
-  Pressable,
   StyleSheet,
   Text,
   useWindowDimensions,
@@ -60,10 +59,9 @@ interface EvidenceCard {
 interface AiScanningOverlayProps {
   images: ScanEncodedImage[];
   mode: ScanMode;
-  onCancel: () => void;
 }
 
-export function AiScanningOverlay({ images, mode, onCancel }: AiScanningOverlayProps) {
+export function AiScanningOverlay({ images, mode }: AiScanningOverlayProps) {
   const { width, height } = useWindowDimensions();
   const imageUris = useMemo(() => images.map((image) => image.uri), [images]);
   const imageIdentity = imageUris.join("|");
@@ -265,25 +263,12 @@ export function AiScanningOverlay({ images, mode, onCancel }: AiScanningOverlayP
       <View pointerEvents="none" style={styles.backgroundGlow} />
 
       <View style={styles.content}>
-        <View style={styles.headerRow}>
-          <View style={styles.brandLockup}>
-            <Image source={COVERLY_HEADER_ICON} style={styles.brandIcon} />
-            <View>
-              <Text style={styles.brandName}>Coverly</Text>
-              <Text style={styles.brandTagline}>Know what you own</Text>
-            </View>
+        <View style={styles.brandLockup}>
+          <Image source={COVERLY_HEADER_ICON} style={styles.brandIcon} />
+          <View>
+            <Text style={styles.brandName}>Coverly</Text>
+            <Text style={styles.brandTagline}>Know what you own</Text>
           </View>
-
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Cancel scan"
-            onPress={onCancel}
-            hitSlop={10}
-            style={({ pressed }) => [styles.cancelButton, pressed && styles.cancelButtonPressed]}
-          >
-            <Feather name="x" size={17} color="#47615C" />
-            <Text style={styles.cancelText}>Cancel</Text>
-          </Pressable>
         </View>
 
         <View style={styles.headingBlock}>
@@ -659,12 +644,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 24,
     paddingBottom: 25,
   },
-  headerRow: {
-    width: "100%",
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-  },
   brandLockup: {
     flexDirection: "row",
     alignItems: "center",
@@ -687,25 +666,6 @@ const styles = StyleSheet.create({
     fontSize: 8,
     lineHeight: 10,
     fontFamily: "Inter_400Regular",
-  },
-  cancelButton: {
-    minHeight: 38,
-    paddingHorizontal: 11,
-    borderWidth: 1,
-    borderColor: "rgba(18, 79, 71, 0.12)",
-    borderRadius: 20,
-    backgroundColor: "rgba(255,255,252,0.74)",
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 5,
-  },
-  cancelButtonPressed: {
-    opacity: 0.7,
-  },
-  cancelText: {
-    color: "#47615C",
-    fontSize: 12,
-    fontFamily: "Inter_600SemiBold",
   },
   headingBlock: {
     width: "100%",

@@ -30,11 +30,21 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { AiScanningOverlay } from "@/components/AiScanningOverlay";
-import { ContextBackButton } from "@/components/ContextBackButton";
 import { EmptyState } from "@/components/EmptyState";
 import { ExpandableImage } from "@/components/ExpandableImage";
 import { LimitReachedModal } from "@/components/LimitReachedModal";
+import {
+  PhotoScanCamera,
+  type PhotoScanCapture,
+  type PhotoScanMode,
+} from "@/components/PhotoScanCamera";
+import { ScanWorkflowHeader } from "@/components/ScanWorkflowHeader";
 import { useToast } from "@/components/Toast";
+import {
+  VideoScanRecorder,
+  VIDEO_SCAN_MAX_DURATION_SECONDS,
+  type VideoScanRecording,
+} from "@/components/VideoScanRecorder";
 import { useAuth } from "@/context/AuthContext";
 import { useEntitlements } from "@/context/EntitlementsContext";
 import { useColors } from "@/hooks/useColors";
@@ -79,9 +89,9 @@ import type {
 
 // Future option: auto-save detected scan results after review confidence improves / with undo.
 
-const VIDEO_SCAN_USED_DURATION_MS = 10_000;
-const VIDEO_SCAN_USED_SECONDS = VIDEO_SCAN_USED_DURATION_MS / 1000;
-const VIDEO_SCAN_LIMIT_COPY = `Record or upload a room walkthrough. Coverly will scan up to the first ${VIDEO_SCAN_USED_SECONDS} seconds.`;
+const VIDEO_SCAN_USED_DURATION_MS = VIDEO_SCAN_MAX_DURATION_SECONDS * 1000;
+const VIDEO_SCAN_USED_SECONDS = VIDEO_SCAN_MAX_DURATION_SECONDS;
+const VIDEO_SCAN_LIMIT_COPY = `Record up to ${VIDEO_SCAN_USED_SECONDS} seconds, or upload a room walkthrough. Coverly scans the first ${VIDEO_SCAN_USED_SECONDS} seconds.`;
 const VIDEO_SCAN_START_ERROR = "Video scan could not start. Please try again or choose a video from gallery.";
 const ANDROID_SCAN_STATE_STORAGE_KEY = "coverly:android-scan-state:v1";
 const ANDROID_SCAN_STATE_MAX_AGE_MS = 30 * 60 * 1000;
@@ -198,6 +208,12 @@ interface CompatibilityPrompt {
 interface StartScanOptions {
   compatibilityMode?: boolean;
   compatibilityReason?: string;
+}
+
+interface PendingPhotoCapture {
+  mode: PhotoScanMode;
+  autoStart: boolean;
+  requestId: number;
 }
 
 interface PersistedAndroidScanState {
@@ -717,6 +733,8 @@ export default function ScanScreen() {
   const [activePinIndex, setActivePinIndex] = useState<number | null>(null);
   const [activeSourcePhotoIdx, setActiveSourcePhotoIdx] = useState(0);
   const [multiPhotoPromptVisible, setMultiPhotoPromptVisible] = useState(false);
+  const [pendingPhotoCapture, setPendingPhotoCapture] = useState<PendingPhotoCapture | null>(null);
+  const [videoRecorderVisible, setVideoRecorderVisible] = useState(false);
   const [reviewNameEdit, setReviewNameEdit] = useState<{ index: number; draft: string } | null>(null);
   const isActiveMultiPhotoSession =
     selectedMode === "multi_photo_room" &&
@@ -730,6 +748,7 @@ export default function ScanScreen() {
   const aiScanEntitlementCheckedRef = useRef(false);
   const videoProcessingRef = useRef<{ key: string; sessionId: number } | null>(null);
   const videoProcessingSessionRef = useRef(0);
+  const photoCaptureSessionRef = useRef(0);
   const scanAttemptRef = useRef(0);
   const scanSubmissionInFlightRef = useRef<number | null>(null);
   const scanUsageIdempotencyKeyRef = useRef<string | null>(null);
@@ -746,6 +765,7 @@ export default function ScanScreen() {
       scanSubmissionInFlightRef.current = null;
       videoProcessingSessionRef.current += 1;
       videoProcessingRef.current = null;
+      photoCaptureSessionRef.current += 1;
       if (multiPhotoCameraTimerRef.current) {
         clearTimeout(multiPhotoCameraTimerRef.current);
       }
@@ -886,12 +906,14 @@ export default function ScanScreen() {
     setSelectedRoomId(rooms[0].id);
   }, [paramRoomId, rooms, selectedFileId, selectedRoomId]);
 
-  const clearCaptureState = () => {
+  const clearCaptureState = (reason = "clear_capture_state") => {
+    scanLog("scan workflow transient state settled", { reason });
     scanAttemptRef.current += 1;
     scanSubmissionInFlightRef.current = null;
     scanUsageIdempotencyKeyRef.current = null;
     videoProcessingSessionRef.current += 1;
     videoProcessingRef.current = null;
+    photoCaptureSessionRef.current += 1;
     completionNavigationRef.current = false;
     if (multiPhotoCameraTimerRef.current) {
       clearTimeout(multiPhotoCameraTimerRef.current);
@@ -902,13 +924,24 @@ export default function ScanScreen() {
     pendingMultiPhotoCameraRef.current = false;
     setSelectedMode(null);
     setImages([]);
+    setDetectedItems([]);
     setScanStatus("idle");
     setScanError(null);
     setCompatibilityPrompt(null);
     setLimitModal(null);
+    setSavingIds(new Set());
+    setScanSaveError(null);
+    setPartialFailures([]);
+    setActivePinIndex(null);
+    setActiveSourcePhotoIdx(0);
     setMultiPhotoPromptVisible(false);
+    setPendingPhotoCapture(null);
+    setVideoRecorderVisible(false);
+    setReviewNameEdit(null);
     aiScanEntitlementCheckedRef.current = false;
-    void clearAndroidScanState("clear_capture_state");
+    saveAllInFlightRef.current = false;
+    clearScanPhotoUploadCache();
+    void clearAndroidScanState(reason);
   };
 
   const selectedPropertyName =
@@ -1034,6 +1067,44 @@ export default function ScanScreen() {
     }
     if (result.canceled) {
       scanLog("image picker cancelled", { source: "library", mode });
+      clearCaptureState(
+        mode === "multi_photo_room"
+          ? "multi_photo_library_cancelled"
+          : mode === "single_item"
+            ? "single_item_library_cancelled"
+            : "single_photo_library_cancelled",
+      );
+    }
+  };
+
+  const processCapturedPhoto = async (
+    mode: PhotoScanMode,
+    autoStart: boolean,
+    asset: ImagePicker.ImagePickerAsset,
+  ) => {
+    const capturedImage = await imageFromPickerAsset(asset, "camera", 0);
+    if (!screenMountedRef.current) return;
+    if (!capturedImage) {
+      setScanError("Could not prepare the captured photo for scanning. Please try again.");
+      return;
+    }
+
+    const capturedImages = [capturedImage];
+    scanUsageIdempotencyKeyRef.current = null;
+    scanLog("photo captured", {
+      source: "camera",
+      imageCount: capturedImages.length,
+      autoStart,
+      images: capturedImages.map(safeImageDiagnostics),
+    });
+    if (mode === "multi_photo_room") {
+      setImages((current) => [...current, capturedImage].slice(0, MAX_MULTI_PHOTO_IMAGES));
+      setMultiPhotoPromptVisible(true);
+    } else {
+      setImages(capturedImages);
+    }
+    if (autoStart) {
+      await handleStartScan(mode, capturedImages);
     }
   };
 
@@ -1041,7 +1112,7 @@ export default function ScanScreen() {
     mode: ScanMode | null = selectedMode,
     autoStart = false,
   ) => {
-    if (!mode) return;
+    if (!mode || mode === "video_room") return;
     if (!selectedFileId || !selectedRoomId) {
       setScanError("Choose a property and room before opening the camera.");
       return;
@@ -1050,17 +1121,19 @@ export default function ScanScreen() {
       setMultiPhotoPromptVisible(true);
       return;
     }
-    // On web the camera/file prompt must be opened directly from the mode-card
-    // click. Awaiting a permission request first causes browsers to block it.
-    if (Platform.OS !== "web") {
-      const permission = await ImagePicker.requestCameraPermissionsAsync();
-      if (permission.status !== "granted") {
-        showScanPermissionHelp("camera", permission.canAskAgain !== false);
-        return;
-      }
-    }
+
     scanLog("image processing started", { source: "camera", mode, autoStart });
     setCompatibilityPrompt(null);
+
+    if (Platform.OS !== "web") {
+      const requestId = photoCaptureSessionRef.current + 1;
+      photoCaptureSessionRef.current = requestId;
+      setPendingPhotoCapture({ mode, autoStart, requestId });
+      return;
+    }
+
+    // Keep the existing web file/camera prompt. Native Android and iOS use
+    // Coverly's embedded camera without changing the downstream photo path.
     const result = await ImagePicker.launchCameraAsync({
       quality: 0.8,
       base64: false,
@@ -1074,35 +1147,49 @@ export default function ScanScreen() {
       hasUri: !result.canceled && !!result.assets[0]?.uri,
     });
     if (!result.canceled && result.assets[0]?.uri) {
-      const a = result.assets[0];
-      const capturedImage = await imageFromPickerAsset(a, "camera", 0);
-      if (!screenMountedRef.current) return;
-      if (!capturedImage) {
-        setScanError("Could not prepare the captured photo for scanning. Please try again.");
-        return;
-      }
-      const capturedImages = [capturedImage];
-      scanUsageIdempotencyKeyRef.current = null;
-      scanLog("photo captured", {
-        source: "camera",
-        imageCount: capturedImages.length,
-        autoStart,
-        images: capturedImages.map(safeImageDiagnostics),
-      });
-      if (mode === "multi_photo_room") {
-        setImages((current) => [...current, capturedImage].slice(0, MAX_MULTI_PHOTO_IMAGES));
-        setMultiPhotoPromptVisible(true);
-      } else {
-        setImages(capturedImages);
-      }
-      if (autoStart) {
-        await handleStartScan(mode, capturedImages);
-      }
+      await processCapturedPhoto(mode, autoStart, result.assets[0]);
     } else if (!result.canceled) {
       setScanError("Could not prepare the captured photo for scanning. Please try again.");
     } else {
       scanLog("image picker cancelled", { source: "camera", mode });
+      clearCaptureState(
+        mode === "single_item"
+          ? "single_item_camera_cancelled"
+          : mode === "multi_photo_room"
+            ? "multi_photo_camera_cancelled"
+            : "single_photo_camera_cancelled",
+      );
     }
+  };
+
+  const handleEmbeddedPhotoCapture = async (photo: PhotoScanCapture) => {
+    const request = pendingPhotoCapture;
+    if (!request || request.requestId !== photoCaptureSessionRef.current) return;
+
+    photoCaptureSessionRef.current += 1;
+    setPendingPhotoCapture(null);
+    await processCapturedPhoto(
+      request.mode,
+      request.autoStart,
+      {
+        uri: photo.uri,
+        width: photo.width,
+        height: photo.height,
+        mimeType: "image/jpeg",
+      } as ImagePicker.ImagePickerAsset,
+    );
+  };
+
+  const cancelEmbeddedPhotoCapture = () => {
+    const cancelledMode = pendingPhotoCapture?.mode ?? null;
+    photoCaptureSessionRef.current += 1;
+    clearCaptureState(
+      cancelledMode === "single_item"
+        ? "single_item_camera_cancelled"
+        : cancelledMode === "multi_photo_room"
+          ? "multi_photo_camera_cancelled"
+          : "single_photo_camera_cancelled",
+    );
   };
 
   const openPendingMultiPhotoCamera = () => {
@@ -1167,7 +1254,7 @@ export default function ScanScreen() {
     return frames;
   };
 
-  const scanVideoAsset = async (asset: ImagePicker.ImagePickerAsset) => {
+  const scanVideoAsset = async (asset: Pick<ImagePicker.ImagePickerAsset, "uri" | "duration">) => {
     const videoKey = `${asset.uri}:${asset.duration ?? "unknown"}`;
     if (videoProcessingRef.current) {
       scanLog("video processing ignored because another video is in flight", {
@@ -1240,6 +1327,7 @@ export default function ScanScreen() {
         await scanVideoAsset(result.assets[0]);
       } else if (result.canceled) {
         scanLog("image picker cancelled", { source: "video_library", mode: "video_room" });
+        clearCaptureState("video_library_cancelled");
       } else {
         setScanError("Could not prepare the selected video. Please try another video.");
       }
@@ -1255,40 +1343,18 @@ export default function ScanScreen() {
       return;
     }
     setScanError(null);
-    try {
-      if (Platform.OS !== "web") {
-        const permission = await ImagePicker.requestCameraPermissionsAsync();
-        if (permission.status !== "granted") {
-          showScanPermissionHelp("camera", permission.canAskAgain !== false);
-          return;
-        }
-      }
-      const result = await ImagePicker.launchCameraAsync({
-        mediaTypes: ["videos"],
-        quality: 0.8,
-        videoMaxDuration: VIDEO_SCAN_USED_SECONDS,
-      });
-      if (!screenMountedRef.current) return;
-      scanLog("image picker returned", {
-        source: "video_camera",
-        mode: "video_room",
-        canceled: result.canceled,
-        assetCount: result.canceled ? 0 : result.assets.length,
-        hasUri: !result.canceled && !!result.assets[0]?.uri,
-      });
-      if (!result.canceled && result.assets[0]) {
-        await scanVideoAsset(result.assets[0]);
-      } else if (result.canceled) {
-        scanLog("image picker cancelled", { source: "video_camera", mode: "video_room" });
-      } else {
-        setScanStatus("error");
-        setScanError(VIDEO_SCAN_START_ERROR);
-      }
-    } catch (error) {
-      scanLog("video camera failed", { message: errorMessage(error), platform: Platform.OS });
-      setScanStatus("error");
-      setScanError(VIDEO_SCAN_START_ERROR);
-    }
+    setVideoRecorderVisible(true);
+  };
+
+  const handleRecordedVideo = async ({ uri, durationMs }: VideoScanRecording) => {
+    setVideoRecorderVisible(false);
+    scanLog("in-app video camera returned", {
+      source: "video_camera",
+      mode: "video_room",
+      durationMs,
+      hasUri: Boolean(uri),
+    });
+    await scanVideoAsset({ uri, duration: durationMs });
   };
 
   const takeAnotherMultiPhoto = () => {
@@ -1319,7 +1385,10 @@ export default function ScanScreen() {
       setScanError("Choose a property and room before selecting a scan type.");
       return;
     }
-    if (!enforce("ai_scan")) return;
+    if (!enforce("ai_scan")) {
+      clearCaptureState("scan_credit_preflight_rejected");
+      return;
+    }
 
     if (mode === "multi_photo_room" && isActiveMultiPhotoSession) {
       aiScanEntitlementCheckedRef.current = true;
@@ -1471,7 +1540,10 @@ export default function ScanScreen() {
     if (!selectedFileId) { setScanError("Select a property."); return; }
     if (!selectedRoomId) { setScanError("Select a room."); return; }
     if (scanImages.length === 0) { setScanError("Add at least one photo."); return; }
-    if (!aiScanEntitlementCheckedRef.current && !enforce("ai_scan")) return;
+    if (!aiScanEntitlementCheckedRef.current && !enforce("ai_scan")) {
+      clearCaptureState("scan_credit_preflight_rejected");
+      return;
+    }
     if (scanSubmissionInFlightRef.current !== null) {
       scanLog("duplicate scan start ignored", {
         mode,
@@ -1996,30 +2068,7 @@ export default function ScanScreen() {
   };
 
   const resetScan = () => {
-    scanAttemptRef.current += 1;
-    scanSubmissionInFlightRef.current = null;
-    scanUsageIdempotencyKeyRef.current = null;
-    if (multiPhotoCameraTimerRef.current) {
-      clearTimeout(multiPhotoCameraTimerRef.current);
-      multiPhotoCameraTimerRef.current = null;
-    }
-    multiPhotoCameraInteractionRef.current?.cancel();
-    multiPhotoCameraInteractionRef.current = null;
-    pendingMultiPhotoCameraRef.current = false;
-    setSelectedMode(null);
-    setImages([]);
-    setDetectedItems([]);
-    setScanStatus("idle");
-    setScanError(null);
-    setCompatibilityPrompt(null);
-    setLimitModal(null);
-    setScanSaveError(null);
-    setPartialFailures([]);
-    setActivePinIndex(null);
-    setActiveSourcePhotoIdx(0);
-    aiScanEntitlementCheckedRef.current = false;
-    clearScanPhotoUploadCache();
-    void clearAndroidScanState("reset_scan");
+    clearCaptureState("reset_scan");
   };
 
   const goBackToRoom = () => {
@@ -2048,7 +2097,60 @@ export default function ScanScreen() {
   };
 
   const returnToScanTypeSelection = () => {
-    clearCaptureState();
+    clearCaptureState("return_to_scan_type_selection");
+  };
+
+  const cancelVideoCapture = () => {
+    clearCaptureState("video_camera_cancelled");
+  };
+
+  const dismissScanLimit = () => {
+    clearCaptureState("scan_limit_dismissed");
+  };
+
+  const scanWorkflowBackLabel =
+    launchStep === "type"
+      ? (paramRoomId ? selectedRoomName : "Room")
+      : launchStep === "room"
+        ? (paramFileId ? selectedPropertyName : "Property")
+        : "Home";
+
+  const handleScanWorkflowBack = () => {
+    clearCaptureState("scan_workflow_header_back");
+
+    if (launchStep === "type") {
+      if (paramRoomId) {
+        router.replace({
+          pathname: "/(tabs)/room/[id]",
+          params: {
+            id: selectedRoomId || paramRoomId,
+            name: selectedRoomName,
+            fileId: selectedFileId || paramFileId || "",
+            fileName: selectedPropertyName,
+          },
+        });
+        return;
+      }
+      setSelectedRoomId("");
+      setNewRoomName("");
+      return;
+    }
+
+    if (launchStep === "room") {
+      if (paramFileId) {
+        router.replace({
+          pathname: "/(tabs)/property/[id]",
+          params: { id: selectedFileId || paramFileId, name: selectedPropertyName },
+        });
+        return;
+      }
+      setSelectedFileId("");
+      setSelectedRoomId("");
+      setNewRoomName("");
+      return;
+    }
+
+    router.replace("/(tabs)");
   };
 
   // ── Confidence badge helpers ─────────────────────────────────────────────────
@@ -2065,38 +2167,27 @@ export default function ScanScreen() {
 
   if (scanStatus === "auto_saving") {
     return (
-      <>
+      <View style={[styles.screen, { backgroundColor: colors.background }]}>
         <Stack.Screen options={{ title: "Saving items…", headerShown: false }} />
+        <ScanWorkflowHeader backLabel={selectedRoomName} onBack={goBackToRoom} />
         <View style={[styles.preparingScreen, { backgroundColor: colors.background }]}>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Back to room"
-            onPress={goBackToRoom}
-            style={styles.preparingCancelButton}
-          >
-            <Feather name="x" size={18} color={colors.primary} />
-            <Text style={[styles.preparingCancelText, { color: colors.primary }]}>Back to room</Text>
-          </Pressable>
           <ActivityIndicator color={colors.primary} />
           <Text style={[styles.preparingTitle, { color: colors.foreground }]}>Saving items</Text>
           <Text style={[styles.preparingText, { color: colors.mutedForeground }]}>Adding detected items to your room…</Text>
         </View>
-      </>
+      </View>
     );
   }
 
   if ((scanStatus === "reviewing" || scanStatus === "saving") && detectedItems.length === 0) {
     return (
-      <>
-        <Stack.Screen
-          options={{
-            title: "Review detected items",
-            headerLeft: () => (
-              <Pressable onPress={goBackToRoom} hitSlop={8} style={{ padding: 4 }}>
-                <Feather name="x" size={20} color={colors.mutedForeground} />
-              </Pressable>
-            ),
-          }}
+      <View style={[styles.screen, { backgroundColor: colors.background }]}>
+        <Stack.Screen options={{ title: "Review detected items", headerShown: false }} />
+        <ScanWorkflowHeader
+          backLabel={selectedRoomName}
+          onBack={goBackToRoom}
+          actionLabel="Scan again"
+          onAction={resetScan}
         />
         <View style={[styles.preparingScreen, { backgroundColor: colors.background }]}>
           <EmptyState
@@ -2112,16 +2203,9 @@ export default function ScanScreen() {
               <Feather name="camera" size={17} color={colors.primary} />
               <Text style={[styles.photoBtnText, { color: colors.primary }]}>Scan again</Text>
             </Pressable>
-            <Pressable
-              onPress={goBackToRoom}
-              style={[styles.photoBtn, { borderColor: colors.primary, backgroundColor: colors.primary, borderRadius: colors.radius }]}
-            >
-              <Feather name="arrow-left" size={17} color={colors.primaryForeground} />
-              <Text style={[styles.photoBtnText, { color: colors.primaryForeground }]}>Back to room</Text>
-            </Pressable>
           </View>
         </View>
-      </>
+      </View>
     );
   }
 
@@ -2141,21 +2225,13 @@ export default function ScanScreen() {
       .filter(({ item }) => item.pin != null && (item.sourcePhotoIndex ?? 0) === activeSourcePhotoIdx);
 
     return (
-      <>
-        <Stack.Screen
-          options={{
-            title: "Review detected items",
-            headerLeft: () => (
-              <Pressable onPress={goBackToRoom} hitSlop={8} style={{ padding: 4 }}>
-                <Feather name="arrow-left" size={20} color={colors.mutedForeground} />
-              </Pressable>
-            ),
-            headerRight: () => (
-              <Pressable onPress={resetScan} hitSlop={8} style={{ padding: 4 }}>
-                <Text style={{ color: colors.primary, fontFamily: "Inter_600SemiBold", fontSize: 13 }}>Scan again</Text>
-              </Pressable>
-            ),
-          }}
+      <View style={[styles.screen, { backgroundColor: colors.background }]}>
+        <Stack.Screen options={{ title: "Review detected items", headerShown: false }} />
+        <ScanWorkflowHeader
+          backLabel={selectedRoomName}
+          onBack={goBackToRoom}
+          actionLabel="Scan again"
+          onAction={resetScan}
         />
         <View style={{ flex: 1, backgroundColor: colors.background }}>
           <FlatList
@@ -2629,7 +2705,7 @@ export default function ScanScreen() {
             </KeyboardAvoidingView>
           </Modal>
         </View>
-      </>
+      </View>
     );
   }
 
@@ -2641,73 +2717,39 @@ export default function ScanScreen() {
   // ── Scanning overlay — full screen while AI processes ─────────────────────
   if (isScanning && !limitModal) {
     return (
-      <>
+      <View style={[styles.screen, { backgroundColor: colors.background }]}>
         <Stack.Screen options={{ title: "Scanning…", headerShown: false }} />
+        <ScanWorkflowHeader backLabel="Scan types" onBack={returnToScanTypeSelection} />
         <AiScanningOverlay
           images={images}
           mode={selectedMode ?? "single_photo_room"}
-          onCancel={returnToScanTypeSelection}
         />
-      </>
+      </View>
     );
   }
 
   if (isPreparingVideo) {
     return (
-      <>
+      <View style={[styles.screen, { backgroundColor: colors.background }]}>
         <Stack.Screen options={{ title: "Preparing video…", headerShown: false }} />
+        <ScanWorkflowHeader backLabel="Scan types" onBack={returnToScanTypeSelection} />
         <View style={[styles.preparingScreen, { backgroundColor: colors.background }]}>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Cancel video preparation"
-            onPress={returnToScanTypeSelection}
-            style={styles.preparingCancelButton}
-          >
-            <Feather name="x" size={18} color={colors.primary} />
-            <Text style={[styles.preparingCancelText, { color: colors.primary }]}>Cancel</Text>
-          </Pressable>
           <ActivityIndicator color={colors.primary} />
           <Text style={[styles.preparingTitle, { color: colors.foreground }]}>Preparing video frames</Text>
           <Text style={[styles.preparingText, { color: colors.mutedForeground }]}>
             Coverly is scanning frames from the first {VIDEO_SCAN_USED_SECONDS} seconds of your video.
           </Text>
         </View>
-      </>
+      </View>
     );
   }
 
   return (
-    <>
-      <Stack.Screen
-        options={{
-          title: "Scan items",
-          headerBackVisible: false,
-          headerLeft: () => (
-            <ContextBackButton
-              label={paramRoomName ?? paramFileName ?? "Home"}
-              onPress={() => {
-                if (paramRoomId) {
-                  router.replace({
-                    pathname: "/(tabs)/room/[id]",
-                    params: {
-                      id: paramRoomId,
-                      name: paramRoomName ?? "Room",
-                      fileId: paramFileId ?? "",
-                      fileName: paramFileName ?? "Property",
-                    },
-                  });
-                } else if (paramFileId) {
-                  router.replace({
-                    pathname: "/(tabs)/property/[id]",
-                    params: { id: paramFileId, name: paramFileName ?? "Property" },
-                  });
-                } else {
-                  router.replace("/(tabs)");
-                }
-              }}
-            />
-          ),
-        }}
+    <View style={[styles.screen, { backgroundColor: colors.background }]}>
+      <Stack.Screen options={{ title: "Scan items", headerShown: false }} />
+      <ScanWorkflowHeader
+        backLabel={scanWorkflowBackLabel}
+        onBack={handleScanWorkflowBack}
       />
       <ScrollView
         contentContainerStyle={[styles.scroll, { paddingBottom: insets.bottom + 32 }]}
@@ -2757,21 +2799,6 @@ export default function ScanScreen() {
         {launchStep === "room" && (
           <View style={styles.section}>
             <View style={styles.stepHeader}>
-              {!paramFileId && (
-                <Pressable
-                  onPress={() => {
-                    clearCaptureState();
-                    setSelectedFileId("");
-                    setSelectedRoomId("");
-                    setNewRoomName("");
-                  }}
-                  hitSlop={8}
-                  style={styles.stepBackButton}
-                >
-                  <Feather name="chevron-left" size={18} color={colors.primary} />
-                  <Text style={[styles.stepBackText, { color: colors.primary }]}>Property</Text>
-                </Pressable>
-              )}
               <Text style={[styles.sectionLabel, { color: colors.mutedForeground }]}>
                 ROOM IN {selectedPropertyName.toUpperCase()}
               </Text>
@@ -2855,19 +2882,6 @@ export default function ScanScreen() {
         {launchStep === "type" && !isActiveMultiPhotoSession && (
         <View style={styles.section}>
           <View style={styles.stepHeader}>
-            {!paramRoomId && (
-              <Pressable
-                onPress={() => {
-                  clearCaptureState();
-                  setSelectedRoomId("");
-                }}
-                hitSlop={8}
-                style={styles.stepBackButton}
-              >
-                <Feather name="chevron-left" size={18} color={colors.primary} />
-                <Text style={[styles.stepBackText, { color: colors.primary }]}>Room</Text>
-              </Pressable>
-            )}
             <Text style={[styles.sectionLabel, { color: colors.mutedForeground }]}>
               SCAN TYPE FOR {selectedRoomName.toUpperCase()}
             </Text>
@@ -2940,94 +2954,6 @@ export default function ScanScreen() {
             );
           })}
         </View>
-        )}
-
-        {/* Location */}
-        {false && selectedMode && selectedMode !== "video_room" && (
-          <View style={styles.section}>
-            <Text style={[styles.sectionLabel, { color: colors.mutedForeground }]}>LOCATION</Text>
-
-            {paramFileId ? (
-              <View style={{ gap: 4 }}>
-                <Text style={[styles.fieldLabel, { color: colors.mutedForeground }]}>Property</Text>
-                <View style={[styles.chip, { backgroundColor: colors.primary, alignSelf: "flex-start" }]}>
-                  <Text style={[styles.chipText, { color: colors.primaryForeground }]}>
-                    {paramFileName ?? properties?.find((property) => property.id === paramFileId)?.name ?? "Loading property…"}
-                  </Text>
-                </View>
-              </View>
-            ) : (
-              <View style={{ gap: 4 }}>
-                <Text style={[styles.fieldLabel, { color: colors.mutedForeground }]}>Property</Text>
-                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
-                  {(properties ?? []).map((p) => (
-                    <Pressable
-                      key={p.id}
-                      onPress={() => { setSelectedFileId(p.id); setSelectedRoomId(""); }}
-                      style={[styles.chip, { backgroundColor: selectedFileId === p.id ? colors.primary : colors.secondary }]}
-                    >
-                      <Text style={[styles.chipText, { color: selectedFileId === p.id ? colors.primaryForeground : colors.foreground }]}>
-                        {p.name}
-                      </Text>
-                    </Pressable>
-                  ))}
-                </ScrollView>
-              </View>
-            )}
-
-            {selectedFileId && (
-              paramRoomId ? (
-                <View style={{ gap: 4 }}>
-                  <Text style={[styles.fieldLabel, { color: colors.mutedForeground }]}>Room</Text>
-                  <View style={[styles.chip, { backgroundColor: colors.primary, alignSelf: "flex-start" }]}>
-                    <Text style={[styles.chipText, { color: colors.primaryForeground }]}>
-                      {paramRoomName ?? paramRoomId}
-                    </Text>
-                  </View>
-                </View>
-              ) : (
-                <View style={{ gap: 4 }}>
-                  <Text style={[styles.fieldLabel, { color: colors.mutedForeground }]}>Room</Text>
-                  {(rooms ?? []).length === 0 ? (
-                    /* No rooms yet — let the user name one inline; it will be
-                       created automatically when the scan starts. */
-                    <TextInput
-                      value={newRoomName}
-                      onChangeText={setNewRoomName}
-                      placeholder="e.g. Living Room, Kitchen…"
-                      placeholderTextColor={colors.mutedForeground}
-                      autoCapitalize="words"
-                      style={{
-                        borderWidth: 1.5,
-                        borderColor: newRoomName.trim() ? colors.primary : colors.border,
-                        borderRadius: colors.radius,
-                        paddingHorizontal: 12,
-                        paddingVertical: 9,
-                        fontSize: 14,
-                        fontFamily: "Inter_400Regular",
-                        color: colors.foreground,
-                        backgroundColor: colors.muted,
-                      }}
-                    />
-                  ) : (
-                    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
-                      {(rooms ?? []).map((r) => (
-                        <Pressable
-                          key={r.id}
-                          onPress={() => { setSelectedRoomId(r.id); setNewRoomName(""); }}
-                          style={[styles.chip, { backgroundColor: selectedRoomId === r.id ? colors.primary : colors.secondary }]}
-                        >
-                          <Text style={[styles.chipText, { color: selectedRoomId === r.id ? colors.primaryForeground : colors.foreground }]}>
-                            {r.name}
-                          </Text>
-                        </Pressable>
-                      ))}
-                    </ScrollView>
-                  )}
-                </View>
-              )
-            )}
-          </View>
         )}
 
         {/* Inline error */}
@@ -3106,25 +3032,30 @@ export default function ScanScreen() {
           </View>
         )}
 
-        {false ? (
-          <Pressable>
-            {false ? (
-              <>
-                <ActivityIndicator color={colors.primaryForeground} />
-                <Text style={[styles.scanBtnText, { color: colors.primaryForeground }]}>Scanning…</Text>
-              </>
-            ) : (
-              <>
-                <Feather name="zap" size={18} color={colors.mutedForeground} />
-                <Text style={[styles.scanBtnText, { color: colors.mutedForeground }]}>
-                  
-                </Text>
-              </>
-            )}
-          </Pressable>
-        ) : null}
-
       </ScrollView>
+
+      <PhotoScanCamera
+        visible={pendingPhotoCapture !== null}
+        mode={pendingPhotoCapture?.mode ?? null}
+        onCancel={cancelEmbeddedPhotoCapture}
+        onCaptured={handleEmbeddedPhotoCapture}
+        onError={(message) => {
+          photoCaptureSessionRef.current += 1;
+          setPendingPhotoCapture(null);
+          setScanError(message);
+        }}
+      />
+
+      <VideoScanRecorder
+        visible={videoRecorderVisible}
+        onCancel={cancelVideoCapture}
+        onRecorded={handleRecordedVideo}
+        onError={(message) => {
+          setVideoRecorderVisible(false);
+          setScanStatus("error");
+          setScanError(message || VIDEO_SCAN_START_ERROR);
+        }}
+      />
 
       <Modal
         visible={multiPhotoPromptVisible}
@@ -3232,20 +3163,18 @@ export default function ScanScreen() {
             },
           } as Href);
         }}
-        onDismiss={returnToScanTypeSelection}
+        onDismiss={dismissScanLimit}
       />
-    </>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
+  screen: { flex: 1 },
   scroll: { padding: 16, gap: 20 },
   section: { gap: 12 },
   sectionLabel: { fontSize: 11, fontFamily: "Inter_600SemiBold", letterSpacing: 0.8 },
-  fieldLabel: { fontSize: 12, fontFamily: "Inter_500Medium" },
   stepHeader: { gap: 8 },
-  stepBackButton: { flexDirection: "row", alignItems: "center", alignSelf: "flex-start", gap: 2 },
-  stepBackText: { fontSize: 13, fontFamily: "Inter_600SemiBold" },
   selectionRow: { borderWidth: 1, padding: 14, flexDirection: "row", alignItems: "center", gap: 12 },
   selectionTitle: { flex: 1, fontSize: 15, fontFamily: "Inter_600SemiBold" },
   emptyRoomCard: { borderWidth: 1, padding: 16, gap: 12 },
@@ -3270,8 +3199,6 @@ const styles = StyleSheet.create({
   modeSub: { fontSize: 13, fontFamily: "Inter_400Regular", lineHeight: 18 },
   modeCredit: { fontSize: 11, fontFamily: "Inter_500Medium", marginTop: 2 },
   soonBadge: { borderRadius: 4, paddingHorizontal: 5, paddingVertical: 2 },
-  chip: { borderRadius: 20, paddingHorizontal: 14, paddingVertical: 8 },
-  chipText: { fontSize: 13, fontFamily: "Inter_500Medium" },
   photoThumb: { width: 100, height: 100 },
   removeThumb: {
     position: "absolute", top: 4, right: 4,
@@ -3289,17 +3216,6 @@ const styles = StyleSheet.create({
   comingSoonTitle: { fontSize: 16, fontFamily: "Inter_600SemiBold", textAlign: "center" },
   comingSoonSub: { fontSize: 13, fontFamily: "Inter_400Regular", textAlign: "center", lineHeight: 20 },
   preparingScreen: { flex: 1, alignItems: "center", justifyContent: "center", padding: 24, gap: 10 },
-  preparingCancelButton: {
-    position: "absolute",
-    top: 52,
-    right: 18,
-    minHeight: 40,
-    paddingHorizontal: 12,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 5,
-  },
-  preparingCancelText: { fontSize: 14, fontFamily: "Inter_600SemiBold" },
   preparingTitle: { fontSize: 18, fontFamily: "Inter_700Bold", textAlign: "center" },
   preparingText: { fontSize: 13, lineHeight: 19, fontFamily: "Inter_400Regular", textAlign: "center" },
   videoHelper: { fontSize: 13, lineHeight: 18, fontFamily: "Inter_400Regular" },

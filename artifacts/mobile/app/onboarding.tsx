@@ -410,7 +410,9 @@ export default function OnboardingScreen() {
               </View>
               <View style={{ flex: 1, gap: 3 }}>
                 <Text style={styles.featureLabel}>Replacement pricing</Text>
-                <Text style={styles.featureDesc}>Find comparable NZ listings and keep your item values current.</Text>
+                <Text style={styles.featureDesc}>
+                  Find comparable local listings where supported and keep your item values current.
+                </Text>
               </View>
             </Animated.View>
           </View>

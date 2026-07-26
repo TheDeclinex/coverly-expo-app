@@ -29,7 +29,7 @@
       "buildNumber": "1",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
-        "NSMicrophoneUsageDescription": "Allow Coverly to use your microphone to add item details by voice."
+        "NSMicrophoneUsageDescription": "Allow Coverly to record room walkthrough videos and add item details by voice."
       }
     },
     "android": {
@@ -113,6 +113,13 @@
           "cameraPermission": "Allow Coverly to take property, room, item and evidence photos.",
           "photosPermission": "Allow Coverly to choose property, room, item and evidence photos.",
           "microphonePermission": "Allow Coverly to record room walkthrough videos for item scanning."
+        }
+      ],
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Allow Coverly to take property, room, item and evidence photos.",
+          "microphonePermission": "Allow Coverly to record room walkthrough videos and add item details by voice."
         }
       ],
       [

@@ -73,6 +73,7 @@
     "expo-network": "~8.0.8",
     "expo-video-thumbnails": "~10.0.8",
     "react-native-purchases": "^9.0.0",
-    "react-native-url-polyfill": "^3.0.0"
+    "react-native-url-polyfill": "^3.0.0",
+    "react-native-webview": "13.15.0"
   }
 }

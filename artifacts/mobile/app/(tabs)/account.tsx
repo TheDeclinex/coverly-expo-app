@@ -9,6 +9,7 @@ import { ActivityIndicator, Alert, Platform, Pressable, ScrollView, StyleSheet, 
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { AccountRow, AccountSection } from "@/components/AccountMenu";
+import { LegalDocumentModal } from "@/components/LegalDocumentModal";
 import { useAuth } from "@/context/AuthContext";
 import { useEntitlements } from "@/context/EntitlementsContext";
 import { useAccountProfile } from "@/hooks/useAccountProfile";
@@ -19,11 +20,12 @@ import {
   type UsageAllowance,
 } from "@/lib/usage-allowances";
 import {
+  COVERLY_LEGAL_DOCUMENTS,
+  type CoverlyLegalDocument,
+} from "@/lib/legal-links";
+import {
   usageWarningLevel,
 } from "@/lib/usage-allowances-model";
-
-const privacyUrl = process.env.EXPO_PUBLIC_PRIVACY_URL;
-const termsUrl = process.env.EXPO_PUBLIC_TERMS_URL;
 
 export default function AccountScreen() {
   const colors = useColors();
@@ -31,6 +33,7 @@ export default function AccountScreen() {
   const { session, signOut } = useAuth();
   const { profile, isAdmin, isLoading, isError } = useAccountProfile();
   const feedbackUnread = useFeedbackUnread();
+  const [legalDocument, setLegalDocument] = React.useState<CoverlyLegalDocument | null>(null);
   const {
     effectivePlan,
     purchaseLoading,
@@ -60,12 +63,15 @@ export default function AccountScreen() {
       ? Constants.platform?.android?.versionCode?.toString() ?? Constants.expoConfig?.android?.versionCode?.toString()
       : undefined);
 
-  const openLegal = async (url: string | undefined, label: string) => {
-    if (!url) return;
+  const openLegal = async (document: CoverlyLegalDocument) => {
+    if (Platform.OS !== "web") {
+      setLegalDocument(document);
+      return;
+    }
     try {
-      await WebBrowser.openBrowserAsync(url);
+      await WebBrowser.openBrowserAsync(document.url);
     } catch {
-      Alert.alert(`Unable to open ${label}`, "Please try again later.");
+      Alert.alert(`Unable to open ${document.title.toLowerCase()}`, "Please try again later.");
     }
   };
 
@@ -180,22 +186,18 @@ export default function AccountScreen() {
         )}
 
         <AccountSection title="About & legal">
-          {privacyUrl ? (
-            <AccountRow
-              icon="lock"
-              title="Privacy policy"
-              tone="green"
-              onPress={() => void openLegal(privacyUrl, "privacy policy")}
-            />
-          ) : null}
-          {termsUrl ? (
-            <AccountRow
-              icon="file-text"
-              title="Terms"
-              tone="green"
-              onPress={() => void openLegal(termsUrl, "terms")}
-            />
-          ) : null}
+          <AccountRow
+            icon="lock"
+            title="Privacy policy"
+            tone="green"
+            onPress={() => void openLegal(COVERLY_LEGAL_DOCUMENTS.privacy)}
+          />
+          <AccountRow
+            icon="file-text"
+            title="Terms"
+            tone="green"
+            onPress={() => void openLegal(COVERLY_LEGAL_DOCUMENTS.terms)}
+          />
           <AccountRow
             icon="trash-2"
             title="Request account deletion"
@@ -210,6 +212,7 @@ export default function AccountScreen() {
           <AccountRow icon="log-out" title="Sign out" tone="neutral" onPress={confirmSignOut} last />
         </AccountSection>
       </ScrollView>
+      <LegalDocumentModal document={legalDocument} onClose={() => setLegalDocument(null)} />
     </>
   );
 }

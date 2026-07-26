@@ -2,13 +2,18 @@ import { Feather } from "@expo/vector-icons";
 import { Stack, router, useLocalSearchParams } from "expo-router";
 import * as WebBrowser from "expo-web-browser";
 import React, { useEffect, useMemo, useState } from "react";
-import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Alert, Platform, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+import { LegalDocumentModal } from "@/components/LegalDocumentModal";
 import { useEntitlements } from "@/context/EntitlementsContext";
 import { useColors } from "@/hooks/useColors";
 import { usePropertyAllowance } from "@/hooks/usePropertyAllowance";
 import { type PurchasesPackage } from "@/lib/billing";
+import {
+  COVERLY_LEGAL_DOCUMENTS,
+  type CoverlyLegalDocument,
+} from "@/lib/legal-links";
 import {
   buildUpgradePackages,
   defaultBillingPeriod,
@@ -21,9 +26,6 @@ import {
   type UpgradeDisplayPackage,
   type UpgradePlanGroup,
 } from "@/lib/upgrade-model";
-
-const privacyUrl = process.env.EXPO_PUBLIC_PRIVACY_URL;
-const termsUrl = process.env.EXPO_PUBLIC_TERMS_URL;
 
 const planContent: Record<UpgradePlanGroup, {
   name: string;
@@ -256,6 +258,7 @@ export default function UpgradeScreen() {
     plus: "annual",
     family: "annual",
   });
+  const [legalDocument, setLegalDocument] = useState<CoverlyLegalDocument | null>(null);
   const purchaseActionLockRef = React.useRef(false);
 
   useEffect(() => {
@@ -296,10 +299,13 @@ export default function UpgradeScreen() {
     }
   };
 
-  const openLegal = async (url: string | undefined, label: string) => {
-    if (!url) return;
-    try { await WebBrowser.openBrowserAsync(url); }
-    catch { Alert.alert(`Unable to open ${label}`, "Please try again later."); }
+  const openLegal = async (document: CoverlyLegalDocument) => {
+    if (Platform.OS !== "web") {
+      setLegalDocument(document);
+      return;
+    }
+    try { await WebBrowser.openBrowserAsync(document.url); }
+    catch { Alert.alert(`Unable to open ${document.title.toLowerCase()}`, "Please try again later."); }
   };
 
   const currentPlanLabel = effectivePlan === "free"
@@ -378,13 +384,14 @@ export default function UpgradeScreen() {
       <View style={styles.footer}>
         <Text style={[styles.legalHeading, { color: colors.foreground }]}>Subscription terms</Text>
         <Text style={[styles.legal, { color: colors.mutedForeground }]}>Payment is charged to your Apple or Google account. Subscriptions renew unless cancelled and are managed through your store subscription settings.</Text>
-        {(privacyUrl || termsUrl) ? <View style={styles.legalLinks}>
-          {privacyUrl ? <Pressable accessibilityRole="link" onPress={() => void openLegal(privacyUrl, "privacy policy")}><Text style={[styles.legalLink, { color: colors.primary }]}>Privacy policy</Text></Pressable> : null}
-          {privacyUrl && termsUrl ? <Text style={[styles.legalDot, { color: colors.mutedForeground }]}>•</Text> : null}
-          {termsUrl ? <Pressable accessibilityRole="link" onPress={() => void openLegal(termsUrl, "terms")}><Text style={[styles.legalLink, { color: colors.primary }]}>Terms</Text></Pressable> : null}
-        </View> : null}
+        <View style={styles.legalLinks}>
+          <Pressable accessibilityRole="link" onPress={() => void openLegal(COVERLY_LEGAL_DOCUMENTS.privacy)}><Text style={[styles.legalLink, { color: colors.primary }]}>Privacy policy</Text></Pressable>
+          <Text style={[styles.legalDot, { color: colors.mutedForeground }]}>•</Text>
+          <Pressable accessibilityRole="link" onPress={() => void openLegal(COVERLY_LEGAL_DOCUMENTS.terms)}><Text style={[styles.legalLink, { color: colors.primary }]}>Terms</Text></Pressable>
+        </View>
       </View>
     </ScrollView>
+    <LegalDocumentModal document={legalDocument} onClose={() => setLegalDocument(null)} />
   </>;
 }
 
