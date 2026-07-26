@@ -57,12 +57,16 @@ serve(async (req: Request) => {
   if (!authHeader.startsWith("Bearer ")) {
     return response({ success: false, errorCode: "UNAUTHORIZED", error: "Missing auth token" }, 401);
   }
+  const accessToken = authHeader.replace(/^Bearer\s+/i, "").trim();
+  if (!accessToken) {
+    return response({ success: false, errorCode: "UNAUTHORIZED", error: "Missing auth token" }, 401);
+  }
 
   try {
     const authClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
       global: { headers: { Authorization: authHeader } },
     });
-    const { data, error } = await authClient.auth.getUser();
+    const { data, error } = await authClient.auth.getUser(accessToken);
     if (error || !data.user) {
       return response({ success: false, errorCode: "UNAUTHORIZED", error: "Invalid or expired session" }, 401);
     }
