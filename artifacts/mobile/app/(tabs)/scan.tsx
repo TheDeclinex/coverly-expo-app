@@ -216,6 +216,11 @@ interface PendingPhotoCapture {
   requestId: number;
 }
 
+interface PickImagesOptions {
+  preserveSessionOnCancel?: boolean;
+  onSelectionAccepted?: () => void;
+}
+
 interface PersistedAndroidScanState {
   version: 1;
   savedAt: number;
@@ -998,6 +1003,7 @@ export default function ScanScreen() {
   const pickImages = async (
     mode: ScanMode | null = selectedMode,
     existingImageCount = images.length,
+    options: PickImagesOptions = {},
   ) => {
     if (!mode) return;
     if (!selectedFileId || !selectedRoomId) {
@@ -1033,6 +1039,7 @@ export default function ScanScreen() {
       hasUri: !result.canceled && result.assets.some((asset) => !!asset.uri),
     });
     if (!result.canceled) {
+      options.onSelectionAccepted?.();
       let picked: ScanEncodedImage[];
       try {
         picked = await normalizeLibraryPickerAssets(result.assets);
@@ -1067,13 +1074,15 @@ export default function ScanScreen() {
     }
     if (result.canceled) {
       scanLog("image picker cancelled", { source: "library", mode });
-      clearCaptureState(
-        mode === "multi_photo_room"
-          ? "multi_photo_library_cancelled"
-          : mode === "single_item"
-            ? "single_item_library_cancelled"
-            : "single_photo_library_cancelled",
-      );
+      if (!options.preserveSessionOnCancel) {
+        clearCaptureState(
+          mode === "multi_photo_room"
+            ? "multi_photo_library_cancelled"
+            : mode === "single_item"
+              ? "single_item_library_cancelled"
+              : "single_photo_library_cancelled",
+        );
+      }
     }
   };
 
@@ -1178,6 +1187,20 @@ export default function ScanScreen() {
         mimeType: "image/jpeg",
       } as ImagePicker.ImagePickerAsset,
     );
+  };
+
+  const handleEmbeddedLibraryPick = async () => {
+    const request = pendingPhotoCapture;
+    if (!request || request.requestId !== photoCaptureSessionRef.current) return;
+
+    await pickImages(request.mode, images.length, {
+      preserveSessionOnCancel: true,
+      onSelectionAccepted: () => {
+        if (request.requestId !== photoCaptureSessionRef.current) return;
+        photoCaptureSessionRef.current += 1;
+        setPendingPhotoCapture(null);
+      },
+    });
   };
 
   const cancelEmbeddedPhotoCapture = () => {
@@ -3039,6 +3062,7 @@ export default function ScanScreen() {
         mode={pendingPhotoCapture?.mode ?? null}
         onCancel={cancelEmbeddedPhotoCapture}
         onCaptured={handleEmbeddedPhotoCapture}
+        onPickLibrary={handleEmbeddedLibraryPick}
         onError={(message) => {
           photoCaptureSessionRef.current += 1;
           setPendingPhotoCapture(null);

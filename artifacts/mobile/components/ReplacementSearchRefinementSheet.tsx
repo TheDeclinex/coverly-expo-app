@@ -137,9 +137,11 @@ export function ReplacementSearchRefinementSheet({
   const visibleRef = React.useRef(visible);
   const aiRequestSequence = React.useRef(0);
   const voiceRequestSequence = React.useRef(0);
+  const voiceResetRef = React.useRef(voice.reset);
   const aiFeedbackTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   draftRef.current = draft;
   visibleRef.current = visible;
+  voiceResetRef.current = voice.reset;
 
   const changeDraft = (nextDraft: ReplacementRefinementDraft) => {
     draftRef.current = nextDraft;
@@ -205,9 +207,9 @@ export function ReplacementSearchRefinementSheet({
       setAiLoading(false);
       setAiFeedback(false);
       setSubmitAttempted(false);
-      void voice.reset();
+      void voiceResetRef.current("sheet_closed");
     }
-  }, [visible, voice.reset]);
+  }, [visible]);
 
   React.useEffect(() => {
     mountedRef.current = true;
@@ -216,9 +218,9 @@ export function ReplacementSearchRefinementSheet({
       aiRequestSequence.current += 1;
       voiceRequestSequence.current += 1;
       clearAiFeedbackTimer();
-      void voice.reset();
+      void voiceResetRef.current("component_unmount");
     };
-  }, [voice.reset]);
+  }, []);
 
   React.useEffect(() => {
     if (voice.maxDurationReached && voice.isRecording) void finishVoiceRecording();
@@ -253,7 +255,7 @@ export function ReplacementSearchRefinementSheet({
     }
     const started = await voice.startRecording();
     if (!voiceRequestIsCurrent(requestId)) {
-      if (started) await voice.reset();
+      if (started) await voice.reset("stale_request_cleanup");
       return;
     }
     if (!started) {
@@ -270,7 +272,7 @@ export function ReplacementSearchRefinementSheet({
     setVoiceError(null);
     const recording = await voice.stopRecording();
     if (!voiceRequestIsCurrent(requestId)) {
-      await voice.reset();
+      await voice.reset("stale_request_cleanup");
       return;
     }
     if (!recording) {
@@ -315,14 +317,14 @@ export function ReplacementSearchRefinementSheet({
       }
     } finally {
       if (voiceRequestIsCurrent(requestId)) setVoiceProcessing(false);
-      await voice.reset();
+      await voice.reset("recording_complete");
     }
   };
 
   const dismissVoice = async () => {
     const requestId = voiceRequestSequence.current + 1;
     voiceRequestSequence.current = requestId;
-    await voice.reset();
+    await voice.reset("user_cancel");
     if (!voiceRequestIsCurrent(requestId)) return;
     setVoiceTarget(null);
     setVoiceProposal(null);
@@ -413,7 +415,7 @@ export function ReplacementSearchRefinementSheet({
     aiRequestSequence.current += 1;
     voiceRequestSequence.current += 1;
     clearAiFeedbackTimer();
-    void voice.reset();
+    void voice.reset("sheet_closed");
     onClose();
   };
 

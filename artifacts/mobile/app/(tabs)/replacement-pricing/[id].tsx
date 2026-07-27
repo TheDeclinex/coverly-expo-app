@@ -594,7 +594,7 @@ export default function ReplacementPricingScreen() {
       if (screenMountedRef.current && requestId === initialVoiceSequence.current) {
         setVoiceProcessing(false);
       }
-      await resetVoiceRecording();
+      await resetVoiceRecording("recording_complete");
     }
   }, [item?.category, item?.name, resetVoiceRecording, searchQuery, stopVoiceRecording]);
 
@@ -628,7 +628,7 @@ export default function ReplacementPricingScreen() {
     try {
       const started = await startVoiceRecording();
       if (!screenMountedRef.current || requestId !== initialVoiceSequence.current) {
-        if (started) await resetVoiceRecordingRef.current();
+        if (started) await resetVoiceRecordingRef.current("stale_request_cleanup");
         return;
       }
       if (!started) {
@@ -663,7 +663,7 @@ export default function ReplacementPricingScreen() {
       initialVoiceSequence.current += 1;
       activeSearchSequence.current += 1;
       searchAttemptInFlight.current = false;
-      void resetVoiceRecordingRef.current();
+      void resetVoiceRecordingRef.current("component_unmount");
       refinedAbortController.current?.abort();
     };
   }, []);

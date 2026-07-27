@@ -118,7 +118,9 @@ export interface VoiceMappedChange {
 export type VoiceInputPhase =
   | "permission"
   | "ready"
+  | "starting"
   | "recording"
+  | "stopping"
   | "processing"
   | "review"
   | "error";

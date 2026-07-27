@@ -1,5 +1,5 @@
 import { Feather } from "@expo/vector-icons";
-import React, { useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   AppState,
@@ -41,6 +41,7 @@ export function VoiceInputSheet({
   currentValues = {},
   context = {},
   onClose,
+  onDismiss,
   onApply,
 }: {
   visible: boolean;
@@ -49,6 +50,7 @@ export function VoiceInputSheet({
   currentValues?: Partial<VoiceItemValues>;
   context?: VoiceContext;
   onClose: () => void;
+  onDismiss?: () => void;
   onApply: (patch: VoiceItemPatch, transcript: string, changes: VoiceMappedChange[]) => void | Promise<void>;
 }) {
   const colors = useColors();
@@ -64,17 +66,11 @@ export function VoiceInputSheet({
   const phaseRef = useRef<VoiceInputPhase>("permission");
   const appStateRef = useRef<AppStateStatus>(AppState.currentState);
   const permissionRefreshInFlightRef = useRef(false);
+  const permissionRequestActiveRef = useRef(false);
+  const sheetRequestSequenceRef = useRef(0);
 
-  useEffect(() => {
-    visibleRef.current = visible;
-    return () => {
-      visibleRef.current = false;
-    };
-  }, [visible]);
-
-  useEffect(() => {
-    phaseRef.current = phase;
-  }, [phase]);
+  visibleRef.current = visible;
+  phaseRef.current = phase;
 
   useEffect(() => {
     const subscription = AppState.addEventListener("change", (nextState) => {
@@ -83,6 +79,8 @@ export function VoiceInputSheet({
       const returnedToForeground = nextState === "active" && previousState !== "active";
       const currentPhase = phaseRef.current;
       const shouldPreservePhase = currentPhase === "recording"
+        || currentPhase === "starting"
+        || currentPhase === "stopping"
         || currentPhase === "processing"
         || currentPhase === "review";
 
@@ -90,6 +88,7 @@ export function VoiceInputSheet({
         !returnedToForeground
         || !visibleRef.current
         || shouldPreservePhase
+        || permissionRequestActiveRef.current
         || permissionRefreshInFlightRef.current
       ) {
         return;
@@ -118,9 +117,17 @@ export function VoiceInputSheet({
   }, [voice.checkPermission]);
 
   useEffect(() => {
-    if (!visible) return;
+    if (!visible) {
+      sheetRequestSequenceRef.current += 1;
+      processingRef.current = false;
+      permissionRequestActiveRef.current = false;
+      permissionRefreshInFlightRef.current = false;
+      void voice.reset("sheet_closed");
+      return;
+    }
     if (permissionRefreshInFlightRef.current) return;
-    let cancelled = false;
+    const requestId = sheetRequestSequenceRef.current + 1;
+    sheetRequestSequenceRef.current = requestId;
     permissionRefreshInFlightRef.current = true;
     setPhase("permission");
     setTranscript("");
@@ -129,38 +136,41 @@ export function VoiceInputSheet({
     setErrorMessage(null);
     void voice.checkPermission()
       .then((granted) => {
-        if (!cancelled && visibleRef.current) setPhase(granted ? "ready" : "permission");
+        if (visibleRef.current && requestId === sheetRequestSequenceRef.current) {
+          setPhase(granted ? "ready" : "permission");
+        }
       })
       .catch(() => {
-        if (!cancelled && visibleRef.current) {
+        if (visibleRef.current && requestId === sheetRequestSequenceRef.current) {
           setPhase("error");
           setErrorMessage(VOICE_EDIT_FALLBACK_MESSAGE);
         }
       })
       .finally(() => {
-        permissionRefreshInFlightRef.current = false;
+        if (requestId === sheetRequestSequenceRef.current) {
+          permissionRefreshInFlightRef.current = false;
+        }
       });
-    return () => {
-      cancelled = true;
-    };
-  }, [visible, voice.checkPermission]);
+  }, [visible, voice.checkPermission, voice.reset]);
 
-  const closeAndClean = async () => {
+  const closeAndClean = useCallback(() => {
+    sheetRequestSequenceRef.current += 1;
     processingRef.current = false;
-    try {
-      await voice.reset();
-    } finally {
-      onClose();
-    }
-  };
+    permissionRequestActiveRef.current = false;
+    permissionRefreshInFlightRef.current = false;
+    onClose();
+    void voice.reset("user_cancel");
+  }, [onClose, voice.reset]);
 
   const requestPermission = async () => {
-    if (voice.isRequestingPermission) return;
+    if (voice.isRequestingPermission || permissionRequestActiveRef.current) return;
+    const requestId = sheetRequestSequenceRef.current;
+    permissionRequestActiveRef.current = true;
     voice.logDiagnostic("voice_permission_button_pressed");
     setErrorMessage(null);
     try {
       const granted = await voice.requestPermission();
-      if (!visibleRef.current) return;
+      if (!visibleRef.current || requestId !== sheetRequestSequenceRef.current) return;
       if (granted) setPhase("ready");
       else {
         setPhase("permission");
@@ -171,20 +181,31 @@ export function VoiceInputSheet({
         setPhase("error");
         setErrorMessage(VOICE_EDIT_FALLBACK_MESSAGE);
       }
+    } finally {
+      if (requestId === sheetRequestSequenceRef.current) {
+        permissionRequestActiveRef.current = false;
+      }
     }
   };
 
   const startRecording = async () => {
     if (voice.isStartingRecording || voice.isRecording) return;
+    const requestId = sheetRequestSequenceRef.current;
     setErrorMessage(null);
     if (voice.permission !== "granted") {
       setPhase("permission");
       setErrorMessage(VOICE_EDIT_FALLBACK_MESSAGE);
       return;
     }
+    setPhase("starting");
     try {
-      if (await voice.startRecording()) {
-        if (visibleRef.current) setPhase("recording");
+      const started = await voice.startRecording();
+      if (!visibleRef.current || requestId !== sheetRequestSequenceRef.current) {
+        if (started) await voice.reset("stale_request_cleanup");
+        return;
+      }
+      if (started) {
+        setPhase("recording");
       }
       else {
         setPhase("error");
@@ -200,25 +221,27 @@ export function VoiceInputSheet({
 
   const stopAndProcess = async () => {
     if (processingRef.current) return;
+    const requestId = sheetRequestSequenceRef.current;
     processingRef.current = true;
-    setPhase("processing");
+    setPhase("stopping");
     setErrorMessage(null);
     try {
       const recording = await voice.stopRecording();
-      if (!visibleRef.current) return;
+      if (!visibleRef.current || requestId !== sheetRequestSequenceRef.current) return;
       if (!recording) {
         setPhase("error");
         setErrorMessage(VOICE_EDIT_FALLBACK_MESSAGE);
         return;
       }
 
+      setPhase("processing");
       const result = await callVoiceDescribe(recording, {
         ...context,
         mode: "item_edit",
         targetField,
         currentValues,
       });
-      if (!visibleRef.current) return;
+      if (!visibleRef.current || requestId !== sheetRequestSequenceRef.current) return;
 
       if (!result.response) {
         setPhase("error");
@@ -257,7 +280,9 @@ export function VoiceInputSheet({
         setErrorMessage(VOICE_EDIT_FALLBACK_MESSAGE);
       }
     } finally {
-      processingRef.current = false;
+      if (requestId === sheetRequestSequenceRef.current) {
+        processingRef.current = false;
+      }
     }
   };
 
@@ -297,9 +322,9 @@ export function VoiceInputSheet({
   };
 
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={() => void closeAndClean()}>
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={closeAndClean} onDismiss={onDismiss}>
       <View style={styles.modalRoot}>
-        <Pressable accessibilityLabel="Close voice input" style={styles.backdrop} onPress={() => void closeAndClean()} />
+        <Pressable accessibilityLabel="Close voice input" style={styles.backdrop} onPress={closeAndClean} />
         <View style={[styles.sheet, { backgroundColor: colors.card, paddingBottom: insets.bottom + 16 }]}>
           <View style={[styles.handle, { backgroundColor: colors.border }]} />
           <View style={styles.header}>
@@ -307,7 +332,7 @@ export function VoiceInputSheet({
               <Text style={[styles.title, { color: colors.foreground }]}>{title}</Text>
               <Text style={[styles.subtitle, { color: colors.mutedForeground }]}>Nothing changes until you review and apply it.</Text>
             </View>
-            <Pressable accessibilityRole="button" accessibilityLabel="Close voice input" onPress={() => void closeAndClean()} hitSlop={10}>
+            <Pressable accessibilityRole="button" accessibilityLabel="Close voice input" onPress={closeAndClean} hitSlop={10}>
               <Feather name="x" size={20} color={colors.mutedForeground} />
             </Pressable>
           </View>
@@ -346,6 +371,18 @@ export function VoiceInputSheet({
               </View>
             )}
 
+            {(phase === "starting" || phase === "stopping") && (
+              <View style={styles.centerState}>
+                <ActivityIndicator size="large" color={colors.primary} />
+                <Text style={[styles.stateTitle, { color: colors.foreground }]}>
+                  {phase === "starting" ? "Starting voice input" : "Finishing recording"}
+                </Text>
+                <Text style={[styles.stateText, { color: colors.mutedForeground }]}>
+                  {phase === "starting" ? "Preparing the microphone…" : "Saving your recording…"}
+                </Text>
+              </View>
+            )}
+
             {phase === "recording" && (
               <View style={styles.centerState}>
                 <View style={[styles.recordingDot, { backgroundColor: colors.destructive }]} />
@@ -380,7 +417,10 @@ export function VoiceInputSheet({
                     <Text style={[styles.errorTranscriptText, { color: colors.foreground }]}>{transcript}</Text>
                   </View>
                 ) : null}
-                <PrimaryButton label="Try again" onPress={() => { setPhase("ready"); setErrorMessage(null); }} />
+                <PrimaryButton label="Try again" onPress={() => { setPhase(voice.permission === "granted" ? "ready" : "permission"); setErrorMessage(null); }} />
+                <Pressable accessibilityRole="button" onPress={closeAndClean} style={[styles.secondaryCloseButton, { borderColor: colors.border }]}>
+                  <Text style={[styles.secondaryText, { color: colors.foreground }]}>Close voice input</Text>
+                </Pressable>
               </View>
             )}
 
@@ -391,7 +431,7 @@ export function VoiceInputSheet({
 
           {phase === "review" && (
             <View style={[styles.footer, { borderTopColor: colors.border }]}>
-              <Pressable onPress={() => void closeAndClean()} style={[styles.secondaryButton, { borderColor: colors.border }]}>
+              <Pressable onPress={closeAndClean} style={[styles.secondaryButton, { borderColor: colors.border }]}>
                 <Text style={[styles.secondaryText, { color: colors.foreground }]}>Cancel</Text>
               </Pressable>
               <Pressable
@@ -460,6 +500,7 @@ const styles = StyleSheet.create({
   primaryText: { fontSize: 14, fontFamily: "Inter_600SemiBold" },
   footer: { flexDirection: "row", gap: 10, borderTopWidth: 1, paddingHorizontal: 18, paddingTop: 12 },
   secondaryButton: { flex: 1, borderWidth: 1, borderRadius: 12, paddingVertical: 12, alignItems: "center" },
+  secondaryCloseButton: { minWidth: 170, borderWidth: 1, borderRadius: 12, paddingHorizontal: 18, paddingVertical: 12, alignItems: "center" },
   secondaryText: { fontSize: 14, fontFamily: "Inter_600SemiBold" },
   applyButton: { flex: 2, borderRadius: 12, paddingVertical: 12, alignItems: "center" },
   applyText: { fontSize: 14, fontFamily: "Inter_600SemiBold" },

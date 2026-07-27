@@ -241,6 +241,7 @@ function ItemCard({
   const [savingCard, setSavingCard] = useState(false);
   const [barcodeScanOpen, setBarcodeScanOpen] = useState(false);
   const [voiceEditOpen, setVoiceEditOpen] = useState(false);
+  const [quickEditSuspendedForVoice, setQuickEditSuspendedForVoice] = useState(false);
   const displayCurrency = resolveStoredValueCurrency(item.estimated_currency, currencyCode);
 
   useEffect(() => {
@@ -432,6 +433,51 @@ function ItemCard({
     if (typeof replacementPrice === "number" && Number.isFinite(replacementPrice) && replacementPrice >= 0) {
       setUnitPriceDraft(String(replacementPrice));
     }
+  };
+
+  const openQuickEditVoice = () => {
+    Keyboard.dismiss();
+    if (Platform.OS !== "ios") {
+      setVoiceEditOpen(true);
+      return;
+    }
+    if (quickEditSuspendedForVoice || voiceEditOpen) return;
+    if (__DEV__) {
+      console.info("[voice]", {
+        stage: "quick_edit_dismiss_for_voice",
+        platform: Platform.OS,
+        entryPoint: "room_item_card_quick_edit",
+      });
+    }
+    setQuickEditSuspendedForVoice(true);
+  };
+
+  const handleQuickEditModalDismissed = () => {
+    if (Platform.OS !== "ios" || !quickEditSuspendedForVoice) return;
+    if (!editingTarget) {
+      setQuickEditSuspendedForVoice(false);
+      return;
+    }
+    if (__DEV__) {
+      console.info("[voice]", {
+        stage: "quick_edit_dismissed_voice_present",
+        platform: Platform.OS,
+        entryPoint: "room_item_card_quick_edit",
+      });
+    }
+    setVoiceEditOpen(true);
+  };
+
+  const handleQuickEditVoiceDismissed = () => {
+    if (Platform.OS !== "ios" || !quickEditSuspendedForVoice) return;
+    if (__DEV__) {
+      console.info("[voice]", {
+        stage: "voice_dismissed_quick_edit_resume",
+        platform: Platform.OS,
+        entryPoint: "room_item_card_quick_edit",
+      });
+    }
+    setQuickEditSuspendedForVoice(false);
   };
 
   const goToDetail = async () => {
@@ -868,10 +914,11 @@ function ItemCard({
       ) : null}
       </View>
       <Modal
-        visible={editingTarget !== null}
+        visible={editingTarget !== null && !quickEditSuspendedForVoice}
         transparent
         animationType="fade"
         onRequestClose={cancelEdit}
+        onDismiss={handleQuickEditModalDismissed}
       >
         <Pressable style={styles.nameModalBackdrop} onPress={cancelEdit}>
           <View
@@ -890,7 +937,7 @@ function ItemCard({
               <Pressable
                 accessibilityRole="button"
                 accessibilityLabel="Update quick-edit fields with voice"
-                onPress={() => setVoiceEditOpen(true)}
+                onPress={openQuickEditVoice}
                 style={[styles.quickEditVoiceButton, { backgroundColor: colors.secondary }]}
               >
                 <Feather name="mic" size={15} color={colors.primary} />
@@ -1003,6 +1050,7 @@ function ItemCard({
         }}
         context={{ currentName: nameDraft }}
         onClose={() => setVoiceEditOpen(false)}
+        onDismiss={handleQuickEditVoiceDismissed}
         onApply={applyVoicePatchToQuickEdit}
       />
       <BarcodeScanFlow
