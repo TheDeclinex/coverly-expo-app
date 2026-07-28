@@ -25,8 +25,12 @@ import {
   authLinkFingerprint,
   establishAuthLinkSession,
   parseAuthLink,
-  passwordValidationError,
 } from "@/lib/auth-links";
+import {
+  NEW_PASSWORD_REQUIREMENTS_MESSAGE,
+  newPasswordAuthErrorMessage,
+  newPasswordValidationError,
+} from "@/lib/password-policy";
 import { supabase } from "@/lib/supabase";
 
 const RECOVERY_LINK_KEY = "@coverly/active-recovery-link";
@@ -80,8 +84,15 @@ export default function ResetPasswordScreen() {
     };
   }, [incomingUrl]);
 
-  const validationError = password || confirmation ? passwordValidationError(password, confirmation) : null;
-  const canSubmit = state === "ready" && !submitting && password.length >= 8 && password === confirmation;
+  const passwordError = password ? newPasswordValidationError(password) : null;
+  const confirmationError = confirmation && password !== confirmation ? "Passwords do not match." : null;
+  const validationError = passwordError ?? confirmationError;
+  const canSubmit =
+    state === "ready" &&
+    !submitting &&
+    password.length > 0 &&
+    !passwordError &&
+    password === confirmation;
 
   const submit = async () => {
     if (!canSubmit) return;
@@ -90,7 +101,10 @@ export default function ResetPasswordScreen() {
     const { error } = await supabase.auth.updateUser({ password });
     if (error) {
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-      setMessage("We couldn't update your password. The reset link may have expired; request a new link and try again.");
+      setMessage(
+        newPasswordAuthErrorMessage(error) ??
+          "We couldn't update your password. The reset link may have expired; request a new link and try again.",
+      );
       setSubmitting(false);
       return;
     }
@@ -144,7 +158,7 @@ export default function ResetPasswordScreen() {
             ) : (
               <>
                 <Text style={styles.title}>Set a new password</Text>
-                <Text style={styles.body}>Choose a password with at least 8 characters.</Text>
+                <Text style={styles.body}>{NEW_PASSWORD_REQUIREMENTS_MESSAGE}</Text>
                 <PasswordField
                   label="New password"
                   value={password}

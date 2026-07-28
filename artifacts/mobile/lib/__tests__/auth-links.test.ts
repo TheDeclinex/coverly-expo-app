@@ -8,8 +8,12 @@ import {
   authLinkFingerprint,
   normalizeAuthEmail,
   parseAuthLink,
-  passwordValidationError,
 } from "../auth-link-model.ts";
+import {
+  NEW_PASSWORD_POLICY_ERROR,
+  newPasswordAuthErrorMessage,
+  newPasswordValidationError,
+} from "../password-policy.ts";
 
 const testDirectory = dirname(fileURLToPath(import.meta.url));
 const readFromTestDirectory = (relativePath: string) => readFileSync(resolve(testDirectory, relativePath), "utf8");
@@ -39,10 +43,27 @@ test("recognises malformed links without exposing credentials in fingerprints", 
   assert.doesNotMatch(authLinkFingerprint(url), /invalid|email|token/i);
 });
 
-test("applies Coverly's existing eight-character password policy", () => {
-  assert.equal(passwordValidationError("short", "short"), "Password must be at least 8 characters.");
-  assert.equal(passwordValidationError("long-enough", "different"), "Passwords do not match.");
-  assert.equal(passwordValidationError("long-enough", "long-enough"), null);
+test("rejects new passwords that do not meet every Coverly requirement", () => {
+  assert.equal(newPasswordValidationError("abcdefgh"), "Password must include an uppercase letter.");
+  assert.equal(newPasswordValidationError("Abcdefgh"), "Password must include a number.");
+  assert.equal(newPasswordValidationError("Abcdefg1"), "Password must include a special character.");
+  assert.equal(newPasswordValidationError("abcdef1!"), "Password must include an uppercase letter.");
+  assert.equal(newPasswordValidationError("ABCDEFG1!"), "Password must include a lowercase letter.");
+  assert.equal(newPasswordValidationError("Ab1!"), "Password must be at least 8 characters.");
+});
+
+test("accepts new passwords that meet every Coverly requirement", () => {
+  for (const password of ["Abcdefg1!", "Coverly1!", "Secure123!", "MyHome26#"]) {
+    assert.equal(newPasswordValidationError(password), null);
+  }
+});
+
+test("maps Supabase weak-password failures to Coverly's policy guidance", () => {
+  assert.equal(
+    newPasswordAuthErrorMessage({ code: "weak_password", message: "Password should be stronger" }),
+    NEW_PASSWORD_POLICY_ERROR,
+  );
+  assert.equal(newPasswordAuthErrorMessage({ code: "unexpected", message: "Network request failed" }), null);
 });
 
 test("normalises auth email input before requests", () => {
@@ -85,6 +106,23 @@ test("auth submissions always release loading and do not render raw provider err
   assert.match(loginSource, /const handleSignUp = async \(\) => \{[\s\S]*finally \{[\s\S]*setLoading\(false\)/);
   assert.match(loginSource, /const handleForgotPassword = async \(\) => \{[\s\S]*finally \{[\s\S]*setLoading\(false\)/);
   assert.doesNotMatch(loginSource, /setError\(authError\.message\)/);
+});
+
+test("login sends existing passwords to Supabase without applying the new-password validator", () => {
+  const loginSource = readFromTestDirectory("../../app/login.tsx");
+  const loginHandler = loginSource.match(
+    /const handleLogin = async \(\) => \{[\s\S]*?const handleSignUp = async \(\) => \{/,
+  )?.[0];
+  assert.ok(loginHandler);
+  assert.match(loginHandler, /signInWithPassword\(\{[\s\S]*password/);
+  assert.doesNotMatch(loginHandler, /newPasswordValidationError/);
+  assert.notEqual(newPasswordValidationError("appletree"), null);
+});
+
+test("checked-in Supabase config enforces the native new-password policy", () => {
+  const configSource = readFromTestDirectory("../../../../supabase/config.toml");
+  assert.match(configSource, /minimum_password_length = 8/);
+  assert.match(configSource, /password_requirements = "lower_upper_letters_digits_symbols"/);
 });
 
 test("auth routes keep recovery on its dedicated screen and wait for onboarding before entry", () => {

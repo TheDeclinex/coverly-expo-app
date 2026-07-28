@@ -33,6 +33,11 @@ import {
   anonKey,
 } from "@/lib/supabase";
 import { EMAIL_VERIFIED_URL, normalizeAuthEmail, PASSWORD_RESET_URL } from "@/lib/auth-links";
+import {
+  NEW_PASSWORD_REQUIREMENTS_MESSAGE,
+  newPasswordAuthErrorMessage,
+  newPasswordValidationError,
+} from "@/lib/password-policy";
 
 // ─── Design tokens ────────────────────────────────────────────────────────────
 const HERO_TEXT   = coverlyBrand.navy;
@@ -259,8 +264,9 @@ export default function LoginScreen() {
       setError("Passwords do not match.");
       return;
     }
-    if (password.length < 8) {
-      setError("Password must be at least 8 characters.");
+    const passwordError = newPasswordValidationError(password);
+    if (passwordError) {
+      setError(passwordError);
       return;
     }
     setLoading(true);
@@ -273,7 +279,10 @@ export default function LoginScreen() {
       });
       if (authError) {
         await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-        setError("We couldn't create your account. Check your details and try again.");
+        setError(
+          newPasswordAuthErrorMessage(authError) ??
+            "We couldn't create your account. Check your details and try again.",
+        );
       } else if (data.session) {
         await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       } else {
@@ -536,6 +545,11 @@ export default function LoginScreen() {
                         <Feather name={showPassword ? "eye-off" : "eye"} size={18} color={coverlyBrand.mutedText} />
                       </Pressable>
                     </View>
+                    {isSignUp ? (
+                      <Text style={[styles.passwordHint, { color: coverlyBrand.mutedText }]}>
+                        {NEW_PASSWORD_REQUIREMENTS_MESSAGE}
+                      </Text>
+                    ) : null}
                   </>
                 )}
 
@@ -769,6 +783,7 @@ const styles = StyleSheet.create({
   inputRow:  { flexDirection: "row", alignItems: "center", borderWidth: 1.4, borderRadius: 12, paddingHorizontal: 13, height: 46 },
   inputIcon: { marginRight: 10 },
   input:     { flex: 1, fontSize: 16, fontFamily: "Inter_400Regular", paddingVertical: 0 },
+  passwordHint: { fontSize: 12, fontFamily: "Inter_400Regular", lineHeight: 17, marginTop: 6 },
   eyeBtn:    { padding: 4 },
 
   errorBox:  { backgroundColor: "#FEF2F2", borderRadius: 8, padding: 12, marginTop: 14, flexDirection: "row", alignItems: "center", gap: 8 },

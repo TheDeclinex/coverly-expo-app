@@ -4,7 +4,6 @@ import {
   authLinkFingerprint,
   normalizeAuthEmail,
   parseAuthLink,
-  passwordValidationError,
   type ParsedAuthLink,
 } from "@/lib/auth-link-model";
 import { supabase } from "@/lib/supabase";
@@ -13,7 +12,6 @@ export {
   authLinkFingerprint,
   normalizeAuthEmail,
   parseAuthLink,
-  passwordValidationError,
 } from "@/lib/auth-link-model";
 export type { ParsedAuthLink } from "@/lib/auth-link-model";
 

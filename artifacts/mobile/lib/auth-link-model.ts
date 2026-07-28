@@ -53,12 +53,6 @@ export function authLinkFingerprint(url: string): string {
   return (hash >>> 0).toString(16).padStart(8, "0");
 }
 
-export function passwordValidationError(password: string, confirmation: string): string | null {
-  if (password.length < 8) return "Password must be at least 8 characters.";
-  if (password !== confirmation) return "Passwords do not match.";
-  return null;
-}
-
 export function normalizeAuthEmail(email: string): string {
   return email.trim().toLowerCase();
 }
