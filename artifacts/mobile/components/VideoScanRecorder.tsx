@@ -4,6 +4,7 @@ import {
   useCameraPermissions,
   useMicrophonePermissions,
 } from "expo-camera";
+import { LinearGradient } from "expo-linear-gradient";
 import React from "react";
 import {
   ActivityIndicator,
@@ -276,7 +277,11 @@ export function VideoScanRecorder({
         </View>
 
         {visible && permissionsGranted ? (
-          <View style={[styles.controls, { paddingBottom: insets.bottom + 24 }]}>
+          <LinearGradient
+            colors={["rgba(7,27,29,0)", "rgba(7,27,29,0.78)"]}
+            locations={[0, 0.32]}
+            style={[styles.controls, { paddingBottom: insets.bottom + 8 }]}
+          >
             <View style={styles.limitCard}>
               <Text style={styles.limitTitle}>
                 {phase === "recording"
@@ -295,15 +300,18 @@ export function VideoScanRecorder({
                 accessibilityRole="button"
                 accessibilityLabel="Stop video recording"
                 onPress={() => requestStop("manual")}
-                style={({ pressed }) => [styles.recordButton, styles.stopButton, { opacity: pressed ? 0.8 : 1 }]}
+                style={({ pressed }) => [
+                  styles.recordControlOuter,
+                  { opacity: pressed ? 0.78 : 1 },
+                ]}
               >
-                <View style={styles.stopSquare} />
-                <Text style={styles.recordButtonText}>Stop</Text>
+                <View style={styles.stopControlInner}>
+                  <View style={styles.stopSquare} />
+                </View>
               </Pressable>
             ) : phase === "stopping" ? (
-              <View style={[styles.recordButton, styles.stoppingButton]}>
+              <View style={[styles.recordControlOuter, styles.stoppingControl]}>
                 <ActivityIndicator color="#FFFFFF" />
-                <Text style={styles.recordButtonText}>Finishing</Text>
               </View>
             ) : (
               <Pressable
@@ -312,15 +320,18 @@ export function VideoScanRecorder({
                 disabled={!cameraReady}
                 onPress={() => void startRecording()}
                 style={({ pressed }) => [
-                  styles.recordButton,
+                  styles.recordControlOuter,
                   { opacity: !cameraReady || pressed ? 0.68 : 1 },
                 ]}
               >
-                {!cameraReady ? <ActivityIndicator color="#FFFFFF" /> : <View style={styles.recordDot} />}
-                <Text style={styles.recordButtonText}>{cameraReady ? "Start recording" : "Starting camera"}</Text>
+                {!cameraReady ? (
+                  <ActivityIndicator color="#FFFFFF" />
+                ) : (
+                  <View style={styles.recordControlInner} />
+                )}
               </Pressable>
             )}
-          </View>
+          </LinearGradient>
         ) : null}
       </View>
     </Modal>
@@ -408,14 +419,13 @@ const styles = StyleSheet.create({
     right: 0,
     bottom: 0,
     alignItems: "center",
-    gap: 18,
+    gap: 8,
     paddingTop: 26,
     paddingHorizontal: 20,
-    backgroundColor: "rgba(7,27,29,0.78)",
   },
   limitCard: {
     alignItems: "center",
-    gap: 5,
+    gap: 2,
   },
   limitTitle: {
     fontSize: 18,
@@ -431,38 +441,38 @@ const styles = StyleSheet.create({
     color: "rgba(255,255,255,0.76)",
     textAlign: "center",
   },
-  recordButton: {
-    minWidth: 176,
-    height: 52,
-    paddingHorizontal: 22,
-    borderRadius: 26,
-    flexDirection: "row",
+  recordControlOuter: {
+    width: 68,
+    height: 68,
+    borderRadius: 34,
+    borderWidth: 4,
+    borderColor: "#FFFFFF",
     alignItems: "center",
     justifyContent: "center",
-    gap: 10,
+    backgroundColor: "rgba(255,255,255,0.18)",
+  },
+  recordControlInner: {
+    width: 50,
+    height: 50,
+    borderRadius: 25,
     backgroundColor: "#C73535",
   },
-  stopButton: {
-    backgroundColor: "#A82727",
+  stopControlInner: {
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#C73535",
   },
-  stoppingButton: {
-    backgroundColor: "rgba(255,255,255,0.2)",
-  },
-  recordDot: {
-    width: 15,
-    height: 15,
-    borderRadius: 8,
-    backgroundColor: "#FFFFFF",
+  stoppingControl: {
+    borderColor: "rgba(255,255,255,0.62)",
+    backgroundColor: "rgba(255,255,255,0.12)",
   },
   stopSquare: {
-    width: 14,
-    height: 14,
-    borderRadius: 2,
+    width: 18,
+    height: 18,
+    borderRadius: 3,
     backgroundColor: "#FFFFFF",
-  },
-  recordButtonText: {
-    fontSize: 15,
-    fontFamily: "Inter_700Bold",
-    color: "#FFFFFF",
   },
 });

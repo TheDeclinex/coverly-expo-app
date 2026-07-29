@@ -511,18 +511,6 @@ export default function ItemDetailScreen() {
           item={item}
           onClose={() => setBarcodeScanOpen(false)}
           onApply={handleApplyBarcode}
-          onTakePhoto={() => {
-            setBarcodeScanOpen(false);
-            router.push({
-              pathname: "/(tabs)/scan",
-              params: {
-                roomId: item.room_id ?? "",
-                roomName: roomName ?? item.room ?? "",
-                fileId: item.file_id,
-                fileName: fileName ?? "",
-              },
-            } as Href);
-          }}
         />
       ) : null}
     </>

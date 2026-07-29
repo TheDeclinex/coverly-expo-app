@@ -54,6 +54,20 @@ test("the in-app recorder has native and watchdog 10-second cutoffs with visible
   assert.doesNotMatch(scan, /videoMaxDuration:/);
 });
 
+test("the video recorder uses the Coverly camera overlay and circular record controls", () => {
+  const recorder = read("components/VideoScanRecorder.tsx");
+
+  assert.match(recorder, /<LinearGradient[\s\S]*styles\.controls/);
+  assert.match(recorder, /colors=\{\["rgba\(7,27,29,0\)", "rgba\(7,27,29,0\.78\)"\]\}/);
+  assert.match(recorder, /paddingBottom: insets\.bottom \+ 8/);
+  assert.match(recorder, /recordControlOuter:[\s\S]*width: 68,[\s\S]*height: 68/);
+  assert.match(recorder, /recordControlInner:[\s\S]*width: 50,[\s\S]*height: 50/);
+  assert.match(recorder, /accessibilityLabel="Start video recording"/);
+  assert.match(recorder, /accessibilityLabel="Stop video recording"/);
+  assert.match(recorder, /stopControlInner[\s\S]*stopSquare/);
+  assert.doesNotMatch(recorder, /minWidth: 176/);
+});
+
 test("recorded video continues directly into the existing frame extraction and scan workflow", () => {
   const scan = read("app/(tabs)/scan.tsx");
 

@@ -1058,10 +1058,6 @@ function ItemCard({
         item={item}
         onClose={() => setBarcodeScanOpen(false)}
         onApply={applyBarcodeMatch}
-        onTakePhoto={() => {
-          setBarcodeScanOpen(false);
-          void onScanRoom();
-        }}
       />
     </>
   );

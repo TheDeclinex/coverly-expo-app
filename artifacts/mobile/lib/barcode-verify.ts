@@ -21,6 +21,7 @@ function describeErrorContext(context: unknown): unknown {
 
 export interface BarcodeVerifyRequest {
   barcode: string;
+  barcodeFormat?: string;
   itemName?: string;
   category?: string;
   itemId?: string;
@@ -45,6 +46,7 @@ export interface BarcodeVerifySuccess {
   confidence: number;
   source: "gpt_vision" | "supplied";
   context?: { countryCode: string; currencyCode: string };
+  diagnostics?: BarcodeDiagnostics;
 }
 
 export interface BarcodeVerifyFailure {
@@ -52,6 +54,21 @@ export interface BarcodeVerifyFailure {
   errorCode: string;
   error: string;
   barcode?: string | null;
+  diagnostics?: BarcodeDiagnostics;
+}
+
+export interface BarcodeDiagnostics {
+  rawScannedBarcode?: string | null;
+  detectedBarcodeFormat?: string | null;
+  normalizedBarcode?: string | null;
+  normalizedBarcodeKind?: string;
+  providerPlan?: "trial" | "paid";
+  providerHttpStatus?: number;
+  providerResponseCode?: string | null;
+  providerResultCount?: number | null;
+  providerRateLimitRemaining?: string | null;
+  providerRateLimitReset?: string | null;
+  coverlyParseOutcome?: string;
 }
 
 export type BarcodeVerifyResponse = BarcodeVerifySuccess | BarcodeVerifyFailure;
@@ -70,6 +87,8 @@ export async function verifyBarcode(
   const session = sessionData.session;
   const diagnostic = {
     operation: "barcode_verify",
+    rawScannedBarcode: request.barcode,
+    detectedBarcodeFormat: request.barcodeFormat ?? null,
     barcodePresent: Boolean(request.barcode),
     barcodeLength: request.barcode.length,
     functionName: BARCODE_FUNCTION_NAME,
@@ -99,12 +118,26 @@ export async function verifyBarcode(
 
   if (error) {
     const errorWithContext = error as typeof error & { context?: unknown };
+    const context = errorWithContext.context;
+    let functionFailure: BarcodeVerifyFailure | null = null;
+    if (context && typeof context === "object" && "json" in context && typeof context.json === "function") {
+      try {
+        const body = await context.json();
+        if (body && typeof body === "object" && (body as { success?: unknown }).success === false) {
+          functionFailure = body as BarcodeVerifyFailure;
+        }
+      } catch {
+        // The response was not JSON; the generic Supabase function error below is retained.
+      }
+    }
     if (__DEV__) console.warn("[barcodeVerify] request failed", {
       ...diagnostic,
       errorName: error.name,
       errorMessage: error.message,
       errorContext: describeErrorContext(errorWithContext.context),
+      functionErrorCode: functionFailure?.errorCode ?? null,
     });
+    if (functionFailure) return functionFailure;
     throw new Error(error.message || "Barcode lookup failed.");
   }
   if (!data) {
@@ -115,6 +148,14 @@ export async function verifyBarcode(
     ...diagnostic,
     success: data.success,
     errorCode: data.success ? null : data.errorCode,
+    normalizedBarcode: data.diagnostics?.normalizedBarcode ?? null,
+    normalizedBarcodeKind: data.diagnostics?.normalizedBarcodeKind ?? null,
+    providerPlan: data.diagnostics?.providerPlan ?? null,
+    providerHttpStatus: data.diagnostics?.providerHttpStatus ?? null,
+    providerResponseCode: data.diagnostics?.providerResponseCode ?? null,
+    providerResultCount: data.diagnostics?.providerResultCount ?? null,
+    providerRateLimitRemaining: data.diagnostics?.providerRateLimitRemaining ?? null,
+    coverlyParseOutcome: data.diagnostics?.coverlyParseOutcome ?? null,
   });
   return data;
 }

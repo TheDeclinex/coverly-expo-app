@@ -46,7 +46,6 @@ interface BarcodeScanFlowProps {
   item: InventoryItem;
   onClose: () => void;
   onApply: (values: BarcodeApplyValues) => Promise<void>;
-  onTakePhoto?: () => void;
 }
 
 function cleanSuggestion(value: string | null | undefined): string | undefined {
@@ -54,7 +53,7 @@ function cleanSuggestion(value: string | null | undefined): string | undefined {
   return trimmed ? trimmed : undefined;
 }
 
-export function BarcodeScanFlow({ visible, item, onClose, onApply, onTakePhoto }: BarcodeScanFlowProps) {
+export function BarcodeScanFlow({ visible, item, onClose, onApply }: BarcodeScanFlowProps) {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const [permission, requestPermission, getPermission] = useCameraPermissions();
@@ -104,9 +103,13 @@ export function BarcodeScanFlow({ visible, item, onClose, onApply, onTakePhoto }
     return () => subscription.remove();
   }, [getPermission]);
 
-  const handleDetected = React.useCallback(async ({ data }: BarcodeScanningResult) => {
+  const handleDetected = React.useCallback(async ({ data, type }: BarcodeScanningResult) => {
     const barcode = data.trim();
     if (!barcode || scanLockedRef.current) return;
+    if (__DEV__) console.info("[barcode] detected", {
+      rawScannedBarcode: data,
+      detectedBarcodeFormat: type,
+    });
 
     // Close the latch synchronously before React state changes so a burst of
     // native scan callbacks can never trigger duplicate Edge Function calls.
@@ -123,6 +126,7 @@ export function BarcodeScanFlow({ visible, item, onClose, onApply, onTakePhoto }
     try {
       const response = await verifyBarcode({
         barcode,
+        barcodeFormat: type,
         itemName: item.name,
         category: item.category ?? undefined,
         itemId: item.id,
@@ -131,7 +135,7 @@ export function BarcodeScanFlow({ visible, item, onClose, onApply, onTakePhoto }
       if (!response.success) {
         const failureKind = classifyBarcodeFailure(response.errorCode, response.error);
         setMessage(failureKind === "not-found"
-          ? "We couldn’t find this barcode in the product database. This is common for some retailer and own-brand products. You can photograph the item or enter its details manually."
+          ? "The barcode was captured, but matching product details are unavailable. You can keep the barcode on this item or scan another."
           : barcodeFailureCopy(failureKind));
         setStage(failureKind);
         return;
@@ -186,14 +190,14 @@ export function BarcodeScanFlow({ visible, item, onClose, onApply, onTakePhoto }
     }
   };
 
-  const keepBarcodeAndEnterManually = async () => {
+  const keepBarcode = async () => {
     if (!detectedBarcode || stage === "saving") return;
     setStage("saving");
     try {
       await onApply({ barcode: detectedBarcode, verified: false });
       onClose();
     } catch {
-      setMessage("The barcode could not be saved. You can still close this screen and enter the item manually.");
+      setMessage("The barcode could not be saved. Your existing item was not changed.");
       setStage("save-error");
     }
   };
@@ -348,7 +352,9 @@ export function BarcodeScanFlow({ visible, item, onClose, onApply, onTakePhoto }
               </>
             ) : null}
 
-            {stage === "not-found" || stage === "invalid" || stage === "network" || stage === "service" ? (
+            {stage === "not-found" || stage === "invalid" || stage === "network" ||
+            stage === "authentication" || stage === "rate-limit" ||
+            stage === "malformed-response" || stage === "parse" || stage === "service" ? (
               <View style={styles.centerState}>
                 <Feather name={stage === "not-found" ? "search" : stage === "network" ? "wifi-off" : "alert-circle"} size={30} color={colors.primary} />
                 <Text style={[styles.stateTitle, { color: colors.foreground }]}>
@@ -358,17 +364,31 @@ export function BarcodeScanFlow({ visible, item, onClose, onApply, onTakePhoto }
                 <Text style={[styles.barcodeText, { color: colors.mutedForeground }]}>{detectedBarcode}</Text>
                 {stage === "not-found" ? (
                   <View style={styles.fallbackActions}>
-                    <Pressable onPress={onTakePhoto ?? onClose} style={[styles.primaryButton, { backgroundColor: colors.primary }]}>
-                      <Feather name="camera" size={16} color={colors.primaryForeground} />
-                      <Text style={[styles.primaryButtonText, { color: colors.primaryForeground }]}>Take a photo</Text>
+                    <Pressable
+                      accessibilityRole="button"
+                      accessibilityLabel="Keep captured barcode"
+                      onPress={() => void keepBarcode()}
+                      style={[styles.primaryButton, { backgroundColor: colors.primary }]}
+                    >
+                      <Feather name="bookmark" size={16} color={colors.primaryForeground} />
+                      <Text style={[styles.primaryButtonText, { color: colors.primaryForeground }]}>Keep barcode</Text>
                     </Pressable>
-                    <Pressable onPress={() => void keepBarcodeAndEnterManually()} style={[styles.secondaryButton, { borderColor: colors.border }]}>
-                      <Feather name="edit-3" size={16} color={colors.foreground} />
-                      <Text style={[styles.secondaryButtonText, { color: colors.foreground }]}>Enter item manually</Text>
-                    </Pressable>
-                    <Pressable onPress={resetScan} style={[styles.secondaryButton, { borderColor: colors.border }]}>
+                    <Pressable
+                      accessibilityRole="button"
+                      accessibilityLabel="Scan another barcode"
+                      onPress={resetScan}
+                      style={[styles.secondaryButton, { borderColor: colors.border }]}
+                    >
                       <Feather name="refresh-cw" size={16} color={colors.primary} />
-                      <Text style={[styles.secondaryButtonText, { color: colors.primary }]}>Retry barcode</Text>
+                      <Text style={[styles.secondaryButtonText, { color: colors.primary }]}>Scan another</Text>
+                    </Pressable>
+                    <Pressable
+                      accessibilityRole="button"
+                      accessibilityLabel="Cancel barcode changes"
+                      onPress={onClose}
+                      style={styles.cancelButton}
+                    >
+                      <Text style={[styles.cancelText, { color: colors.mutedForeground }]}>Cancel</Text>
                     </Pressable>
                   </View>
                 ) : (
@@ -410,16 +430,17 @@ export function BarcodeScanFlow({ visible, item, onClose, onApply, onTakePhoto }
                       <Feather name="refresh-cw" size={16} color={colors.primaryForeground} />
                       <Text style={[styles.primaryButtonText, { color: colors.primaryForeground }]}>Retry</Text>
                     </Pressable>
-                  ) : null}
-                  <Pressable
-                    accessibilityRole="button"
-                    accessibilityLabel="Save barcode and enter item manually"
-                    onPress={() => void keepBarcodeAndEnterManually()}
-                    style={[styles.secondaryButton, { borderColor: colors.border }]}
-                  >
-                    <Feather name="edit-3" size={16} color={colors.foreground} />
-                    <Text style={[styles.secondaryButtonText, { color: colors.foreground }]}>Enter manually</Text>
-                  </Pressable>
+                  ) : (
+                    <Pressable
+                      accessibilityRole="button"
+                      accessibilityLabel="Retry keeping captured barcode"
+                      onPress={() => void keepBarcode()}
+                      style={[styles.primaryButton, { backgroundColor: colors.primary }]}
+                    >
+                      <Feather name="refresh-cw" size={16} color={colors.primaryForeground} />
+                      <Text style={[styles.primaryButtonText, { color: colors.primaryForeground }]}>Retry</Text>
+                    </Pressable>
+                  )}
                   <Pressable
                     accessibilityRole="button"
                     accessibilityLabel="Cancel barcode changes"
@@ -441,6 +462,7 @@ export function BarcodeScanFlow({ visible, item, onClose, onApply, onTakePhoto }
 function barcodeFailureTitle(kind: BarcodeFailureKind): string {
   if (kind === "not-found") return "Product not found";
   if (kind === "invalid") return "Barcode not readable";
+  if (kind === "rate-limit") return "Barcode lookup limit reached";
   if (kind === "network") return "You’re offline";
   return "Barcode service unavailable";
 }
@@ -449,6 +471,10 @@ function barcodeFailureCopy(kind: BarcodeFailureKind): string {
   if (kind === "invalid") return "We couldn’t read a valid EAN or UPC barcode. Try again with the full barcode in view.";
   if (kind === "network") return "Check your connection and try the barcode lookup again.";
   if (kind === "not-found") return "This barcode is not in the product database.";
+  if (kind === "authentication") return "The barcode provider could not authenticate this request. Please try again later.";
+  if (kind === "rate-limit") return "The barcode provider is temporarily limiting lookups. Please wait and try again.";
+  if (kind === "malformed-response") return "The barcode provider returned an invalid response. Please try again shortly.";
+  if (kind === "parse") return "Coverly could not read the product details returned for this barcode.";
   return "The barcode lookup service couldn’t complete this request. Please try again shortly.";
 }
 
