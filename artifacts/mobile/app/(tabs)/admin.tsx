@@ -10,15 +10,8 @@ import { LoadingState } from "@/components/LoadingState";
 import { useAuth } from "@/context/AuthContext";
 import { useAccountProfile } from "@/hooks/useAccountProfile";
 import { useColors } from "@/hooks/useColors";
-import { useFeedbackUnread } from "@/hooks/useFeedbackUnread";
 import { adminMetricLabel } from "@/lib/admin-model";
 import { loadAdminOverview } from "@/lib/admin-service";
-import {
-  loadRecentFeedbackReports,
-  type FeedbackReportRow,
-} from "@/lib/feedback-service";
-
-const openStatuses = new Set(["new", "under_investigation", "bug", "development", "testing", "feature"]);
 
 function environmentLabel(value: string | undefined): string {
   const environment = value?.trim().toLowerCase();
@@ -29,11 +22,23 @@ function environmentLabel(value: string | undefined): string {
   return __DEV__ ? "Local" : "Production";
 }
 
-function supportCountLabel(reports: FeedbackReportRow[] | undefined, isLoading: boolean, isError: boolean): string | undefined {
+function supportCountLabel(
+  overview: ReturnType<typeof adminSupportCounts> | undefined,
+  isLoading: boolean,
+  isError: boolean,
+): string | undefined {
   if (isLoading) return "Loading";
   if (isError) return "Unavailable";
-  const openCount = (reports ?? []).filter((report) => openStatuses.has(report.status ?? "new")).length;
-  return openCount > 0 ? String(openCount) : undefined;
+  if (!overview) return undefined;
+  return `${overview.newCount} new / ${overview.openCount} open`;
+}
+
+function adminSupportCounts(overview: Awaited<ReturnType<typeof loadAdminOverview>> | undefined) {
+  if (!overview) return undefined;
+  return {
+    newCount: overview.supportNew ?? 0,
+    openCount: overview.supportOpen ?? 0,
+  };
 }
 
 export default function AdminScreen() {
@@ -41,7 +46,6 @@ export default function AdminScreen() {
   const insets = useSafeAreaInsets();
   const { session } = useAuth();
   const { isAdmin, isLoading } = useAccountProfile();
-  const feedbackUnread = useFeedbackUnread();
 
   const overviewQuery = useQuery({
     queryKey: ["admin-overview", session?.user.id],
@@ -51,18 +55,11 @@ export default function AdminScreen() {
     retry: 1,
   });
 
-  const feedbackQuery = useQuery({
-    queryKey: ["admin-feedback-reports", session?.user.id],
-    queryFn: () => loadRecentFeedbackReports(50),
-    enabled: !!session && isAdmin,
-    staleTime: 30_000,
-    retry: 1,
-  });
-
   if (isLoading) return <LoadingState />;
   if (!isAdmin) return <Redirect href={"/account" as Href} />;
 
   const overview = overviewQuery.data;
+  const supportCounts = adminSupportCounts(overview);
   const environment = environmentLabel(process.env.EXPO_PUBLIC_APP_ENV);
 
   return (
@@ -113,8 +110,8 @@ export default function AdminScreen() {
             icon="message-square"
             title="Support inbox"
             subtitle="Review feedback, issues, and enhancement requests"
-            value={supportCountLabel(feedbackQuery.data, feedbackQuery.isLoading, feedbackQuery.isError)}
-            badgeCount={feedbackUnread.data?.adminUnreadCount}
+            value={supportCountLabel(supportCounts, overviewQuery.isLoading, overviewQuery.isError)}
+            badgeCount={overview?.supportUnread ?? undefined}
             tone="amber"
             onPress={() => router.push("/admin-support" as Href)}
             last
@@ -126,7 +123,7 @@ export default function AdminScreen() {
             icon="search"
             title="User lookup"
             subtitle="Email, user ID, inventory and usage"
-            value="Connected"
+            value="Available"
             tone="blue"
             onPress={() => router.push("/admin-users" as Href)}
           />
@@ -134,7 +131,7 @@ export default function AdminScreen() {
             icon="user-check"
             title="Access grants"
             subtitle="Tester and temporary Plus access"
-            value="Connected"
+            value="Available"
             tone="blue"
             onPress={() => router.push("/admin-access" as Href)}
             last
@@ -146,7 +143,7 @@ export default function AdminScreen() {
             icon="credit-card"
             title="Entitlement debug"
             subtitle="Supabase plan fields, overrides, usage and RevenueCat state"
-            value="Connected"
+            value="Available"
             tone="green"
             onPress={() => router.push("/admin-entitlements" as Href)}
           />
@@ -157,7 +154,7 @@ export default function AdminScreen() {
           <AccountRow
             icon="package"
             title="Orders & history"
-            value="Connected"
+            value="Available"
             tone="lavender"
             onPress={() => router.push("/admin-claim-packs" as Href)}
           />
@@ -165,7 +162,7 @@ export default function AdminScreen() {
         </AccountSection>
 
         <AccountSection title="Operational logs">
-          <AccountRow icon="alert-triangle" title="Recent errors" value="Connected" tone="lavender" onPress={() => router.push("/admin-errors" as Href)} />
+          <AccountRow icon="alert-triangle" title="Recent errors" value="Available" tone="lavender" onPress={() => router.push("/admin-errors" as Href)} />
           <AccountRow icon="camera" title="AI scan logs" value="Not available" tone="lavender" />
           <AccountRow icon="search" title="Replacement pricing searches" value="Not available" tone="lavender" last />
         </AccountSection>

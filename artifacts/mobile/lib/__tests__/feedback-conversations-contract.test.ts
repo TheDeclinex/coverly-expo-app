@@ -173,5 +173,5 @@ test("high priority is accepted between blocking and normal", () => {
 
 test("admin ticket rows announce unread user replies", () => {
   assert.match(adminSupportSource, /unread user reply/);
-  assert.match(adminSupportSource, /ticketIsUnreadForAdmin\(report\)/);
+  assert.match(adminSupportSource, /report\.has_unread_user_message/);
 });

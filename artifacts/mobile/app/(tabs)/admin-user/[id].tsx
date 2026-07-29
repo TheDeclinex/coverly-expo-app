@@ -17,7 +17,7 @@ import {
   adminUserIdDebugSummary,
   normalizeAdminUserIdParam,
 } from "@/lib/admin-model";
-import { loadAdminUserDetail, loadAdminUserFiles, type AdminUserFile } from "@/lib/admin-service";
+import { loadAdminUserDetail, loadAdminUserPropertyPreview, type AdminUserFile } from "@/lib/admin-service";
 
 export default function AdminUserDetailScreen() {
   const colors = useColors();
@@ -42,7 +42,7 @@ export default function AdminUserDetailScreen() {
 
   const filesQuery = useQuery({
     queryKey: ["admin-user-files", session?.user.id, selectedUserId],
-    queryFn: () => loadAdminUserFiles(selectedUserId!),
+    queryFn: () => loadAdminUserPropertyPreview(selectedUserId!),
     enabled: !!session && isAdmin && !!selectedUserId && !!detailQuery.data?.profile,
     staleTime: 20_000,
     retry: 1,
@@ -104,14 +104,14 @@ export default function AdminUserDetailScreen() {
                 <AccountRow icon="home" title="No properties found" value="Empty" last />
               ) : (
                 <>
-                  {(filesQuery.data ?? []).slice(0, 3).map((file, index, files) => (
-                    <PropertySetupRow key={file.id} file={file} last={index === files.length - 1 && (filesQuery.data?.length ?? 0) <= 3} />
+                  {(filesQuery.data ?? []).map((file, index, files) => (
+                    <PropertySetupRow key={file.id} file={file} last={index === files.length - 1 && (detail.counts.propertyCount ?? 0) <= 3} />
                   ))}
-                  {(filesQuery.data?.length ?? 0) > 3 ? (
+                  {(detail.counts.propertyCount ?? 0) > 3 ? (
                     <AccountRow
                       icon="list"
                       title="Open all properties"
-                      value={adminNumberLabel(filesQuery.data?.length ?? null)}
+                      value={adminNumberLabel(detail.counts.propertyCount)}
                       onPress={() => router.push({ pathname: "/(tabs)/admin-user-files/[id]", params: { id: profile.id } } as Href)}
                       last
                     />

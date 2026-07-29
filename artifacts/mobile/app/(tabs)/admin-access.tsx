@@ -10,6 +10,7 @@ import { LoadingState } from "@/components/LoadingState";
 import { useAuth } from "@/context/AuthContext";
 import { useAccountProfile } from "@/hooks/useAccountProfile";
 import { useColors } from "@/hooks/useColors";
+import { canRunAdminUserSearch } from "@/lib/admin-list-model";
 import {
   adminDateLabel,
   adminStatusLabel,
@@ -51,7 +52,7 @@ export default function AdminAccessScreen() {
   const usersQuery = useQuery({
     queryKey: ["admin-access-users", session?.user.id, submittedQuery],
     queryFn: () => searchAdminUsers(submittedQuery, 10),
-    enabled: !!session && isAdmin && submittedQuery.length > 0,
+    enabled: !!session && isAdmin && canRunAdminUserSearch(submittedQuery),
     staleTime: 20_000,
     retry: 1,
   });

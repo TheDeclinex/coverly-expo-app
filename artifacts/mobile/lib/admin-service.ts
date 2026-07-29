@@ -1,4 +1,20 @@
 import { supabase } from "@/lib/supabase";
+import {
+  ADMIN_DEFAULT_PAGE_SIZE,
+  adminClaimPackRpcParams,
+  adminEventRpcParams,
+  adminSupportRpcParams,
+  adminUsersRpcParams,
+  canRunAdminUserSearch,
+  clampAdminLimit,
+  normalizeAdminSearchQuery,
+  type AdminClaimPackStatusFilter,
+  type AdminCursor,
+  type AdminEventSeverityFilter,
+  type AdminPage,
+  type AdminSupportFilter,
+  type AdminTimeframe,
+} from "@/lib/admin-list-model";
 import { adminUserIdDebugSummary } from "@/lib/admin-model";
 
 export interface AdminOverview {
@@ -8,6 +24,9 @@ export interface AdminOverview {
   replacementLookupsThisMonth: number | null;
   claimPacksGenerated: number | null;
   recentErrors: number | null;
+  supportNew: number | null;
+  supportOpen: number | null;
+  supportUnread: number | null;
   monthKey?: string | null;
 }
 
@@ -101,10 +120,12 @@ export interface AdminUserFile {
   item_count: number | null;
   claim_pack_count: number | null;
   updated_at: string | null;
+  cursor_created_at?: string | null;
 }
 
 export interface AdminClaimPackSummary {
   id: string;
+  pack_ref: string | null;
   user_id: string | null;
   user_email: string | null;
   file_id: string | null;
@@ -113,7 +134,8 @@ export interface AdminClaimPackSummary {
   created_at: string | null;
   generated_at: string | null;
   email_sent: boolean | null;
-  generation_error: string | null;
+  has_generation_error: boolean;
+  cursor_created_at: string | null;
 }
 
 export interface AdminClaimPackDetail {
@@ -132,7 +154,25 @@ export interface AdminEvent {
   severity: string | null;
   message: string | null;
   user_id: string | null;
-  metadata: Record<string, unknown> | null;
+  cursor_created_at: string | null;
+}
+
+export interface AdminSupportSummary {
+  id: string;
+  user_id: string | null;
+  user_email: string | null;
+  feedback_type: string | null;
+  classification: string | null;
+  severity: string | null;
+  status: string | null;
+  title: string | null;
+  latest_message_preview: string | null;
+  created_at: string | null;
+  last_activity_at: string | null;
+  admin_last_read_at: string | null;
+  last_user_message_at: string | null;
+  has_unread_user_message: boolean;
+  cursor_created_at: string | null;
 }
 
 async function rpcValue<T>(name: string, params?: Record<string, unknown>): Promise<T> {
@@ -160,14 +200,26 @@ function adminErrorSummary(error: unknown): Record<string, unknown> {
 }
 
 export function loadAdminOverview(): Promise<AdminOverview> {
-  return rpcValue<AdminOverview>("admin_get_overview");
+  return rpcValue<AdminOverview>("admin_get_overview_v2", {
+    p_error_from: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString(),
+  });
 }
 
 export function searchAdminUsers(query: string, limit = 25): Promise<AdminUserSearchResult[]> {
+  const normalizedQuery = normalizeAdminSearchQuery(query);
+  if (!canRunAdminUserSearch(normalizedQuery)) return Promise.resolve([]);
   return rpcValue<AdminUserSearchResult[]>("admin_search_users", {
-    p_query: query,
-    p_limit: limit,
+    p_query: normalizedQuery,
+    p_limit: clampAdminLimit(limit, 25),
   });
+}
+
+export function loadAdminUsersPage(input: {
+  query: string | null;
+  cursor?: AdminCursor | null;
+  limit?: number;
+}): Promise<AdminPage<AdminUserSearchResult>> {
+  return rpcValue<AdminPage<AdminUserSearchResult>>("admin_list_users_page", adminUsersRpcParams(input));
 }
 
 export async function loadAdminUserDetail(userId: string): Promise<AdminUserDetail> {
@@ -238,8 +290,30 @@ export async function loadAdminUserFiles(userId: string): Promise<AdminUserFile[
   }
 }
 
-export function loadAdminClaimPacks(limit = 50): Promise<AdminClaimPackSummary[]> {
-  return rpcValue<AdminClaimPackSummary[]>("admin_list_claim_packs", { p_limit: limit });
+export function loadAdminUserPropertyPreview(userId: string): Promise<AdminUserFile[]> {
+  return rpcValue<AdminUserFile[]>("admin_get_user_property_preview", {
+    p_user_id: userId,
+    p_limit: 3,
+  });
+}
+
+export function loadAdminSupportTickets(input: {
+  filter: AdminSupportFilter;
+  timeframe: AdminTimeframe;
+  cursor?: AdminCursor | null;
+  limit?: number;
+}): Promise<AdminPage<AdminSupportSummary>> {
+  return rpcValue<AdminPage<AdminSupportSummary>>("admin_list_support_tickets", adminSupportRpcParams(input));
+}
+
+export function loadAdminClaimPacks(input: {
+  status: AdminClaimPackStatusFilter;
+  timeframe: AdminTimeframe;
+  query: string;
+  cursor?: AdminCursor | null;
+  limit?: number;
+}): Promise<AdminPage<AdminClaimPackSummary>> {
+  return rpcValue<AdminPage<AdminClaimPackSummary>>("admin_list_claim_packs_page", adminClaimPackRpcParams(input));
 }
 
 export function loadAdminClaimPackDetail(claimPackId: string): Promise<AdminClaimPackDetail | null> {
@@ -248,6 +322,25 @@ export function loadAdminClaimPackDetail(claimPackId: string): Promise<AdminClai
   });
 }
 
-export function loadAdminRecentEvents(limit = 50): Promise<AdminEvent[]> {
-  return rpcValue<AdminEvent[]>("admin_list_recent_events", { p_limit: limit });
+export function loadAdminEvents(input: {
+  timeframe: AdminTimeframe;
+  severity: AdminEventSeverityFilter;
+  source: string;
+  cursor?: AdminCursor | null;
+  limit?: number;
+}): Promise<AdminPage<AdminEvent>> {
+  return rpcValue<AdminPage<AdminEvent>>("admin_list_events_page", adminEventRpcParams(input));
+}
+
+export function loadAdminUserFilesPage(
+  userId: string,
+  cursor: AdminCursor | null = null,
+  limit = ADMIN_DEFAULT_PAGE_SIZE,
+): Promise<AdminPage<AdminUserFile>> {
+  return rpcValue<AdminPage<AdminUserFile>>("admin_list_user_files_page", {
+    p_user_id: userId,
+    p_limit: clampAdminLimit(limit),
+    p_before_created_at: cursor?.createdAt ?? null,
+    p_before_id: cursor?.id ?? null,
+  });
 }

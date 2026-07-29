@@ -1,8 +1,8 @@
 import { Feather } from "@expo/vector-icons";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Redirect, Stack, type Href } from "expo-router";
 import React from "react";
-import { ActivityIndicator, Alert, Modal, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Alert, FlatList, Modal, Pressable, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { LoadingState } from "@/components/LoadingState";
@@ -13,12 +13,20 @@ import { useAuth } from "@/context/AuthContext";
 import { useAccountProfile } from "@/hooks/useAccountProfile";
 import { useColors } from "@/hooks/useColors";
 import {
+  cursorFromPage,
+  mergeAdminPages,
+  supportTimeframeApplies,
+  type AdminCursor,
+  type AdminSupportFilter,
+  type AdminTimeframe,
+} from "@/lib/admin-list-model";
+import { loadAdminSupportTickets, type AdminSupportSummary } from "@/lib/admin-service";
+import {
   feedbackAdminStatusOptions,
   feedbackCategoryLabel,
   feedbackPriorityLabel,
   feedbackPriorityOptions,
   feedbackStatusLabel,
-  feedbackTicketHasUnread,
   feedbackTypeLabel,
   normalizeFeedbackPriority,
   serializeError,
@@ -26,24 +34,11 @@ import {
   type FeedbackPriority,
 } from "@/lib/feedback-model";
 import {
-  loadRecentFeedbackReports,
+  loadFeedbackReportById,
   type FeedbackReportRow,
   updateFeedbackReportPriority,
   updateFeedbackReportStatus,
 } from "@/lib/feedback-service";
-
-type InboxFilter = "all" | "new" | "open" | "closed";
-
-const openStatuses = new Set(["under_investigation", "development", "testing"]);
-const closedStatuses = new Set(["resolved", "closed"]);
-
-function ticketMatchesFilter(report: FeedbackReportRow, filter: InboxFilter): boolean {
-  const status = report.status ?? "new";
-  if (filter === "new") return status === "new";
-  if (filter === "open") return openStatuses.has(status);
-  if (filter === "closed") return closedStatuses.has(status);
-  return true;
-}
 
 function formatFeedbackDate(value: string | null): string {
   if (!value) return "Date unavailable";
@@ -52,15 +47,8 @@ function formatFeedbackDate(value: string | null): string {
   return date.toLocaleDateString("en-NZ", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
 }
 
-function ticketCategory(report: FeedbackReportRow): string {
+function ticketCategory(report: Pick<FeedbackReportRow, "metadata_json">): string {
   return feedbackCategoryLabel(report.metadata_json?.category);
-}
-
-function ticketIsUnreadForAdmin(report: FeedbackReportRow): boolean {
-  return feedbackTicketHasUnread("admin", {
-    adminLastReadAt: report.admin_last_read_at,
-    lastUserMessageAt: report.last_user_message_at,
-  });
 }
 
 export default function AdminSupportScreen() {
@@ -69,25 +57,38 @@ export default function AdminSupportScreen() {
   const { session } = useAuth();
   const { isAdmin, isLoading } = useAccountProfile();
   const queryClient = useQueryClient();
-  const [filter, setFilter] = React.useState<InboxFilter>("all");
-  const [selectedReport, setSelectedReport] = React.useState<FeedbackReportRow | null>(null);
+  const [filter, setFilter] = React.useState<AdminSupportFilter>("needs_attention");
+  const [timeframe, setTimeframe] = React.useState<AdminTimeframe>("30d");
+  const [selectedReport, setSelectedReport] = React.useState<AdminSupportSummary | null>(null);
 
-  const feedbackQuery = useQuery({
-    queryKey: ["admin-feedback-reports", session?.user.id],
-    queryFn: () => loadRecentFeedbackReports(100),
+  const feedbackQuery = useInfiniteQuery({
+    queryKey: ["admin-support-tickets", session?.user.id, filter, timeframe],
+    queryFn: ({ pageParam }) => loadAdminSupportTickets({ filter, timeframe, cursor: pageParam, limit: 20 }),
+    initialPageParam: null as AdminCursor | null,
+    getNextPageParam: (lastPage) => lastPage.hasMore ? cursorFromPage(lastPage) : null,
     enabled: !!session && isAdmin,
     staleTime: 30_000,
     retry: 1,
   });
 
-  const selectedReportFresh = selectedReport
-    ? feedbackQuery.data?.find((report) => report.id === selectedReport.id) ?? selectedReport
-    : null;
+  const detailQuery = useQuery({
+    queryKey: ["admin-support-ticket-detail", session?.user.id, selectedReport?.id],
+    queryFn: () => loadFeedbackReportById(selectedReport!.id),
+    enabled: !!session && isAdmin && !!selectedReport,
+    staleTime: 15_000,
+    retry: 1,
+  });
+
+  const selectedReportFresh = detailQuery.data ?? null;
 
   const statusMutation = useMutation({
     mutationFn: ({ id, status }: { id: string; status: FeedbackAdminStatus }) => updateFeedbackReportStatus(id, status),
     onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ["admin-feedback-reports", session?.user.id] });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["admin-support-tickets", session?.user.id] }),
+        queryClient.invalidateQueries({ queryKey: ["admin-support-ticket-detail", session?.user.id, selectedReport?.id] }),
+        queryClient.invalidateQueries({ queryKey: ["admin-overview", session?.user.id] }),
+      ]);
     },
     onError: (error) => {
       if (__DEV__) console.warn("[adminFeedback] status update failed", { error: serializeError(error) });
@@ -98,7 +99,10 @@ export default function AdminSupportScreen() {
   const priorityMutation = useMutation({
     mutationFn: ({ id, priority }: { id: string; priority: FeedbackPriority }) => updateFeedbackReportPriority(id, priority),
     onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ["admin-feedback-reports", session?.user.id] });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["admin-support-tickets", session?.user.id] }),
+        queryClient.invalidateQueries({ queryKey: ["admin-support-ticket-detail", session?.user.id, selectedReport?.id] }),
+      ]);
     },
     onError: (error) => {
       if (__DEV__) console.warn("[adminFeedback] priority update failed", { error: serializeError(error) });
@@ -109,55 +113,70 @@ export default function AdminSupportScreen() {
   if (isLoading) return <LoadingState />;
   if (!isAdmin) return <Redirect href={"/account" as Href} />;
 
-  const reports = feedbackQuery.data ?? [];
-  const filteredReports = reports.filter((report) => ticketMatchesFilter(report, filter));
+  const reports = mergeAdminPages(feedbackQuery.data?.pages);
+  const loadMore = () => {
+    if (!feedbackQuery.hasNextPage || feedbackQuery.isFetchingNextPage) return;
+    void feedbackQuery.fetchNextPage();
+  };
 
   return (
     <>
       <Stack.Screen options={{ title: "Support inbox" }} />
-      <ScrollView contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + 28 }]} showsVerticalScrollIndicator={false}>
-        <View style={[styles.headerCard, { backgroundColor: colors.card, borderColor: colors.border, borderRadius: colors.radius }]}>
-          <Text style={[styles.screenTitle, { color: colors.foreground }]}>Support inbox</Text>
-          <Text style={[styles.screenHelper, { color: colors.mutedForeground }]}>
-            Review feedback, issues, and enhancement requests from testers and users.
-          </Text>
-        </View>
-
-        <View style={styles.filterRow}>
-          {(["all", "new", "open", "closed"] as InboxFilter[]).map((value) => {
-            const active = filter === value;
-            return (
-              <Pressable
-                key={value}
-                accessibilityRole="button"
-                accessibilityState={{ selected: active }}
-                onPress={() => setFilter(value)}
-                style={({ pressed }) => [
-                  styles.filterChip,
-                  {
-                    borderColor: active ? colors.primary : colors.border,
-                    backgroundColor: active ? colors.accent : colors.card,
-                    opacity: pressed ? 0.72 : 1,
-                  },
-                ]}
-              >
-                <Text style={[styles.filterText, { color: active ? colors.primary : colors.foreground }]}>{filterLabel(value)}</Text>
-              </Pressable>
-            );
-          })}
-        </View>
-
-        <SupportTicketList
-          reports={filteredReports}
-          isLoading={feedbackQuery.isLoading}
-          isError={feedbackQuery.isError}
-          onSelect={setSelectedReport}
-        />
-      </ScrollView>
+      <FlatList
+        data={reports}
+        keyExtractor={(report) => report.id}
+        renderItem={({ item }) => (
+          <SupportTicketRow
+            report={item}
+            onSelect={setSelectedReport}
+          />
+        )}
+        contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + 28 }]}
+        ListHeaderComponent={(
+          <>
+            <View style={[styles.headerCard, { backgroundColor: colors.card, borderColor: colors.border, borderRadius: colors.radius }]}>
+              <Text style={[styles.screenTitle, { color: colors.foreground }]}>Support inbox</Text>
+              <Text style={[styles.screenHelper, { color: colors.mutedForeground }]}>
+                Needs attention includes new, active, and unread-user-message tickets regardless of age.
+              </Text>
+            </View>
+            <FilterChips
+              values={["needs_attention", "new", "open", "closed", "all"]}
+              selected={filter}
+              label={filterLabel}
+              onSelect={setFilter}
+            />
+            {supportTimeframeApplies(filter) ? (
+              <FilterChips
+                values={["7d", "30d", "90d", "all"]}
+                selected={timeframe}
+                label={timeframeLabel}
+                onSelect={setTimeframe}
+              />
+            ) : null}
+          </>
+        )}
+        ListEmptyComponent={(
+          feedbackQuery.isLoading
+            ? <StateCard title="Loading support tickets..." loading />
+            : feedbackQuery.isError
+              ? <StateCard title="Support inbox unavailable" detail="Please try again." onRetry={() => void feedbackQuery.refetch()} />
+              : <StateCard title="No tickets here" detail="Try another filter or check back after new feedback arrives." />
+        )}
+        ListFooterComponent={feedbackQuery.isFetchingNextPage ? <ActivityIndicator style={styles.footer} color={colors.primary} /> : null}
+        refreshing={feedbackQuery.isRefetching && !feedbackQuery.isFetchingNextPage}
+        onRefresh={() => void feedbackQuery.refetch()}
+        onEndReached={loadMore}
+        onEndReachedThreshold={0.35}
+        showsVerticalScrollIndicator={false}
+      />
 
       <FeedbackTicketModal
         report={selectedReportFresh}
         visible={!!selectedReport}
+        isLoading={detailQuery.isLoading}
+        isError={detailQuery.isError}
+        onRetry={() => void detailQuery.refetch()}
         isUpdatingPriority={priorityMutation.isPending}
         isUpdatingStatus={statusMutation.isPending}
         onClose={() => setSelectedReport(null)}
@@ -172,89 +191,53 @@ export default function AdminSupportScreen() {
   );
 }
 
-function filterLabel(value: InboxFilter): string {
+function filterLabel(value: AdminSupportFilter): string {
+  if (value === "needs_attention") return "Needs attention";
   if (value === "new") return "New";
   if (value === "open") return "Open";
   if (value === "closed") return "Closed";
   return "All";
 }
 
-function SupportTicketList({
-  reports,
-  isLoading,
-  isError,
+function timeframeLabel(value: AdminTimeframe): string {
+  if (value === "7d") return "7 days";
+  if (value === "30d") return "30 days";
+  if (value === "90d") return "90 days";
+  return "All time";
+}
+
+function FilterChips<T extends string>({
+  values,
+  selected,
+  label,
   onSelect,
 }: {
-  reports: FeedbackReportRow[];
-  isLoading: boolean;
-  isError: boolean;
-  onSelect: (report: FeedbackReportRow) => void;
+  values: readonly T[];
+  selected: T;
+  label: (value: T) => string;
+  onSelect: (value: T) => void;
 }) {
   const colors = useColors();
-
-  if (isLoading) {
-    return (
-      <View style={[styles.emptyCard, { backgroundColor: colors.card, borderColor: colors.border, borderRadius: colors.radius }]}>
-        <ActivityIndicator color={colors.primary} />
-        <Text style={[styles.emptyText, { color: colors.mutedForeground }]}>Loading support tickets...</Text>
-      </View>
-    );
-  }
-
-  if (isError) {
-    return (
-      <View style={[styles.emptyCard, { backgroundColor: colors.card, borderColor: colors.border, borderRadius: colors.radius }]}>
-        <Text style={[styles.emptyTitle, { color: colors.foreground }]}>Support inbox unavailable</Text>
-        <Text style={[styles.emptyText, { color: colors.mutedForeground }]}>Please try again later.</Text>
-      </View>
-    );
-  }
-
-  if (reports.length === 0) {
-    return (
-      <View style={[styles.emptyCard, { backgroundColor: colors.card, borderColor: colors.border, borderRadius: colors.radius }]}>
-        <Text style={[styles.emptyTitle, { color: colors.foreground }]}>No tickets here</Text>
-        <Text style={[styles.emptyText, { color: colors.mutedForeground }]}>Try another filter or check back after new feedback arrives.</Text>
-      </View>
-    );
-  }
-
   return (
-    <View style={[styles.listCard, { backgroundColor: colors.card, borderColor: colors.border, borderRadius: colors.radius }]}>
-      {reports.map((report, index) => {
-        const unread = ticketIsUnreadForAdmin(report);
+    <View style={styles.filterRow}>
+      {values.map((value) => {
+        const active = selected === value;
         return (
           <Pressable
-            key={report.id}
+            key={value}
             accessibilityRole="button"
-            accessibilityLabel={`Review ${report.title ?? "feedback ticket"}${unread ? ", unread user reply" : ""}`}
-            onPress={() => onSelect(report)}
+            accessibilityState={{ selected: active }}
+            onPress={() => onSelect(value)}
             style={({ pressed }) => [
-              styles.ticketRow,
-              index < reports.length - 1 && { borderBottomColor: colors.border, borderBottomWidth: StyleSheet.hairlineWidth },
-              { opacity: pressed ? 0.72 : 1 },
+              styles.filterChip,
+              {
+                borderColor: active ? colors.primary : colors.border,
+                backgroundColor: active ? colors.accent : colors.card,
+                opacity: pressed ? 0.72 : 1,
+              },
             ]}
           >
-            <View style={styles.ticketHeader}>
-              <Text style={[styles.ticketTitle, { color: colors.foreground }]} numberOfLines={1}>
-                {report.title ?? `${feedbackTypeLabel(report.feedback_type)} - ${ticketCategory(report)}`}
-              </Text>
-              <Feather name="chevron-right" size={17} color={colors.mutedForeground} />
-            </View>
-            <Text style={[styles.ticketPreview, { color: colors.foreground }]} numberOfLines={2}>
-              {report.description ?? "No description supplied."}
-            </Text>
-            <View style={styles.badgeRow}>
-              <Badge label={feedbackStatusLabel(report.status)} tone="status" />
-              <Badge label={feedbackPriorityLabel(report.severity)} tone="severity" />
-              <Badge label={feedbackTypeLabel(report.classification ?? report.feedback_type)} />
-              <Badge label={ticketCategory(report)} />
-              {report.screenshot_url ? <Badge label="Screenshot" tone="status" /> : null}
-            </View>
-            <Text style={[styles.ticketMeta, { color: colors.mutedForeground }]} numberOfLines={1}>
-              {report.user_email ?? "Unknown user"} - {formatFeedbackDate(report.created_at)}
-            </Text>
-            {unread ? <Badge label="Unread reply" tone="severity" /> : null}
+            <Text style={[styles.filterText, { color: active ? colors.primary : colors.foreground }]}>{label(value)}</Text>
           </Pressable>
         );
       })}
@@ -262,19 +245,96 @@ function SupportTicketList({
   );
 }
 
+function SupportTicketRow({
+  report,
+  onSelect,
+}: {
+  report: AdminSupportSummary;
+  onSelect: (report: AdminSupportSummary) => void;
+}) {
+  const colors = useColors();
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={`Review ${report.title ?? "feedback ticket"}${report.has_unread_user_message ? ", unread user reply" : ""}`}
+      onPress={() => onSelect(report)}
+      style={({ pressed }) => [
+        styles.ticketRow,
+        {
+          backgroundColor: colors.card,
+          borderColor: colors.border,
+          borderRadius: colors.radius,
+          opacity: pressed ? 0.72 : 1,
+        },
+      ]}
+    >
+      <View style={styles.ticketHeader}>
+        <Text style={[styles.ticketTitle, { color: colors.foreground }]} numberOfLines={1}>
+          {report.title ?? feedbackTypeLabel(report.feedback_type)}
+        </Text>
+        <Feather name="chevron-right" size={17} color={colors.mutedForeground} />
+      </View>
+      <Text style={[styles.ticketPreview, { color: colors.foreground }]} numberOfLines={2}>
+        {report.latest_message_preview ?? "No preview supplied."}
+      </Text>
+      <View style={styles.badgeRow}>
+        <Badge label={feedbackStatusLabel(report.status)} tone="status" />
+        <Badge label={feedbackPriorityLabel(report.severity)} tone="severity" />
+        <Badge label={feedbackTypeLabel(report.classification ?? report.feedback_type)} />
+      </View>
+      <Text style={[styles.ticketMeta, { color: colors.mutedForeground }]} numberOfLines={1}>
+        {report.user_email ?? "Unknown user"} - {formatFeedbackDate(report.last_activity_at ?? report.created_at)}
+      </Text>
+      {report.has_unread_user_message ? <Badge label="Unread reply" tone="severity" /> : null}
+    </Pressable>
+  );
+}
+
+function StateCard({
+  title,
+  detail,
+  loading = false,
+  onRetry,
+}: {
+  title: string;
+  detail?: string;
+  loading?: boolean;
+  onRetry?: () => void;
+}) {
+  const colors = useColors();
+  return (
+    <View style={[styles.emptyCard, { backgroundColor: colors.card, borderColor: colors.border, borderRadius: colors.radius }]}>
+      {loading ? <ActivityIndicator color={colors.primary} /> : null}
+      <Text style={[styles.emptyTitle, { color: colors.foreground }]}>{title}</Text>
+      {detail ? <Text style={[styles.emptyText, { color: colors.mutedForeground }]}>{detail}</Text> : null}
+      {onRetry ? (
+        <Pressable accessibilityRole="button" onPress={onRetry} style={[styles.retryButton, { backgroundColor: colors.primary }]}>
+          <Text style={[styles.filterText, { color: colors.primaryForeground }]}>Retry</Text>
+        </Pressable>
+      ) : null}
+    </View>
+  );
+}
+
 function FeedbackTicketModal({
   report,
   visible,
+  isLoading,
+  isError,
   isUpdatingPriority,
   isUpdatingStatus,
+  onRetry,
   onClose,
   onUpdatePriority,
   onUpdateStatus,
 }: {
   report: FeedbackReportRow | null;
   visible: boolean;
+  isLoading: boolean;
+  isError: boolean;
   isUpdatingPriority: boolean;
   isUpdatingStatus: boolean;
+  onRetry: () => void;
   onClose: () => void;
   onUpdatePriority: (priority: FeedbackPriority) => void;
   onUpdateStatus: (status: FeedbackAdminStatus) => void;
@@ -307,7 +367,15 @@ function FeedbackTicketModal({
           </Pressable>
         </View>
 
-        {report ? (
+        {isLoading ? (
+          <View style={styles.modalState}>
+            <StateCard title="Loading full ticket..." loading />
+          </View>
+        ) : isError ? (
+          <View style={styles.modalState}>
+            <StateCard title="Ticket unavailable" detail="The summary is still available. Retry the full ticket." onRetry={onRetry} />
+          </View>
+        ) : report ? (
           <KeyboardAwareScrollViewCompat
             keyboardShouldPersistTaps="handled"
             keyboardDismissMode="interactive"
@@ -480,7 +548,7 @@ const styles = StyleSheet.create({
   filterChip: { borderWidth: 1, borderRadius: 999, paddingHorizontal: 12, paddingVertical: 8 },
   filterText: { fontSize: 12, fontFamily: "Inter_700Bold" },
   listCard: { borderWidth: 1, overflow: "hidden" },
-  ticketRow: { paddingHorizontal: 15, paddingVertical: 13, gap: 8 },
+  ticketRow: { borderWidth: 1, paddingHorizontal: 15, paddingVertical: 13, gap: 8 },
   ticketHeader: { flexDirection: "row", alignItems: "center", gap: 8 },
   ticketTitle: { flex: 1, fontSize: 14, fontFamily: "Inter_700Bold" },
   ticketPreview: { fontSize: 13, lineHeight: 18, fontFamily: "Inter_400Regular" },
@@ -490,12 +558,15 @@ const styles = StyleSheet.create({
   emptyCard: { borderWidth: 1, padding: 18, gap: 8, alignItems: "flex-start" },
   emptyTitle: { fontSize: 14, fontFamily: "Inter_700Bold" },
   emptyText: { fontSize: 12, lineHeight: 17, fontFamily: "Inter_400Regular" },
+  retryButton: { minHeight: 34, borderRadius: 8, paddingHorizontal: 14, alignItems: "center", justifyContent: "center" },
+  footer: { paddingVertical: 18 },
   modalRoot: { flex: 1 },
   modalHeader: { borderBottomWidth: StyleSheet.hairlineWidth, paddingHorizontal: 16, paddingBottom: 12, flexDirection: "row", alignItems: "center", gap: 12 },
   modalEyebrow: { fontSize: 11, fontFamily: "Inter_700Bold", letterSpacing: 0.8, marginBottom: 4 },
   modalTitle: { fontSize: 18, lineHeight: 24, fontFamily: "Inter_700Bold" },
   closeButton: { width: 38, height: 38, borderRadius: 19, alignItems: "center", justifyContent: "center" },
   modalContent: { padding: 16, gap: 12 },
+  modalState: { padding: 16 },
   summaryCard: { borderWidth: 1, padding: 14, gap: 10 },
   summaryBadges: { flexDirection: "row", flexWrap: "wrap", gap: 7 },
   reportCard: { borderWidth: 1, padding: 15, gap: 11 },

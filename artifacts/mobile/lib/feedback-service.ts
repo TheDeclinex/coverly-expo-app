@@ -278,6 +278,16 @@ export async function loadRecentFeedbackReports(limit = 20): Promise<FeedbackRep
   return (data ?? []) as FeedbackReportRow[];
 }
 
+export async function loadFeedbackReportById(id: string): Promise<FeedbackReportRow> {
+  const { data, error } = await supabase
+    .from("feedback_reports")
+    .select("id, user_id, user_email, user_name, feedback_type, classification, severity, status, title, description, expected_result, screenshot_url, app_version, app_build_number, route, screen_name, environment, device_info, device_model, os_info, browser_info, metadata_json, created_at, last_activity_at, user_last_read_at, admin_last_read_at, last_user_message_at, last_admin_message_at, latest_message_preview")
+    .eq("id", id)
+    .single();
+  if (error) throw error;
+  return data as FeedbackReportRow;
+}
+
 export async function loadMyFeedbackReports(userId: string, limit = 50): Promise<FeedbackReportRow[]> {
   const { data, error } = await supabase
     .from("feedback_reports")
