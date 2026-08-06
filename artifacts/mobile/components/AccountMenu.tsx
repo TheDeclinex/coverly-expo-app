@@ -17,11 +17,29 @@ const rowTones: Record<AccountRowTone, { surface: string; iconSurface: string; i
   red: { surface: "#FFF9F9", iconSurface: "#FDECEC", icon: "#B91C1C" },
 };
 
-export function AccountSection({ title, children }: { title: string; children: ReactNode }) {
+export function AccountSection({
+  title,
+  children,
+  tone = "neutral",
+}: {
+  title: string;
+  children: ReactNode;
+  tone?: AccountRowTone;
+}) {
   const colors = useColors();
+  const resolvedTone = rowTones[tone];
   return (
-    <View style={[styles.section, { backgroundColor: colors.card, borderColor: colors.border, borderRadius: colors.radius }]}>
-      <Text style={[styles.sectionTitle, { color: colors.mutedForeground }]}>{title.toUpperCase()}</Text>
+    <View
+      style={[
+        styles.section,
+        {
+          backgroundColor: tone === "neutral" ? colors.card : resolvedTone.surface,
+          borderColor: colors.border,
+          borderRadius: colors.radius,
+        },
+      ]}
+    >
+      <Text style={[styles.sectionTitle, { color: tone === "neutral" ? colors.mutedForeground : resolvedTone.icon }]}>{title.toUpperCase()}</Text>
       {children}
     </View>
   );
@@ -38,6 +56,7 @@ export function AccountRow({
   tone = "neutral",
   badgeCount,
   last = false,
+  accessibilityLabel,
 }: {
   icon: React.ComponentProps<typeof Feather>["name"];
   title: string;
@@ -49,6 +68,7 @@ export function AccountRow({
   tone?: AccountRowTone;
   badgeCount?: number;
   last?: boolean;
+  accessibilityLabel?: string;
 }) {
   const colors = useColors();
   const active = !!onPress && !disabled;
@@ -59,7 +79,7 @@ export function AccountRow({
   return (
     <Pressable
       accessibilityRole={active ? "button" : undefined}
-      accessibilityLabel={badgeLabel ? `${title}, ${badgeLabel} unread support replies` : title}
+      accessibilityLabel={accessibilityLabel ?? (badgeLabel ? `${title}, ${badgeLabel} unread support replies` : title)}
       accessibilityState={{ disabled: !active }}
       disabled={!active}
       onPress={onPress}

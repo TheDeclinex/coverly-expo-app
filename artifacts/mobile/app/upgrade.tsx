@@ -10,6 +10,8 @@ import { useEntitlements } from "@/context/EntitlementsContext";
 import { useColors } from "@/hooks/useColors";
 import { usePropertyAllowance } from "@/hooks/usePropertyAllowance";
 import { type PurchasesPackage } from "@/lib/billing";
+import { trackEvent } from "@/lib/analytics";
+import { analyticsSourceScreen, categorizeAnalyticsFailure } from "@/lib/analytics-core";
 import {
   COVERLY_LEGAL_DOCUMENTS,
   type CoverlyLegalDocument,
@@ -19,6 +21,8 @@ import {
   defaultBillingPeriod,
   isCurrentPackage,
   isCurrentPlan,
+  packagePeriod,
+  packagePlan,
   selectedUpgradePackage,
   upgradePackageHasPrice,
   upgradePurchaseDisabled,
@@ -260,6 +264,14 @@ export default function UpgradeScreen() {
   });
   const [legalDocument, setLegalDocument] = useState<CoverlyLegalDocument | null>(null);
   const purchaseActionLockRef = React.useRef(false);
+  const paywallTrackedRef = React.useRef(false);
+  const sourceScreen = analyticsSourceScreen(feature ?? "account");
+
+  useEffect(() => {
+    if (paywallTrackedRef.current) return;
+    paywallTrackedRef.current = true;
+    void trackEvent("paywall_viewed", { source_screen: sourceScreen });
+  }, [sourceScreen]);
 
   useEffect(() => {
     setSelectedPeriods((current) => ({
@@ -275,9 +287,30 @@ export default function UpgradeScreen() {
   const buy = async (pkg: PurchasesPackage) => {
     if (purchaseLoading || isRefreshing || purchaseActionLockRef.current) return;
     purchaseActionLockRef.current = true;
+    const period = packagePeriod(pkg);
+    const purchaseProperties = {
+      plan: packagePlan(pkg),
+      billing_period: period === "monthly" || period === "annual" ? period : undefined,
+      product_identifier: pkg.product.identifier,
+      source_screen: sourceScreen,
+    } as const;
+    void trackEvent("purchase_started", purchaseProperties);
     try {
       const result = await purchasePackage(pkg);
-      if (result.cancelled) return;
+      if (result.cancelled) {
+        void trackEvent("purchase_failed", { ...purchaseProperties, failure_category: "cancelled" });
+        return;
+      }
+      if (result.ok) {
+        // This is a client purchase-flow interaction. The RevenueCat webhook
+        // remains the authoritative billing record.
+        void trackEvent("purchase_completed", purchaseProperties);
+      } else {
+        void trackEvent("purchase_failed", {
+          ...purchaseProperties,
+          failure_category: categorizeAnalyticsFailure({ message: result.message }),
+        });
+      }
       Alert.alert(
         result.ok ? "You're covered" : "Purchase unavailable",
         result.message,
@@ -293,6 +326,7 @@ export default function UpgradeScreen() {
     purchaseActionLockRef.current = true;
     try {
       const result = await restorePurchases();
+      if (result.ok) void trackEvent("purchase_restored", { source_screen: sourceScreen });
       Alert.alert(result.ok ? "Purchases restored" : "Restore complete", result.message);
     } finally {
       purchaseActionLockRef.current = false;

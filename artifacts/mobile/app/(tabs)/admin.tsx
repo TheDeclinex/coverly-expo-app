@@ -10,8 +10,17 @@ import { LoadingState } from "@/components/LoadingState";
 import { useAuth } from "@/context/AuthContext";
 import { useAccountProfile } from "@/hooks/useAccountProfile";
 import { useColors } from "@/hooks/useColors";
+import {
+  ADMIN_ANALYTICS_GROUPS,
+  ADMIN_ANALYTICS_HEADLINES,
+  ADMIN_ANALYTICS_METRICS,
+  adminAnalyticsMetricValue,
+  adminFunnelPercent,
+  type AdminAnalyticsMetricKey,
+  type AdminAnalyticsMetricTone,
+} from "@/lib/admin-analytics-model";
 import { adminMetricLabel } from "@/lib/admin-model";
-import { loadAdminOverview } from "@/lib/admin-service";
+import { loadAdminOverview, loadAdminUsageAnalytics } from "@/lib/admin-service";
 
 function environmentLabel(value: string | undefined): string {
   const environment = value?.trim().toLowerCase();
@@ -55,12 +64,23 @@ export default function AdminScreen() {
     retry: 1,
   });
 
+  const usageAnalyticsQuery = useQuery({
+    queryKey: ["admin-usage-analytics", session?.user.id],
+    queryFn: loadAdminUsageAnalytics,
+    enabled: !!session && isAdmin,
+    staleTime: 60_000,
+    retry: 1,
+  });
+
   if (isLoading) return <LoadingState />;
   if (!isAdmin) return <Redirect href={"/account" as Href} />;
 
   const overview = overviewQuery.data;
   const supportCounts = adminSupportCounts(overview);
   const environment = environmentLabel(process.env.EXPO_PUBLIC_APP_ENV);
+  const openMetric = (metric: AdminAnalyticsMetricKey) => {
+    router.push({ pathname: "/(tabs)/admin-analytics/[metric]", params: { metric } } as Href);
+  };
 
   return (
     <>
@@ -74,36 +94,65 @@ export default function AdminScreen() {
               Secure operator tools backed by admin-only Supabase RPCs.
             </Text>
           </View>
-          {overviewQuery.isFetching ? <ActivityIndicator size="small" color={colors.primary} /> : null}
+          {overviewQuery.isFetching || usageAnalyticsQuery.isFetching ? <ActivityIndicator size="small" color={colors.primary} /> : null}
         </View>
 
-        <View style={styles.metricGrid}>
-          <MetricCard
-            label="Total users"
-            value={adminMetricLabel(overview?.totalUsers, overviewQuery.isLoading, overviewQuery.isError)}
-          />
-          <MetricCard
-            label="Active testers"
-            value={adminMetricLabel(overview?.activeTesters, overviewQuery.isLoading, overviewQuery.isError)}
-          />
-          <MetricCard
-            label="AI scans this month"
-            value={adminMetricLabel(overview?.aiScansThisMonth, overviewQuery.isLoading, overviewQuery.isError)}
-          />
-          <MetricCard
-            label="Replacement lookups this month"
-            value={adminMetricLabel(overview?.replacementLookupsThisMonth, overviewQuery.isLoading, overviewQuery.isError)}
-          />
-          <MetricCard
-            label="Claim packs generated"
-            value={adminMetricLabel(overview?.claimPacksGenerated, overviewQuery.isLoading, overviewQuery.isError)}
-          />
-          <MetricCard
-            label="Recent errors"
-            value={adminMetricLabel(overview?.recentErrors, overviewQuery.isLoading, overviewQuery.isError)}
-            onPress={() => router.push("/admin-errors" as Href)}
-          />
+        <View style={styles.sectionHeading}>
+          <Text style={[styles.sectionTitle, { color: colors.foreground }]}>Usage analytics</Text>
+          <Text style={[styles.sectionHelper, { color: colors.mutedForeground }]}>Tap a metric to see the contributing accounts. Household content is never included.</Text>
         </View>
+        {usageAnalyticsQuery.isError ? (
+          <View style={[styles.analyticsState, { backgroundColor: colors.card, borderColor: colors.border, borderRadius: colors.radius }]}>
+            <Text style={[styles.sectionHelper, { color: colors.mutedForeground }]}>Usage reporting is unavailable. The rest of Admin is still available.</Text>
+            <Pressable accessibilityRole="button" onPress={() => void usageAnalyticsQuery.refetch()} style={[styles.retryButton, { backgroundColor: colors.primary }]}>
+              <Text style={[styles.retryText, { color: colors.primaryForeground }]}>Retry analytics</Text>
+            </Pressable>
+          </View>
+        ) : (
+          <View style={styles.metricGrid}>
+            {ADMIN_ANALYTICS_HEADLINES.map((metric) => {
+              const definition = ADMIN_ANALYTICS_METRICS[metric];
+              const value = usageAnalyticsQuery.data ? adminAnalyticsMetricValue(usageAnalyticsQuery.data, metric) : undefined;
+              return (
+                <MetricCard
+                  key={metric}
+                  label={definition.headlineLabel ?? definition.label}
+                  value={adminMetricLabel(value, usageAnalyticsQuery.isLoading, false)}
+                  tone={definition.tone}
+                  onPress={() => openMetric(metric)}
+                />
+              );
+            })}
+          </View>
+        )}
+
+        {ADMIN_ANALYTICS_GROUPS.map((group) => (
+          <AccountSection key={group.key} title={group.label} tone={group.tone}>
+            {group.metrics.map((metric, index) => {
+              const definition = ADMIN_ANALYTICS_METRICS[metric];
+              const rawValue = usageAnalyticsQuery.data ? adminAnalyticsMetricValue(usageAnalyticsQuery.data, metric) : undefined;
+              const value = usageAnalyticsQuery.isError
+                ? "Unavailable"
+                : adminMetricLabel(rawValue, usageAnalyticsQuery.isLoading, false);
+              const isActivationPercent = group.key === "activation" && metric !== "registered";
+              return (
+                <AccountRow
+                  key={metric}
+                  icon={definition.icon}
+                  title={definition.label}
+                  subtitle={isActivationPercent && usageAnalyticsQuery.data
+                    ? `Approx. ${adminFunnelPercent(rawValue ?? 0, usageAnalyticsQuery.data.funnel.registered)} of registered accounts`
+                    : undefined}
+                  value={value}
+                  tone={definition.tone}
+                  accessibilityLabel={`${definition.label}, ${value}`}
+                  onPress={() => openMetric(metric)}
+                  last={index === group.metrics.length - 1}
+                />
+              );
+            })}
+          </AccountSection>
+        ))}
 
         <AccountSection title="Support">
           <AccountRow
@@ -178,8 +227,18 @@ export default function AdminScreen() {
   );
 }
 
-function MetricCard({ label, value, onPress }: { label: string; value: string; onPress?: () => void }) {
+const metricTones: Record<AdminAnalyticsMetricTone, { surface: string; border: string }> = {
+  blue: { surface: "#F8FBFF", border: "#D8E8F8" },
+  teal: { surface: "#F6FCFA", border: "#D3ECE6" },
+  lavender: { surface: "#FBF9FF", border: "#E4DCF4" },
+  amber: { surface: "#FFFCF5", border: "#F4E4BC" },
+  green: { surface: "#F8FCF8", border: "#D7EAD9" },
+  greyBlue: { surface: "#F8FAFC", border: "#DCE4EC" },
+};
+
+function MetricCard({ label, value, tone, onPress }: { label: string; value: string; tone: AdminAnalyticsMetricTone; onPress: () => void }) {
   const colors = useColors();
+  const palette = metricTones[tone];
   const content = (
     <>
       <Text style={[styles.metricValue, { color: value === "Not available" || value === "Unavailable" ? colors.mutedForeground : colors.foreground }]}>{value}</Text>
@@ -187,21 +246,14 @@ function MetricCard({ label, value, onPress }: { label: string; value: string; o
     </>
   );
 
-  if (!onPress) {
-    return (
-      <View style={[styles.metric, { backgroundColor: colors.card, borderColor: colors.border, borderRadius: colors.radius }]}>
-        {content}
-      </View>
-    );
-  }
-
   return (
     <Pressable
       accessibilityRole="button"
+      accessibilityLabel={`${label}, ${value}`}
       onPress={onPress}
       style={({ pressed }) => [
         styles.metric,
-        { backgroundColor: colors.card, borderColor: colors.border, borderRadius: colors.radius, opacity: pressed ? 0.72 : 1 },
+        { backgroundColor: palette.surface, borderColor: palette.border, borderRadius: colors.radius, opacity: pressed ? 0.72 : 1 },
       ]}
     >
       {content}
@@ -218,4 +270,10 @@ const styles = StyleSheet.create({
   metric: { width: "48%", flexGrow: 1, borderWidth: 1, padding: 14, minHeight: 82, justifyContent: "center" },
   metricValue: { fontSize: 20, fontFamily: "Inter_700Bold" },
   metricLabel: { fontSize: 11, lineHeight: 16, fontFamily: "Inter_400Regular", marginTop: 4 },
+  sectionHeading: { gap: 3, marginTop: 2 },
+  sectionTitle: { fontSize: 15, fontFamily: "Inter_700Bold" },
+  sectionHelper: { fontSize: 11, lineHeight: 16, fontFamily: "Inter_400Regular" },
+  analyticsState: { borderWidth: 1, padding: 14, gap: 10, alignItems: "flex-start" },
+  retryButton: { minHeight: 34, borderRadius: 8, alignItems: "center", justifyContent: "center", paddingHorizontal: 14 },
+  retryText: { fontSize: 12, fontFamily: "Inter_700Bold" },
 });

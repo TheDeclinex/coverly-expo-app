@@ -4,7 +4,7 @@ import {
   adminClaimPackRpcParams,
   adminEventRpcParams,
   adminSupportRpcParams,
-  adminUsersRpcParams,
+  adminUsersAnalyticsRpcParams,
   canRunAdminUserSearch,
   clampAdminLimit,
   normalizeAdminSearchQuery,
@@ -14,7 +14,19 @@ import {
   type AdminPage,
   type AdminSupportFilter,
   type AdminTimeframe,
+  type AdminUserAnalyticsCursor,
 } from "@/lib/admin-list-model";
+import type {
+  AdminAnalyticsDrilldownCursor,
+  AdminAnalyticsDrilldownPage,
+  AdminAnalyticsMetricKey,
+  AdminRecentActivityEvent,
+  AdminUsageAnalytics,
+  AdminUserActivity,
+  AdminUserAnalyticsFilter,
+  AdminUserAnalyticsSort,
+} from "@/lib/admin-analytics-model";
+import { adminAnalyticsDrilldownRpcParams } from "@/lib/admin-analytics-model";
 import { adminUserIdDebugSummary } from "@/lib/admin-model";
 
 export interface AdminOverview {
@@ -38,6 +50,15 @@ export interface AdminUserSearchResult {
   effective_plan: string | null;
   tester_status: string | null;
   created_at: string | null;
+  last_sign_in_at: string | null;
+  last_active_at: string | null;
+  property_count: number;
+  room_count: number;
+  item_count: number;
+  successful_scans_30d: number;
+  replacement_searches_30d: number;
+  claim_packs_30d: number;
+  cursor_sort_value: string | null;
 }
 
 export interface AdminUserProfile {
@@ -205,6 +226,21 @@ export function loadAdminOverview(): Promise<AdminOverview> {
   });
 }
 
+export function loadAdminUsageAnalytics(): Promise<AdminUsageAnalytics> {
+  return rpcValue<AdminUsageAnalytics>("admin_get_usage_analytics");
+}
+
+export function loadAdminAnalyticsMetricPage(input: {
+  metric: AdminAnalyticsMetricKey;
+  cursor?: AdminAnalyticsDrilldownCursor | null;
+  limit?: number;
+}): Promise<AdminAnalyticsDrilldownPage> {
+  return rpcValue<AdminAnalyticsDrilldownPage>(
+    "admin_get_analytics_metric_accounts",
+    adminAnalyticsDrilldownRpcParams(input),
+  );
+}
+
 export function searchAdminUsers(query: string, limit = 25): Promise<AdminUserSearchResult[]> {
   const normalizedQuery = normalizeAdminSearchQuery(query);
   if (!canRunAdminUserSearch(normalizedQuery)) return Promise.resolve([]);
@@ -216,10 +252,27 @@ export function searchAdminUsers(query: string, limit = 25): Promise<AdminUserSe
 
 export function loadAdminUsersPage(input: {
   query: string | null;
-  cursor?: AdminCursor | null;
+  filter?: AdminUserAnalyticsFilter;
+  sort?: AdminUserAnalyticsSort;
+  cursor?: AdminUserAnalyticsCursor | null;
   limit?: number;
 }): Promise<AdminPage<AdminUserSearchResult>> {
-  return rpcValue<AdminPage<AdminUserSearchResult>>("admin_list_users_page", adminUsersRpcParams(input));
+  return rpcValue<AdminPage<AdminUserSearchResult>>(
+    "admin_list_users_analytics_page",
+    adminUsersAnalyticsRpcParams({
+      ...input,
+      filter: input.filter ?? "all",
+      sort: input.sort ?? "last_active",
+    }),
+  );
+}
+
+export function loadAdminUserActivity(userId: string): Promise<AdminUserActivity> {
+  return rpcValue<AdminUserActivity>("admin_get_user_activity", { p_user_id: userId });
+}
+
+export function loadAdminUserRecentActivity(userId: string): Promise<AdminRecentActivityEvent[]> {
+  return rpcValue<AdminRecentActivityEvent[]>("admin_get_user_recent_activity", { p_user_id: userId });
 }
 
 export async function loadAdminUserDetail(userId: string): Promise<AdminUserDetail> {

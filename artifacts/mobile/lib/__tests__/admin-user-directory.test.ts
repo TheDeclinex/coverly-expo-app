@@ -91,13 +91,14 @@ test("directory RPC returns only summary fields and remains admin-only", () => {
   assert.match(migration, /GRANT EXECUTE ON FUNCTION public\.admin_list_users_page[\s\S]*TO authenticated, service_role/);
 });
 
-test("client uses the paginated directory RPC and resets on effective query changes", () => {
-  assert.match(service, /"admin_list_users_page"/);
+test("client uses the analytics-enriched paginated directory RPC and resets on effective query changes", () => {
+  assert.match(service, /"admin_list_users_analytics_page"/);
   assert.match(screen, /useInfiniteQuery/);
   assert.match(screen, /<FlatList/);
   assert.match(screen, /limit: 50/);
   assert.match(screen, /isFetchingNextPage/);
   assert.match(screen, /mergeAdminPages/);
+  assert.match(screen, /cursorFromAdminUserPage/);
   assert.match(screen, /setQueryRevision/);
   assert.match(screen, /resetQueries/);
 });

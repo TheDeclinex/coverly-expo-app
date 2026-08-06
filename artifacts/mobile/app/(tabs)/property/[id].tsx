@@ -37,6 +37,7 @@ import { ENABLE_RECOMMENDED_ACTIONS } from "@/constants/recommendedActions";
 import { getRoomPlaceholderIcon } from "@/constants/roomVisuals";
 import { useAuth } from "@/context/AuthContext";
 import { useColors } from "@/hooks/useColors";
+import { trackEvent } from "@/lib/analytics";
 import {
   useSignedImageRecovery,
   useSignedImageSource,
@@ -1929,6 +1930,7 @@ export default function PropertyDetailScreen() {
         requestAnimationFrame(() => addRoomInputRef.current?.focus());
         return;
       }
+      void trackEvent("room_created", { room_count: (rooms?.length ?? 0) + 1 });
       await queryClient.invalidateQueries({ queryKey: ["rooms", id] });
       setAddRoomVisible(false);
       setAddRoomName("");

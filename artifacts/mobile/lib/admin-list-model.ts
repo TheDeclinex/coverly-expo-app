@@ -7,6 +7,11 @@ export type AdminCursor = {
   id: string;
 };
 
+export type AdminUserAnalyticsCursor = {
+  sortValue: string;
+  id: string;
+};
+
 export interface AdminPage<T> {
   items: T[];
   hasMore: boolean;
@@ -51,6 +56,30 @@ export function adminUsersRpcParams(input: {
     p_before_created_at: input.cursor?.createdAt ?? null,
     p_before_id: input.cursor?.id ?? null,
   };
+}
+
+export function adminUsersAnalyticsRpcParams(input: {
+  query: string | null;
+  filter: import("./admin-analytics-model").AdminUserAnalyticsFilter;
+  sort: import("./admin-analytics-model").AdminUserAnalyticsSort;
+  cursor?: AdminUserAnalyticsCursor | null;
+  limit?: number;
+}): Record<string, unknown> {
+  return {
+    p_query: input.query === null ? null : adminUserDirectoryEffectiveQuery(input.query),
+    p_filter: input.filter,
+    p_sort: input.sort,
+    p_limit: clampAdminLimit(input.limit, 50),
+    p_before_sort_value: input.cursor?.sortValue ?? null,
+    p_before_id: input.cursor?.id ?? null,
+  };
+}
+
+export function cursorFromAdminUserPage<T extends { id: string; cursor_sort_value: string | null }>(
+  page: AdminPage<T> | undefined,
+): AdminUserAnalyticsCursor | null {
+  const last = page?.items.at(-1);
+  return last?.cursor_sort_value ? { sortValue: last.cursor_sort_value, id: last.id } : null;
 }
 
 export function adminDateRange(

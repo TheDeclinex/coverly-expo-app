@@ -2,6 +2,7 @@ import { supabase } from "@/lib/supabase";
 import { normalizePropertyTypeValue } from "@/constants/propertyTypes";
 import type { InventoryFile } from "@/types";
 import { normalizePropertyCreationError } from "@/lib/property-errors";
+import { trackEvent } from "@/lib/analytics";
 
 export { formatPropertySaveError, PropertyCreationError } from "@/lib/property-errors";
 
@@ -41,6 +42,7 @@ export async function createProperty(input: CreatePropertyInput): Promise<Invent
     throw new Error("Could not create property. Please try again.");
   }
 
+  void trackEvent("property_created");
   return data as InventoryFile;
 }
 

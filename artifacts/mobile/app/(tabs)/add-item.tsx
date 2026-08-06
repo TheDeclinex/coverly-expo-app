@@ -27,6 +27,7 @@ import { VoiceFieldButton } from "@/components/voice/VoiceFieldButton";
 import { VoiceInputSheet } from "@/components/voice/VoiceInputSheet";
 import { useAuth } from "@/context/AuthContext";
 import { useColors } from "@/hooks/useColors";
+import { trackEvent } from "@/lib/analytics";
 import { formatCurrencyFull } from "@/lib/inventory-mappers";
 import { buildItemInsertPayload } from "@/lib/item-insert-helpers";
 import { requestImagePermission } from "@/lib/media-permissions";
@@ -432,6 +433,7 @@ export default function AddItemScreen() {
     }
 
     if (__DEV__) console.log("[AddItem] Insert succeeded — navigating to room", selectedRoomId);
+    void trackEvent("item_created_manually", { entry_method: "manual" });
     stageRecentItemBatch(selectedRoomId, [payload.id]);
     showToast(`Item added to ${destRoomName ?? "room"}`);
 

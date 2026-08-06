@@ -29,6 +29,8 @@ import { useAuth } from "@/context/AuthContext";
 import { useEntitlements } from "@/context/EntitlementsContext";
 import { useColors } from "@/hooks/useColors";
 import { useVoiceRecording } from "@/hooks/useVoiceRecording";
+import { trackEvent } from "@/lib/analytics";
+import { categorizeAnalyticsFailure } from "@/lib/analytics-core";
 import { callVoiceDescribe } from "@/lib/voice-input";
 import {
   buildReplacementSearchQuery,
@@ -428,6 +430,8 @@ export default function ReplacementPricingScreen() {
     const mode = options.mode ?? "initial";
     const refinementDraft = mode === "refined" ? options.draft : undefined;
     const isRefined = refinementDraft != null;
+    const searchStartedAt = Date.now();
+    void trackEvent("replacement_search_started", { refined_search_used: isRefined });
     const sequence = activeSearchSequence.current + 1;
     activeSearchSequence.current = sequence;
     if (isRefined) {
@@ -481,6 +485,11 @@ export default function ReplacementPricingScreen() {
       setLastSuccessfulRefinementDraft(cloneReplacementRefinementDraft(successfulDraft));
       setWorkingRefinementDraft(cloneReplacementRefinementDraft(successfulDraft));
       if (isRefined) setLastFailedRefinement(null);
+      void trackEvent("replacement_search_completed", {
+        result_count: response.results.length,
+        duration_ms: Date.now() - searchStartedAt,
+        refined_search_used: isRefined,
+      });
       if (!reduceMotion) {
         resultEntrance.setValue(0);
         Animated.timing(resultEntrance, {
@@ -495,6 +504,15 @@ export default function ReplacementPricingScreen() {
     } catch (searchFailure) {
       if (sequence !== activeSearchSequence.current) return;
       if (searchFailure instanceof ReplacementPriceSearchError && searchFailure.errorCode === "CANCELLED") return;
+      void trackEvent("replacement_search_failed", {
+        duration_ms: Date.now() - searchStartedAt,
+        refined_search_used: isRefined,
+        failure_category: categorizeAnalyticsFailure({
+          status: searchFailure instanceof ReplacementPriceSearchError ? searchFailure.status : null,
+          code: searchFailure instanceof ReplacementPriceSearchError ? searchFailure.errorCode : null,
+          message: searchFailure instanceof Error ? searchFailure.message : null,
+        }),
+      });
       if (isRefined) {
         setLastFailedRefinement({
           draft: cloneReplacementRefinementDraft(refinementDraft),

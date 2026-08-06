@@ -13,7 +13,7 @@ import {
 import { Stack } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
 import React, { useEffect } from "react";
-import { Image } from "react-native";
+import { AppState, Image, type AppStateStatus } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { KeyboardProvider } from "react-native-keyboard-controller";
 import { SafeAreaProvider } from "react-native-safe-area-context";
@@ -22,6 +22,7 @@ import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { ToastProvider } from "@/components/Toast";
 import { AuthProvider, useAuth } from "@/context/AuthContext";
 import { EntitlementsProvider } from "@/context/EntitlementsContext";
+import { recordAppOpened, trackEvent, updateLastActive } from "@/lib/analytics";
 import { synchroniseImageCacheAccount } from "@/lib/image-cache";
 import { isSignedImageQueryKey } from "@/lib/image-cache-model";
 
@@ -33,6 +34,9 @@ const queryClient = new QueryClient();
 function RootLayoutNav() {
   const { loading, session, hasSeenOnboarding } = useAuth();
   const rootQueryClient = useQueryClient();
+  const appStateRef = React.useRef<AppStateStatus>(AppState.currentState);
+  const analyticsUserIdRef = React.useRef<string | null>(session?.user.id ?? null);
+  analyticsUserIdRef.current = session?.user.id ?? null;
   const [fontsLoaded, fontError] = useFonts({
     Inter_400Regular,
     Inter_500Medium,
@@ -70,6 +74,27 @@ function RootLayoutNav() {
       }
     });
   }, [loading, rootQueryClient, session?.user.id]);
+
+  useEffect(() => {
+    if (loading) return;
+    void recordAppOpened();
+    if (session?.user.id) void updateLastActive();
+  }, [loading, session?.user.id]);
+
+  useEffect(() => {
+    const subscription = AppState.addEventListener("change", (nextState) => {
+      const previousState = appStateRef.current;
+      appStateRef.current = nextState;
+      if (nextState !== "active" || previousState === "active") return;
+      const authenticated = Boolean(analyticsUserIdRef.current);
+      void trackEvent("app_foregrounded", { authenticated });
+      if (authenticated) {
+        void recordAppOpened();
+        void updateLastActive();
+      }
+    });
+    return () => subscription.remove();
+  }, []);
 
   // Auth is settled when not loading AND (no session, OR the onboarding flag has resolved).
   // Waiting for hasSeenOnboarding prevents a flash of the wrong screen for authed users.

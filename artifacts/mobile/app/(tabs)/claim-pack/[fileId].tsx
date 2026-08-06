@@ -24,6 +24,8 @@ import { LoadingState } from "@/components/LoadingState";
 import { useAuth } from "@/context/AuthContext";
 import { useEntitlements } from "@/context/EntitlementsContext";
 import { useColors } from "@/hooks/useColors";
+import { trackEvent } from "@/lib/analytics";
+import { categorizeAnalyticsFailure } from "@/lib/analytics-core";
 import {
   deleteClaimPackDraft,
   getClaimPackDraft,
@@ -189,6 +191,7 @@ export default function ClaimPackDraftScreen() {
   const [didPrefillClaimDetails, setDidPrefillClaimDetails] = useState(false);
   const [approvedReviewIssueIds, setApprovedReviewIssueIds] = useState<Set<string>>(new Set());
   const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
+  const claimPackGenerationInFlightRef = useRef(false);
   const [generatedPdf, setGeneratedPdf] = useState<GenerateClaimPackPdfSuccess | null>(null);
   const [generateError, setGenerateError] = useState<string | null>(null);
 
@@ -567,7 +570,8 @@ export default function ClaimPackDraftScreen() {
 
   const generatePdf = async () => {
     logClaimPackPdfDiagnostic("claim_pack_pdf_button_pressed", claimPackPdfDiagnostics);
-    if (isGeneratingPdf) return;
+    if (isGeneratingPdf || claimPackGenerationInFlightRef.current) return;
+    claimPackGenerationInFlightRef.current = true;
     logClaimPackPdfDiagnostic("claim_pack_generate_prepare_started", claimPackPdfDiagnostics);
     if (!futureGeneratePayload) {
       const message = "We couldn't prepare the claim pack PDF request, so it was not sent. Please refresh the draft and try again.";
@@ -578,6 +582,7 @@ export default function ClaimPackDraftScreen() {
       });
       setGeneratedPdf(null);
       setGenerateError(message);
+      claimPackGenerationInFlightRef.current = false;
       return;
     }
     if (futureGeneratePayload.selectedItemIds.length === 0) {
@@ -589,6 +594,7 @@ export default function ClaimPackDraftScreen() {
       });
       setGeneratedPdf(null);
       setGenerateError(message);
+      claimPackGenerationInFlightRef.current = false;
       return;
     }
     if (!canExportClaimPack) {
@@ -603,10 +609,17 @@ export default function ClaimPackDraftScreen() {
         { text: "Not now", style: "cancel" },
         { text: "View plan options", onPress: () => router.push({ pathname: "/upgrade", params: { feature: "claim_pack" } } as Href) },
       ]);
+      claimPackGenerationInFlightRef.current = false;
       return;
     }
+    const generationStartedAt = Date.now();
     setIsGeneratingPdf(true);
     setGenerateError(null);
+    void trackEvent("claim_pack_started", {
+      room_count: summary.selectedRoomsCount,
+      item_count: summary.selectedItemsCount,
+      evidence_file_count: summary.includedEvidenceCount,
+    });
     try {
       logClaimPackPdfDiagnostic("claim_pack_generate_invoke_started", claimPackPdfDiagnostics);
       const result = await generateClaimPackPdf(futureGeneratePayload);
@@ -616,6 +629,13 @@ export default function ClaimPackDraftScreen() {
         status: 200,
       });
       setGeneratedPdf(result);
+      void trackEvent("claim_pack_completed", {
+        room_count: summary.selectedRoomsCount,
+        item_count: summary.selectedItemsCount,
+        evidence_file_count: summary.includedEvidenceCount,
+        duration_ms: Date.now() - generationStartedAt,
+        delivery_method: result.emailSent ? "email" : "in_app",
+      });
       clearClaimPackDraftSnapshot(clientDraftId);
       if (session?.user.id) {
         await deleteClaimPackDraft(session.user.id, clientDraftId);
@@ -626,6 +646,17 @@ export default function ClaimPackDraftScreen() {
       ]);
     } catch (error) {
       setGeneratedPdf(null);
+      void trackEvent("claim_pack_failed", {
+        room_count: summary.selectedRoomsCount,
+        item_count: summary.selectedItemsCount,
+        evidence_file_count: summary.includedEvidenceCount,
+        duration_ms: Date.now() - generationStartedAt,
+        failure_category: categorizeAnalyticsFailure({
+          status: claimPackErrorStatus(error),
+          code: claimPackErrorCode(error) ?? claimPackErrorReason(error),
+          message: claimPackErrorMessage(error),
+        }),
+      });
       logClaimPackPdfDiagnostic("claim_pack_generate_invoke_failed", {
         ...claimPackPdfDiagnostics,
         status: claimPackErrorStatus(error),
@@ -635,6 +666,7 @@ export default function ClaimPackDraftScreen() {
       setGenerateError(safeClaimPackExportError(error));
     } finally {
       setIsGeneratingPdf(false);
+      claimPackGenerationInFlightRef.current = false;
     }
   };
 

@@ -48,6 +48,8 @@ import {
 import { useAuth } from "@/context/AuthContext";
 import { useEntitlements } from "@/context/EntitlementsContext";
 import { useColors } from "@/hooks/useColors";
+import { analyticsScanMode, categorizeAnalyticsFailure } from "@/lib/analytics-core";
+import { trackEvent } from "@/lib/analytics";
 import { buildItemInsertPayload } from "@/lib/item-insert-helpers";
 import { getInstalledAppContext } from "@/lib/app-build-context";
 import { formatCurrencyFull } from "@/lib/inventory-mappers";
@@ -996,6 +998,7 @@ export default function ScanScreen() {
 
     setSelectedRoomId(roomId);
     setScanError(null);
+    void trackEvent("room_created", { room_count: (rooms?.length ?? 0) + 1 });
     queryClient.invalidateQueries({ queryKey: ["rooms", selectedFileId] });
     queryClient.invalidateQueries({ queryKey: ["rooms", selectedFileId, session.user.id] });
   };
@@ -1578,6 +1581,12 @@ export default function ScanScreen() {
     const scanAttemptId = scanAttemptRef.current + 1;
     scanAttemptRef.current = scanAttemptId;
     scanSubmissionInFlightRef.current = scanAttemptId;
+    const scanStartedAt = Date.now();
+    const trackedScanMode = analyticsScanMode(mode);
+    void trackEvent("scan_started", {
+      scan_mode: trackedScanMode,
+      image_count: scanImages.length,
+    });
     try {
 
     setScanError(null);
@@ -1606,6 +1615,12 @@ export default function ScanScreen() {
         imagesForScan = await prepareImagesForCompatibility(scanImages, reason);
         setImages(imagesForScan);
       } catch (error) {
+        void trackEvent("scan_failed", {
+          scan_mode: trackedScanMode,
+          image_count: scanImages.length,
+          duration_ms: Date.now() - scanStartedAt,
+          failure_category: "processing",
+        });
         showRecoverableScanError(
           "This phone had trouble preparing the photo. Try again in compatibility mode or choose a photo from gallery.",
           scanImages,
@@ -1641,6 +1656,12 @@ export default function ScanScreen() {
     } catch (error) {
       if (scanAttemptRef.current !== scanAttemptId) return;
       const message = error instanceof Error ? error.message : "Scan failed. Please try again.";
+      void trackEvent("scan_failed", {
+        scan_mode: trackedScanMode,
+        image_count: imagesForScan.length,
+        duration_ms: Date.now() - scanStartedAt,
+        failure_category: categorizeAnalyticsFailure({ message }),
+      });
       const expectedNetworkFailure = /timed out|network request failed|network request timed out|failed to fetch/i.test(message);
       if (__DEV__ && !expectedNetworkFailure) console.error("[Scan] unexpected scan failure", error);
       showRecoverableScanError(
@@ -1654,6 +1675,12 @@ export default function ScanScreen() {
     }
 
     if (result.status === "not_configured") {
+      void trackEvent("scan_failed", {
+        scan_mode: trackedScanMode,
+        image_count: imagesForScan.length,
+        duration_ms: Date.now() - scanStartedAt,
+        failure_category: "configuration",
+      });
       reportScanFailure("scan_not_configured", mode, imagesForScan);
       setScanStatus("error");
       setScanError("AI scan is not available right now. No items were saved. Please try again later.");
@@ -1661,6 +1688,16 @@ export default function ScanScreen() {
     }
 
     if (result.status === "error") {
+      void trackEvent("scan_failed", {
+        scan_mode: trackedScanMode,
+        image_count: imagesForScan.length,
+        duration_ms: Date.now() - scanStartedAt,
+        failure_category: categorizeAnalyticsFailure({
+          status: result.httpStatus,
+          code: result.errorCode,
+          message: result.errorMessage,
+        }),
+      });
       const normalizedLimit = normalizeLimitError({
         status: result.httpStatus,
         errorCode: result.errorCode ?? (result.httpStatus === 402 ? "AI_SCAN_LIMIT_REACHED" : undefined),
@@ -1692,6 +1729,12 @@ export default function ScanScreen() {
     }
 
     if (result.items.length === 0) {
+      void trackEvent("scan_failed", {
+        scan_mode: trackedScanMode,
+        image_count: imagesForScan.length,
+        duration_ms: Date.now() - scanStartedAt,
+        failure_category: "processing",
+      });
       showRecoverableScanError(
         "The photo was scanned, but no items were detected or saved. Try a clearer shot or a different angle.",
         imagesForScan,
@@ -1699,6 +1742,13 @@ export default function ScanScreen() {
       );
       return;
     }
+
+    void trackEvent("scan_completed", {
+      scan_mode: trackedScanMode,
+      image_count: imagesForScan.length,
+      items_detected_count: result.items.length,
+      duration_ms: Date.now() - scanStartedAt,
+    });
 
     try {
       // Attach source image thumbnails for review cards.

@@ -9,6 +9,7 @@ import { LoadingState } from "@/components/LoadingState";
 import { useAuth } from "@/context/AuthContext";
 import { useAccountProfile } from "@/hooks/useAccountProfile";
 import { useColors } from "@/hooks/useColors";
+import { adminActivityDateLabel, adminTimelineEventView } from "@/lib/admin-analytics-model";
 import {
   adminDateLabel,
   adminNumberLabel,
@@ -17,7 +18,13 @@ import {
   adminUserIdDebugSummary,
   normalizeAdminUserIdParam,
 } from "@/lib/admin-model";
-import { loadAdminUserDetail, loadAdminUserPropertyPreview, type AdminUserFile } from "@/lib/admin-service";
+import {
+  loadAdminUserActivity,
+  loadAdminUserDetail,
+  loadAdminUserPropertyPreview,
+  loadAdminUserRecentActivity,
+  type AdminUserFile,
+} from "@/lib/admin-service";
 
 export default function AdminUserDetailScreen() {
   const colors = useColors();
@@ -48,11 +55,38 @@ export default function AdminUserDetailScreen() {
     retry: 1,
   });
 
+  const activityQuery = useQuery({
+    queryKey: ["admin-user-activity", session?.user.id, selectedUserId],
+    queryFn: () => loadAdminUserActivity(selectedUserId!),
+    enabled: !!session && isAdmin && !!selectedUserId,
+    staleTime: 20_000,
+    retry: 1,
+  });
+
+  const recentActivityQuery = useQuery({
+    queryKey: ["admin-user-recent-activity", session?.user.id, selectedUserId],
+    queryFn: () => loadAdminUserRecentActivity(selectedUserId!),
+    enabled: !!session && isAdmin && !!selectedUserId,
+    staleTime: 20_000,
+    retry: 1,
+  });
+
   if (isLoading) return <LoadingState />;
   if (!isAdmin) return <Redirect href={"/account" as Href} />;
 
   const detail = detailQuery.data;
   const profile = detail?.profile;
+  const recentActivityCount = activityQuery.data
+    ? activityQuery.data.appOpens30d
+      + activityQuery.data.successfulScans30d
+      + activityQuery.data.failedScans30d
+      + activityQuery.data.replacementSearches30d
+      + activityQuery.data.failedReplacementSearches30d
+      + activityQuery.data.claimPacksCompleted30d
+      + activityQuery.data.claimPacksFailed30d
+      + activityQuery.data.paywallViews30d
+      + activityQuery.data.purchaseStarts30d
+    : null;
 
   return (
     <>
@@ -123,6 +157,81 @@ export default function AdminUserDetailScreen() {
             <AccountSection title={`Usage ${detail.usage.monthKey ?? ""}`.trim()}>
               <AccountRow icon="camera" title="AI scans" value={adminNumberLabel(detail.usage.aiScans)} />
               <AccountRow icon="search" title="Replacement lookups" value={adminNumberLabel(detail.usage.replacementLookups)} last />
+            </AccountSection>
+
+            <AccountSection title="Activity">
+              {activityQuery.isLoading ? (
+                <AccountRow icon="loader" title="Loading activity" value="Loading" last />
+              ) : activityQuery.isError || !activityQuery.data ? (
+                <AccountRow
+                  icon="alert-triangle"
+                  title="Activity unavailable"
+                  subtitle="The user profile remains available. Tap to retry reporting."
+                  value="Retry"
+                  onPress={() => void activityQuery.refetch()}
+                  last
+                />
+              ) : (
+                <>
+                  <AccountRow icon="calendar" title="Account created" value={adminDateLabel(activityQuery.data.accountCreatedAt)} />
+                  <AccountRow icon="log-in" title="Last sign-in" value={adminActivityDateLabel(activityQuery.data.lastSignInAt, "Never signed in")} />
+                  <AccountRow icon="activity" title="Last active" value={adminActivityDateLabel(activityQuery.data.lastActiveAt, "No recorded activity")} />
+                  <AccountRow
+                    icon="play-circle"
+                    title="First recorded event"
+                    subtitle={activityQuery.data.firstEventName ? adminTimelineEventView({ id: "first", eventName: activityQuery.data.firstEventName, createdAt: activityQuery.data.firstEventAt ?? "", summary: null }).label : undefined}
+                    value={adminActivityDateLabel(activityQuery.data.firstEventAt, "No recorded activity")}
+                  />
+                  <AccountRow
+                    icon="clock"
+                    title="Latest recorded event"
+                    subtitle={activityQuery.data.latestEventName ? adminTimelineEventView({ id: "latest", eventName: activityQuery.data.latestEventName, createdAt: activityQuery.data.latestEventAt ?? "", summary: null }).label : undefined}
+                    value={adminActivityDateLabel(activityQuery.data.latestEventAt, "No recorded activity")}
+                  />
+                  <AccountRow icon="log-in" title="App opens (7d / 30d)" value={`${activityQuery.data.appOpens7d} / ${activityQuery.data.appOpens30d}`} />
+                  <AccountRow icon="camera" title="Successful / failed scans (30d)" value={`${activityQuery.data.successfulScans30d} / ${activityQuery.data.failedScans30d}`} />
+                  <AccountRow icon="search" title="Successful / failed searches (30d)" value={`${activityQuery.data.replacementSearches30d} / ${activityQuery.data.failedReplacementSearches30d}`} />
+                  <AccountRow icon="archive" title="Completed / failed claim packs (30d)" value={`${activityQuery.data.claimPacksCompleted30d} / ${activityQuery.data.claimPacksFailed30d}`} />
+                  <AccountRow icon="credit-card" title="Paywall views (30d)" value={adminNumberLabel(activityQuery.data.paywallViews30d)} />
+                  <AccountRow icon="shopping-cart" title="Purchase starts (30d)" value={adminNumberLabel(activityQuery.data.purchaseStarts30d)} />
+                  <AccountRow
+                    icon="info"
+                    title="Last 30 days"
+                    value={recentActivityCount === 0 ? "No activity in the last 30 days" : `${recentActivityCount} recorded events`}
+                    last
+                  />
+                </>
+              )}
+            </AccountSection>
+
+            <AccountSection title="Recent activity">
+              {recentActivityQuery.isLoading ? (
+                <AccountRow icon="loader" title="Loading recent activity" value="Loading" last />
+              ) : recentActivityQuery.isError ? (
+                <AccountRow
+                  icon="alert-triangle"
+                  title="Recent activity unavailable"
+                  subtitle="Tap to retry. Raw event properties are never shown."
+                  value="Retry"
+                  onPress={() => void recentActivityQuery.refetch()}
+                  last
+                />
+              ) : (recentActivityQuery.data ?? []).length === 0 ? (
+                <AccountRow icon="activity" title="No recorded activity" value="Empty" last />
+              ) : (
+                (recentActivityQuery.data ?? []).map((event, index, events) => {
+                  const view = adminTimelineEventView(event);
+                  return (
+                    <AccountRow
+                      key={event.id}
+                      icon="activity"
+                      title={view.label}
+                      subtitle={[adminDateLabel(event.createdAt), view.summary].filter(Boolean).join(" · ")}
+                      last={index === events.length - 1}
+                    />
+                  );
+                })
+              )}
             </AccountSection>
 
             <AccountSection title="Access">

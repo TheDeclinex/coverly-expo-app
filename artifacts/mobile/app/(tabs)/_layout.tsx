@@ -65,6 +65,7 @@ export default function AppLayout() {
         <Stack.Screen name="feedback" options={{ title: "Feedback & Support" }} />
         <Stack.Screen name="account-deletion" options={{ title: "Account deletion" }} />
         <Stack.Screen name="admin" options={{ title: "Admin" }} />
+        <Stack.Screen name="admin-analytics/[metric]" options={{ title: "Analytics metric" }} />
         <Stack.Screen name="admin-users" options={{ title: "User lookup" }} />
         <Stack.Screen name="admin-user/[id]" options={{ title: "User detail" }} />
         <Stack.Screen name="admin-user-files/[id]" options={{ title: "User properties" }} />
