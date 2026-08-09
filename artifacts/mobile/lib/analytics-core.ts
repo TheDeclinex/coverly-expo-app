@@ -76,6 +76,13 @@ type BillingProperties = {
   failure_category?: AnalyticsFailureCategory;
 };
 
+type ReviewProperties = {
+  trigger?: "third_successful_ai_scan";
+  successful_scan_count?: number;
+  source_screen?: "account";
+  store_platform?: "ios" | "android";
+};
+
 export interface AnalyticsEventProperties {
   app_opened: AppActivityProperties;
   app_foregrounded: AppActivityProperties;
@@ -96,6 +103,9 @@ export interface AnalyticsEventProperties {
   purchase_completed: BillingProperties;
   purchase_failed: BillingProperties;
   purchase_restored: BillingProperties;
+  review_prompt_eligible: ReviewProperties;
+  review_prompt_requested: ReviewProperties;
+  review_store_link_opened: ReviewProperties;
 }
 
 export type AnalyticsEventName = keyof AnalyticsEventProperties;
@@ -203,6 +213,9 @@ const EVENT_PROPERTY_KEYS: Record<AnalyticsEventName, readonly string[]> = {
     "failure_category",
   ],
   purchase_restored: ["source_screen"],
+  review_prompt_eligible: ["trigger", "successful_scan_count"],
+  review_prompt_requested: ["trigger", "successful_scan_count"],
+  review_store_link_opened: ["source_screen", "store_platform"],
 };
 
 const BOOLEAN_KEYS = new Set([
@@ -221,6 +234,7 @@ const NUMBER_KEYS = new Set([
   "result_count",
   "item_count",
   "evidence_file_count",
+  "successful_scan_count",
 ]);
 const FAILURE_CATEGORIES = new Set<AnalyticsFailureCategory>([
   "network",
@@ -264,6 +278,8 @@ function allowedStringValue(key: string, value: string): boolean {
     return ["in_app", "email", "share", "download", "unknown"].includes(value);
   if (key === "product_identifier")
     return /^[A-Za-z0-9._:$-]{1,160}$/.test(value);
+  if (key === "trigger") return value === "third_successful_ai_scan";
+  if (key === "store_platform") return value === "ios" || value === "android";
   return false;
 }
 

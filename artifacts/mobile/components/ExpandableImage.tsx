@@ -44,6 +44,7 @@ interface ExpandableImageProps {
   /** When provided, expansion is owned by a single parent-level viewer. */
   onExpand?: () => void;
   onPermanentError?: () => void;
+  onNaturalSize?: (size: { w: number; h: number }) => void;
 }
 
 export function ExpandableImage({
@@ -66,6 +67,7 @@ export function ExpandableImage({
   onReposition,
   onExpand,
   onPermanentError,
+  onNaturalSize,
 }: ExpandableImageProps) {
   const [lightboxVisible, setLightboxVisible] = useState(false);
   const [dims, setDims] = useState({ w: 0, h: 0 });
@@ -180,7 +182,11 @@ export function ExpandableImage({
           onLoad={(event) => {
             clearRetryTimeout();
             const { width, height } = event.source;
-            if (width > 0 && height > 0) setNaturalDims({ w: width, h: height });
+            if (width > 0 && height > 0) {
+              const size = { w: width, h: height };
+              setNaturalDims(size);
+              onNaturalSize?.(size);
+            }
             if (__DEV__) console.info("[ExpandableImage] loaded", { attempt: loadAttempt });
           }}
           onError={(e) => {

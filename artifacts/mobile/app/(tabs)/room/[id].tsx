@@ -1,3 +1,4 @@
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Feather, MaterialCommunityIcons } from "@expo/vector-icons";
 import * as ImagePicker from "expo-image-picker";
 import * as Haptics from "expo-haptics";
@@ -11,6 +12,7 @@ import {
   ActivityIndicator,
   Alert,
   Animated,
+  AppState,
   Easing,
   FlatList,
   InteractionManager,
@@ -80,6 +82,15 @@ import { subtractDeletedItems, withoutRoomItems } from "@/lib/room-deletion";
 import { formatCurrencyTotals, groupAmountsByCurrency, moneyDisplayToken } from "@/lib/money";
 import { parseReplacementPriceInput, resolveReviewedValueCurrency, resolveStoredValueCurrency, resolveValueMarket, supportedCurrencyCode } from "@/lib/replacement-value";
 import { findPotentialDuplicateGroups } from "@/lib/potential-duplicates";
+import {
+  attemptAutomaticReviewPrompt,
+  AUTOMATIC_REVIEW_TRIGGER,
+} from "@/lib/review-prompt";
+import {
+  dismissRecommendation,
+  HIGH_VALUE_EVIDENCE_RECOMMENDATION,
+  isRecommendationDismissed,
+} from "@/lib/recommendation-dismissal";
 import {
   createDeferredRoomCoverPickerController,
   roomCoverActions,
@@ -1278,7 +1289,18 @@ const MemoizedAnimatedItemCard = React.memo(AnimatedItemCard, detailedCardPropsE
 const MemoizedCompactItemCard = React.memo(CompactItemCard, compactCardPropsEqual);
 
 export default function ItemsScreen() {
-  const { id, name, fileId, fileName, addedCount, addedItemIds, scrollToTop } = useLocalSearchParams<{
+  const {
+    id,
+    name,
+    fileId,
+    fileName,
+    addedCount,
+    addedItemIds,
+    scrollToTop,
+    reviewPrompt,
+    reviewPromptItemIds,
+    reviewPromptToken,
+  } = useLocalSearchParams<{
     id: string;
     name: string;
     fileId?: string;
@@ -1286,6 +1308,9 @@ export default function ItemsScreen() {
     addedCount?: string;
     addedItemIds?: string;
     scrollToTop?: string;
+    reviewPrompt?: string;
+    reviewPromptItemIds?: string;
+    reviewPromptToken?: string;
   }>();
   const { session } = useAuth();
   const colors = useColors();
@@ -1318,13 +1343,16 @@ export default function ItemsScreen() {
   const [sortOption, setSortOption] = useState<RoomSortOption>((initialViewSession?.sortOption as RoomSortOption | undefined) ?? "recent");
   const [selectionMode, setSelectionMode] = useState(false);
   const [duplicateReviewMode, setDuplicateReviewMode] = useState(false);
+  const [highValueEvidenceDismissed, setHighValueEvidenceDismissed] = useState<boolean | null>(null);
   const [selectedItemIds, setSelectedItemIds] = useState<Set<string>>(new Set());
   const [bulkWorking, setBulkWorking] = useState(false);
   const [moveModalVisible, setMoveModalVisible] = useState(false);
   const [categorySummaryExpanded, setCategorySummaryExpanded] = useState(false);
+  const [currentAppState, setCurrentAppState] = useState(AppState.currentState);
   const openingItemRef = useRef(false);
   const restoredRoomScrollRef = useRef(false);
   const consumedScrollToTopTokenRef = useRef<string | null>(null);
+  const consumedReviewPromptRef = useRef<string | null>(null);
   const roomViewabilityConfig = useRef({ itemVisiblePercentThreshold: 20 }).current;
   const liveScrollOffsetRef = useRef(initialViewSession?.offset ?? 0);
 
@@ -1433,6 +1461,34 @@ export default function ItemsScreen() {
   const resolvedPropertyCurrency = parentProperty?.currency_code ?? "NZD";
   const resolvedPropertyCountry = parentProperty?.country_code ?? "NZ";
   const resolvedRoomName = room?.name ?? name ?? "Room";
+
+  useEffect(() => {
+    const userId = session?.user.id;
+    if (!userId || !resolvedFileId) {
+      setHighValueEvidenceDismissed(null);
+      return;
+    }
+
+    let active = true;
+    setHighValueEvidenceDismissed(null);
+    void isRecommendationDismissed(
+      AsyncStorage,
+      userId,
+      resolvedFileId,
+      HIGH_VALUE_EVIDENCE_RECOMMENDATION,
+    ).then((dismissed) => {
+      if (active) setHighValueEvidenceDismissed(dismissed);
+    }).catch((error) => {
+      console.warn("[roomRecommendation] Could not read dismissal", {
+        message: error instanceof Error ? error.message : String(error),
+      });
+      if (active) setHighValueEvidenceDismissed(false);
+    });
+
+    return () => {
+      active = false;
+    };
+  }, [resolvedFileId, session?.user.id]);
   const scanAddedCount = Number.parseInt(addedCount ?? "", 10);
   const scanSuccessMessage = Number.isFinite(scanAddedCount) && scanAddedCount > 0
     ? `${scanAddedCount} item${scanAddedCount === 1 ? "" : "s"} added`
@@ -1559,6 +1615,11 @@ export default function ItemsScreen() {
     () => findPotentialDuplicateGroups(items ?? []),
     [items],
   );
+
+  useEffect(() => {
+    const subscription = AppState.addEventListener("change", setCurrentAppState);
+    return () => subscription.remove();
+  }, []);
   const duplicateCandidateItems = React.useMemo(
     () => duplicateGroups.flatMap((group) => group.items),
     [duplicateGroups],
@@ -1667,6 +1728,37 @@ export default function ItemsScreen() {
     return () => cancelAnimationFrame(frame);
   }, [addedItemIds, id, isLoading, items, scrollToTop]);
 
+  useEffect(() => {
+    const userId = session?.user.id;
+    if (
+      reviewPrompt !== AUTOMATIC_REVIEW_TRIGGER
+      || !reviewPromptToken
+      || consumedReviewPromptRef.current === reviewPromptToken
+      || currentAppState !== "active"
+      || isLoading
+      || !userId
+    ) return;
+
+    const expectedIds = (reviewPromptItemIds ?? "").split(",").filter(Boolean);
+    if (
+      expectedIds.length === 0
+      || !expectedIds.every((itemId) => (items ?? []).some((item) => item.id === itemId))
+    ) return;
+
+    const interaction = InteractionManager.runAfterInteractions(() => {
+      if (consumedReviewPromptRef.current === reviewPromptToken) return;
+      consumedReviewPromptRef.current = reviewPromptToken;
+      void attemptAutomaticReviewPrompt(userId).finally(() => {
+        router.setParams({
+          reviewPrompt: undefined,
+          reviewPromptItemIds: undefined,
+          reviewPromptToken: undefined,
+        });
+      });
+    });
+    return () => interaction.cancel();
+  }, [currentAppState, isLoading, items, reviewPrompt, reviewPromptItemIds, reviewPromptToken, session?.user.id]);
+
   const onRoomViewableItemsChanged = React.useCallback(
     ({ viewableItems }: { viewableItems: Array<{ item: InventoryItem }> }) => {
       updateRoomViewSession(id, { anchorItemId: viewableItems[0]?.item.id ?? null });
@@ -1754,6 +1846,10 @@ export default function ItemsScreen() {
     setSelectedItemIds(new Set());
     void Haptics.selectionAsync().catch(() => undefined);
   }, []);
+
+  useEffect(() => {
+    if (duplicateReviewMode && duplicateGroups.length === 0) clearSelection();
+  }, [clearSelection, duplicateGroups.length, duplicateReviewMode]);
 
   const enterDuplicateReviewMode = React.useCallback(() => {
     setActiveEdit(null);
@@ -1850,8 +1946,31 @@ export default function ItemsScreen() {
     showToast,
   ]);
 
-  const roomRecommendedAction = React.useMemo(() => {
-    if (!ENABLE_RECOMMENDED_ACTIONS || !items) return null;
+  const dismissHighValueEvidenceRecommendation = React.useCallback(() => {
+    const userId = session?.user.id;
+    if (!userId || !resolvedFileId) return;
+    setHighValueEvidenceDismissed(true);
+    void dismissRecommendation(
+      AsyncStorage,
+      userId,
+      resolvedFileId,
+      HIGH_VALUE_EVIDENCE_RECOMMENDATION,
+    ).catch((error) => {
+      setHighValueEvidenceDismissed(false);
+      console.warn("[roomRecommendation] Could not persist dismissal", {
+        message: error instanceof Error ? error.message : String(error),
+      });
+    });
+  }, [resolvedFileId, session?.user.id]);
+
+  const roomRecommendedAction = React.useMemo<{
+    body: string;
+    detail: string;
+    primaryLabel: string;
+    onPrimaryPress: () => void;
+    onDismiss?: () => void;
+  } | null>(() => {
+    if (!ENABLE_RECOMMENDED_ACTIONS || !items || (resolvedFileId && highValueEvidenceDismissed === null)) return null;
 
     const openAttention = (filter: ItemAttentionFilter) => {
       router.push({
@@ -1905,7 +2024,7 @@ export default function ItemsScreen() {
       };
     }
 
-    if (!evidenceCountsLoading) {
+    if (!evidenceCountsLoading && highValueEvidenceDismissed === false) {
       const highValueWithoutEvidence = filterItemsNeedingAttention(items, "missing_evidence", evidenceCounts);
       if (highValueWithoutEvidence.length > 0) {
         return {
@@ -1913,6 +2032,7 @@ export default function ItemsScreen() {
           detail: "Receipts or photos can strengthen these records.",
           primaryLabel: "View items",
           onPrimaryPress: () => openAttention("missing_evidence"),
+          onDismiss: dismissHighValueEvidenceRecommendation,
         };
       }
     }
@@ -1932,12 +2052,14 @@ export default function ItemsScreen() {
     clearNewItemOnOpen,
     evidenceCounts,
     evidenceCountsLoading,
+    highValueEvidenceDismissed,
     handleScanRoom,
     id,
     items,
     resolvedFileId,
     resolvedPropertyName,
     resolvedRoomName,
+    dismissHighValueEvidenceRecommendation,
   ]);
 
 
@@ -2499,7 +2621,20 @@ export default function ItemsScreen() {
       <View style={styles.recommendedActionWrap}>
         <View style={[styles.compactRecommendedCard, { backgroundColor: colors.card, borderColor: colors.border, borderRadius: colors.radius }]}>
           <View style={styles.compactRecommendedCopy}>
-            <Text style={[styles.compactRecommendedKicker, { color: colors.mutedForeground }]}>RECOMMENDED ACTION</Text>
+            <View style={styles.compactRecommendedHeader}>
+              <Text style={[styles.compactRecommendedKicker, { color: colors.mutedForeground }]}>RECOMMENDED ACTION</Text>
+              {roomRecommendedAction.onDismiss ? (
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Dismiss high-value evidence recommendation"
+                  onPress={roomRecommendedAction.onDismiss}
+                  hitSlop={8}
+                  style={({ pressed }) => [styles.compactRecommendedDismiss, { opacity: pressed ? 0.55 : 1 }]}
+                >
+                  <Feather name="x" size={16} color={colors.mutedForeground} />
+                </Pressable>
+              ) : null}
+            </View>
             <Text style={[styles.compactRecommendedTitle, { color: colors.foreground }]} numberOfLines={1}>
               {roomRecommendedAction.body}
             </Text>
@@ -2553,7 +2688,7 @@ export default function ItemsScreen() {
           {selectionMode ? `${selectedCount} selected · Cancel` : "Select"}
         </Text>
       </Pressable>
-      <Pressable
+      {duplicateGroups.length > 0 ? <Pressable
         accessibilityRole="button"
         accessibilityLabel={duplicateReviewMode ? "Close potential duplicates review" : "Review potential duplicates"}
         onPress={duplicateReviewMode ? clearSelection : enterDuplicateReviewMode}
@@ -2569,7 +2704,7 @@ export default function ItemsScreen() {
       >
         <Feather name="copy" size={14} color={colors.primary} />
         <Text style={[styles.itemListSelectText, { color: colors.primary }]}>Potential duplicates</Text>
-      </Pressable>
+      </Pressable> : null}
     </View>
     {duplicateReviewMode ? (
       <View style={[styles.duplicateReviewSummary, { backgroundColor: colors.accent, borderColor: colors.border }]}>
@@ -3242,6 +3377,8 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   compactRecommendedCopy: { flex: 1, minWidth: 0, gap: 2 },
+  compactRecommendedHeader: { minHeight: 20, flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8 },
+  compactRecommendedDismiss: { width: 24, height: 20, alignItems: "center", justifyContent: "center" },
   compactRecommendedKicker: { fontSize: 9, fontFamily: "Inter_700Bold", letterSpacing: 0.7 },
   compactRecommendedTitle: { fontSize: 13, fontFamily: "Inter_700Bold" },
   compactRecommendedDetail: { fontSize: 11, lineHeight: 15, fontFamily: "Inter_400Regular" },

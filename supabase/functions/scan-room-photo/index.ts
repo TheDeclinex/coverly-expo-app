@@ -17,7 +17,7 @@ import { resolveMarketConfig, type MarketConfig } from '../_shared/market-config
 
 // Version marker — bump this whenever the edge function is redeployed so the
 // client can confirm it is running the expected version via diagnostics.
-const EDGE_FUNCTION_VERSION = 'v24.4.0-distinct-multi-photo-items';
+const EDGE_FUNCTION_VERSION = 'v24.5.0-pin-diagnostics';
 
 const CORS_HEADERS = {
   'Access-Control-Allow-Origin': '*',
@@ -618,25 +618,29 @@ function buildOpenAiBody(req: ScanRequest, imageContent: OpenAiImageContent[], m
 }
 
 // ── Normalise sourceImageId → 0-based sourcePhotoIndex ───────────────────────
-function resolveSourcePhotoIndex(i: RawItem): number | undefined {
-  if (typeof i.sourcePhotoIndex === 'number') return i.sourcePhotoIndex;
+function resolveSourcePhotoIndex(i: RawItem, imageCount: number): number | undefined {
+  let resolved: number | undefined;
   if (i.sourceImageId !== undefined) {
     const str = String(i.sourceImageId).toLowerCase().replace('photo_', '').trim();
     const parsed = Number(str);
     if (Number.isFinite(parsed)) {
-      return parsed > 0 ? parsed - 1 : 0;
+      resolved = parsed > 0 ? Math.round(parsed) - 1 : 0;
     }
+  } else if (typeof i.sourcePhotoIndex === 'number' && Number.isFinite(i.sourcePhotoIndex)) {
+    resolved = Math.round(i.sourcePhotoIndex);
   }
-  return undefined;
+
+  return resolved !== undefined && resolved >= 0 && resolved < imageCount ? resolved : undefined;
 }
 
-function resolveSeenInPhotos(i: RawItem, sourcePhotoIndex: number | undefined): number[] | undefined {
+function resolveSeenInPhotos(i: RawItem, sourcePhotoIndex: number | undefined, imageCount: number): number[] | undefined {
   if (Array.isArray(i.seenInPhotos)) {
-    return i.seenInPhotos.map((n: number | string) => {
+    const resolved = i.seenInPhotos.map((n: number | string) => {
       const str = String(n).toLowerCase().replace('photo_', '').trim();
       const parsed = Number(str);
-      return Number.isFinite(parsed) && parsed > 0 ? parsed - 1 : 0;
-    });
+      return Number.isFinite(parsed) && parsed > 0 ? Math.round(parsed) - 1 : -1;
+    }).filter((index) => index >= 0 && index < imageCount);
+    return resolved.length > 0 ? [...new Set(resolved)] : undefined;
   }
   return sourcePhotoIndex !== undefined ? [sourcePhotoIndex] : undefined;
 }
@@ -906,9 +910,10 @@ serve(async (req: Request) => {
     const rawItems = extractJson(content) as RawItem[];
     diagnostics.rawItemCount = rawItems.length;
 
+    const pinDiagnostics: Array<Record<string, unknown>> = [];
     const validItems = rawItems
       .filter(i => i.name && typeof i.name === 'string' && i.name.trim())
-      .map(i => {
+      .map((i, itemIndex) => {
         const quantity = typeof i.quantity === 'number' && i.quantity >= 1 ? Math.round(i.quantity) : 1;
         const rawUnit = finitePositiveScanEstimate(i.unitEstimatedPrice);
         const rawTotal = finitePositiveScanEstimate(i.estimatedPrice);
@@ -927,9 +932,26 @@ serve(async (req: Request) => {
           estimatedPrice = null;
         }
 
-        const sourcePhotoIndex = resolveSourcePhotoIndex(i);
-        const seenInPhotos = resolveSeenInPhotos(i, sourcePhotoIndex);
+        const sourcePhotoIndex = resolveSourcePhotoIndex(i, scanReq.images.length);
+        const seenInPhotos = resolveSeenInPhotos(i, sourcePhotoIndex, scanReq.images.length);
         const category = normaliseCategory(i.category);
+        const normalizedPin = i.pin
+          && Number.isFinite(i.pin.x)
+          && Number.isFinite(i.pin.y)
+          ? { x: Math.min(100, Math.max(0, i.pin.x)), y: Math.min(100, Math.max(0, i.pin.y)) }
+          : undefined;
+
+        if (i.pin || i.sourceImageId !== undefined || i.sourcePhotoIndex !== undefined) {
+          pinDiagnostics.push({
+            itemIndex,
+            imageCount: scanReq.images.length,
+            rawPin: i.pin ?? null,
+            normalizedPin: normalizedPin ?? null,
+            rawSourceImageId: i.sourceImageId ?? null,
+            rawSourcePhotoIndex: i.sourcePhotoIndex ?? null,
+            resolvedSourcePhotoIndex: sourcePhotoIndex ?? null,
+          });
+        }
 
         return {
           name: i.name!.trim(),
@@ -944,13 +966,17 @@ serve(async (req: Request) => {
           pricingSupportTier: market.pricingSupportTier,
           confidence: Math.min(1, Math.max(0, Number(i.confidence) || 0.8)),
           brand_guess: i.brand_guess ?? undefined,
-          pin: i.pin ? { x: Math.min(100, Math.max(0, i.pin.x)), y: Math.min(100, Math.max(0, i.pin.y)) } : undefined,
+          pin: normalizedPin,
           sourcePhotoIndex,
           sourceImageId: i.sourceImageId,
           seenInPhotos,
           mergeConfidence: i.mergeConfidence,
         };
       });
+
+    if (pinDiagnostics.length > 0) {
+      scanLog('pin_diagnostics', { imageCount: scanReq.images.length, items: pinDiagnostics });
+    }
 
     diagnostics.validItemCount = validItems.length;
     diagnostics.quantityItemCount = validItems.filter(i => i.quantity > 1).length;

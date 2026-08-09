@@ -44,6 +44,15 @@ Do not point “Open Coverly” at the web-app login. Do not automatically redir
 
 The page at `/reset-password` must remain on that route when no app is installed and provide a functional Supabase recovery form. It must accept PKCE query codes and implicit-grant fragments as configured by the project, exchange them once, remove secrets from browser history with `history.replaceState`, require matching passwords of at least eight characters, call `supabase.auth.updateUser({ password })`, show recovery-specific invalid/expired states, and sign out the temporary recovery session after success. It must not redirect to the marketing homepage or repeatedly bounce to itself. Automatic attempts to open an installed app should happen at most once per user navigation.
 
+After a successful password update, the final **Open Coverly** control must be a user-initiated link to `coverly://open`. It must not link back to `https://www.coverly.nz/reset-password`; that is a self-navigation and never performs the native handoff. Keep a separate **Continue on website** fallback linked to `https://www.coverly.nz/open`. A direct custom-scheme link is required here because iOS may keep a same-domain `https://www.coverly.nz/open` navigation in Safari instead of handing it to the installed app. Do not append recovery codes, access tokens, refresh tokens, or arbitrary callback parameters to either link.
+
+Minimal success-state contract for the website repository:
+
+```html
+<a href="coverly://open">Open Coverly</a>
+<a href="https://www.coverly.nz/open">Continue on website</a>
+```
+
 Store download links were not present in this repository. Add them to the browser fallbacks only after the real App Store and Google Play listing URLs are known.
 
 ## Supabase Auth dashboard
@@ -73,7 +82,8 @@ After deploying both association files and creating a freshly signed EAS build:
 2. Confirm `curl -i https://www.coverly.nz/.well-known/assetlinks.json` returns 200 directly, JSON content, and no redirect.
 3. Test fresh verification and recovery emails in iOS Gmail and Mail/Safari, and Android Gmail/Chrome.
 4. Test cold-start and warm-app links. Confirm recovery always opens “Set a new password”, never the normal signed-in tabs.
-5. Test with the app removed. Confirm verification fallback copy is useful and `/reset-password` retains a working browser form.
-6. Test expired and already-used links, password mismatch, successful reset, normal logout, and a second tap on the same link.
+5. After a successful browser reset, confirm **Open Coverly** has the literal destination `coverly://open` and opens cold and warm installed builds on both platforms.
+6. Test with the app removed. Confirm verification fallback copy is useful, `/reset-password` retains a working browser form, and **Continue on website** reaches `/open` without a loop.
+7. Test expired and already-used links, password mismatch, successful reset, normal logout, and a second tap on the same link.
 
 Association files are commonly cached by iOS and Android. Reinstall a fresh build after the live files and signing values are correct.

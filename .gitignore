@@ -59,6 +59,14 @@ reference/
 # Local package/cache folders
 .pnpm-store/
 node_modules/
+
+# Local assistant settings
+/.claude/settings.local.json
+
+# Generated design explorations
+/artifacts/coverly-app-icon-exploration/
+/artifacts/coverly-app-icon-refinement/
+
 /outputs/brand-final
 /outputs
 /scripts

@@ -74,6 +74,10 @@ import {
   type UploadFailure,
 } from "@/lib/photo-upload";
 import { stageRecentItemBatch } from "@/lib/recent-items";
+import {
+  AUTOMATIC_REVIEW_TRIGGER,
+  recordSuccessfulAiScan,
+} from "@/lib/review-prompt";
 import { pinMarkerPosition } from "@/lib/pin-position";
 import {
   DUPLICATE_ROOM_NAME_MESSAGE,
@@ -729,6 +733,7 @@ export default function ScanScreen() {
   const [newRoomName, setNewRoomName] = useState("");
   const roomNameInputRef = useRef<TextInput>(null);
   const [images, setImages] = useState<ScanEncodedImage[]>([]);
+  const [decodedImageDimensions, setDecodedImageDimensions] = useState<Record<string, { w: number; h: number }>>({});
   const [scanStatus, setScanStatus] = useState<ScanStatus>("idle");
   const [detectedItems, setDetectedItems] = useState<ScanDetectedItem[]>([]);
   const [scanError, setScanError] = useState<string | null>(null);
@@ -1881,6 +1886,27 @@ export default function ScanScreen() {
     updateDetectedItem(index, result.patch);
   };
 
+  const recordSuccessfulScanForReview = async (savedItemCount: number): Promise<boolean> => {
+    const userId = session?.user.id;
+    const scanId = scanUsageIdempotencyKeyRef.current;
+    if (!userId || !scanId || savedItemCount < 1) return false;
+
+    try {
+      const result = await recordSuccessfulAiScan({
+        userId,
+        scanId,
+        scanCompletedWithoutError: true,
+        savedItemCount,
+      });
+      return result.eligible;
+    } catch (error) {
+      if (__DEV__) console.warn("[reviewPrompt] Could not persist successful scan", {
+        message: error instanceof Error ? error.message : String(error),
+      });
+      return false;
+    }
+  };
+
   const handleSaveItem = async (item: ScanDetectedItem, index: number) => {
     if (!selectedFileId || !selectedRoomId) return;
     setSavingIds((prev) => new Set(prev).add(index));
@@ -1928,6 +1954,7 @@ export default function ScanScreen() {
       if (__DEV__) console.error("[Scan] Save item failed:", error.message);
       setScanSaveError(`Failed to save "${item.name}": ${error.message}`);
     } else {
+      await recordSuccessfulScanForReview(1);
       void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
       stageRecentItemBatch(selectedRoomId, [payload.id]);
       showToast(`${item.name} added`);
@@ -2084,6 +2111,7 @@ export default function ScanScreen() {
     if (failures.length > 0) {
       // Keep unsaved items in review; surface partial failure list
       if (savedItemIds.length > 0) {
+        await recordSuccessfulScanForReview(savedItemIds.length);
         stageRecentItemBatch(selectedRoomId, savedItemIds);
         showToast(`${savedItemIds.length} item${savedItemIds.length === 1 ? "" : "s"} saved`);
       }
@@ -2098,6 +2126,7 @@ export default function ScanScreen() {
       return;
     }
 
+    const reviewPromptEligible = await recordSuccessfulScanForReview(savedItemIds.length);
     void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     stageRecentItemBatch(selectedRoomId, savedItemIds);
     showToast(`${savedItemIds.length} item${savedItemIds.length === 1 ? "" : "s"} added to ${getDestRoomName() ?? "room"}`);
@@ -2114,6 +2143,13 @@ export default function ScanScreen() {
           addedCount: String(savedItemIds.length),
           addedItemIds: savedItemIds.join(","),
           scrollToTop: `${selectedRoomId}:${Date.now()}`,
+          ...(reviewPromptEligible
+            ? {
+                reviewPrompt: AUTOMATIC_REVIEW_TRIGGER,
+                reviewPromptItemIds: savedItemIds.join(","),
+                reviewPromptToken: scanUsageIdempotencyKeyRef.current ?? `${selectedRoomId}:${Date.now()}`,
+              }
+            : {}),
         },
       });
     }
@@ -2293,6 +2329,7 @@ export default function ScanScreen() {
     const REVIEW_THUMB_PIN_R = 7;
     const sourceUri = images[activeSourcePhotoIdx]?.uri ?? null;
     const activeSourceImage = images[activeSourcePhotoIdx];
+    const activeDecodedDimensions = sourceUri ? decodedImageDimensions[sourceUri] : undefined;
     const visiblePins = detectedItems
       .map((item, idx) => ({ item, idx }))
       .filter(({ item }) => item.pin != null && (item.sourcePhotoIndex ?? 0) === activeSourcePhotoIdx);
@@ -2352,13 +2389,33 @@ export default function ScanScreen() {
                       borderRadius: 10, overflow: "hidden",
                       backgroundColor: colors.secondary,
                     }}>
-                      <ExpandableImage uri={sourceUri} style={{ width: PHOTO_W, height: PHOTO_H }} contentFit="cover" viewerTitle="Scan source photo" />
+                      <ExpandableImage
+                        uri={sourceUri}
+                        style={{ width: PHOTO_W, height: PHOTO_H }}
+                        contentFit="cover"
+                        viewerTitle="Scan source photo"
+                        onNaturalSize={(size) => {
+                          setDecodedImageDimensions((current) => current[sourceUri]?.w === size.w && current[sourceUri]?.h === size.h
+                            ? current
+                            : { ...current, [sourceUri]: size });
+                          if (__DEV__) console.info("[scanPin] Source image dimensions", {
+                            sourcePhotoIndex: activeSourcePhotoIdx,
+                            metadataDimensions: activeSourceImage
+                              ? { w: activeSourceImage.width, h: activeSourceImage.height }
+                              : null,
+                            decodedDimensions: size,
+                            displayDimensions: { w: PHOTO_W, h: PHOTO_H },
+                            fit: "cover",
+                          });
+                        }}
+                      />
                       {/* Numbered pin markers */}
                       {visiblePins.map(({ item, idx }) => {
                         const position = pinMarkerPosition({
                           pin: { x: item.pin!.x / 100, y: item.pin!.y / 100 },
                           container: { w: PHOTO_W, h: PHOTO_H },
-                          image: { w: activeSourceImage?.width ?? PHOTO_W, h: activeSourceImage?.height ?? PHOTO_H },
+                          image: activeDecodedDimensions
+                            ?? { w: activeSourceImage?.width ?? PHOTO_W, h: activeSourceImage?.height ?? PHOTO_H },
                           fit: "cover",
                           marker: { w: PIN_R * 2, h: PIN_R * 2 },
                         });

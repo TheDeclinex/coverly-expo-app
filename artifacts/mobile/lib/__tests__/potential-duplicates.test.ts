@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import test from "node:test";
 
 import { findPotentialDuplicateGroups, normalizeDuplicateItemName } from "../potential-duplicates.ts";
@@ -34,4 +36,11 @@ test("uses matching model and brand only when names still resemble each other", 
     item("c", "Sony soundbar", { brand_maker: "Sony", model_series: "XR55" }),
   ]);
   assert.deepEqual(groups.map((group) => group.items.map((candidate) => candidate.id)), [["a", "b"]]);
+});
+
+test("room duplicate review uses the canonical duplicate groups and hides a zero-count action", () => {
+  const roomScreen = readFileSync(resolve(process.cwd(), "app/(tabs)/room/[id].tsx"), "utf8");
+  assert.match(roomScreen, /const duplicateGroups = React\.useMemo\([\s\S]*findPotentialDuplicateGroups\(items \?\? \[\]\)/);
+  assert.match(roomScreen, /duplicateGroups\.length > 0 \? <Pressable/);
+  assert.match(roomScreen, /duplicateReviewMode && duplicateGroups\.length === 0/);
 });

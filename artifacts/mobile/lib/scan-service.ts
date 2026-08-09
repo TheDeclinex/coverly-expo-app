@@ -540,19 +540,25 @@ export async function runAiScan(input: ScanInput): Promise<ScanResult> {
       .map((raw) => {
         // Validate pin: must be object with finite x/y numbers in 0–100 range
         const rawPin = raw.pin as { x?: unknown; y?: unknown } | undefined;
+        const sourcePhotoIndexCandidate =
+          typeof raw.sourcePhotoIndex === "number" && isFinite(raw.sourcePhotoIndex)
+            ? Math.round(raw.sourcePhotoIndex)
+            : null;
+        const sourcePhotoIndex =
+          sourcePhotoIndexCandidate != null
+          && sourcePhotoIndexCandidate >= 0
+          && sourcePhotoIndexCandidate < input.images.length
+            ? sourcePhotoIndexCandidate
+            : null;
+        const hasTrustworthyPinSource = input.images.length === 1 || sourcePhotoIndex !== null;
         const pin =
           rawPin &&
+          hasTrustworthyPinSource &&
           typeof rawPin.x === "number" &&
           typeof rawPin.y === "number" &&
           isFinite(rawPin.x) &&
           isFinite(rawPin.y)
             ? { x: Math.min(100, Math.max(0, rawPin.x)), y: Math.min(100, Math.max(0, rawPin.y)) }
-            : null;
-
-        // sourcePhotoIndex: 0-based integer returned by Edge Function
-        const sourcePhotoIndex =
-          typeof raw.sourcePhotoIndex === "number" && isFinite(raw.sourcePhotoIndex)
-            ? Math.max(0, Math.round(raw.sourcePhotoIndex))
             : null;
 
         return {

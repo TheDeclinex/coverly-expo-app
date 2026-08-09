@@ -133,6 +133,25 @@ test("prohibited, nested, and uncontrolled property values never pass sanitizati
   );
 });
 
+test("review events keep only controlled trigger, count, source, and platform values", () => {
+  assert.deepEqual(
+    sanitizeEventProperties("review_prompt_eligible", {
+      trigger: "third_successful_ai_scan",
+      successful_scan_count: 3,
+      item_name: "Private item",
+    }),
+    { trigger: "third_successful_ai_scan", successful_scan_count: 3 },
+  );
+  assert.deepEqual(
+    sanitizeEventProperties("review_store_link_opened", {
+      source_screen: "account",
+      store_platform: "ios",
+      url: "https://apps.apple.com/private",
+    }),
+    { source_screen: "account", store_platform: "ios" },
+  );
+});
+
 test("analytics insert failures never throw into the calling feature", async () => {
   const harness = analyticsHarness({
     insertEvent: async () => {

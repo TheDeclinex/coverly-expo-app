@@ -23,6 +23,7 @@ import { PROPERTY_TYPES, normalizePropertyTypeValue } from "@/constants/property
 import { resolveMarketConfig } from "@/constants/market-config";
 import { useColors } from "@/hooks/useColors";
 import { formatPropertySaveError as formatPropertyServiceSaveError, updateProperty } from "@/lib/property-service";
+import { deletePropertyOwnedData } from "@/lib/property-delete";
 import { moneyDisplayToken } from "@/lib/money";
 import { supabase } from "@/lib/supabase";
 import type { InventoryFile } from "@/types";
@@ -171,16 +172,15 @@ export default function EditPropertyScreen() {
           style: "destructive",
           onPress: async () => {
             setDeleting(true);
-            const { error: dbError } = await supabase.rpc("delete_my_inventory_file", {
-              p_file_id: id,
-            });
-            setDeleting(false);
-            if (dbError) {
-              if (__DEV__) console.warn("[property] Delete failed", { dbError });
+            try {
+              await deletePropertyOwnedData(id);
+            } catch {
+              setDeleting(false);
               await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
               setError("Could not delete this property. Check your connection and try again.");
               return;
             }
+            setDeleting(false);
             await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
             invalidate();
             // Go back to the home screen

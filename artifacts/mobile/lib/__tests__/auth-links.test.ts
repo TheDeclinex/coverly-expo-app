@@ -145,3 +145,11 @@ test("reset screen updates the password and clears the recovery session", () => 
   assert.match(resetSource, /Set a new password/);
   assert.match(resetSource, /Request another reset link/);
 });
+
+test("website reset success contract hands off through the custom scheme without recovery secrets", () => {
+  const contract = readFromTestDirectory("../../../../docs/mobile-auth-links.md");
+  assert.match(contract, /href="coverly:\/\/open">Open Coverly/);
+  assert.match(contract, /href="https:\/\/www\.coverly\.nz\/open">Continue on website/);
+  assert.match(contract, /must not link back to `https:\/\/www\.coverly\.nz\/reset-password`/);
+  assert.match(contract, /Do not append recovery codes, access tokens, refresh tokens/);
+});

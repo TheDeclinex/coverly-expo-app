@@ -15,6 +15,13 @@ import {
   useWindowDimensions,
   View,
 } from "react-native";
+import { Gesture, GestureDetector } from "react-native-gesture-handler";
+import Reanimated, {
+  runOnJS,
+  useAnimatedStyle,
+  useSharedValue,
+  withTiming,
+} from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { DraggablePinLayer } from "@/components/DraggablePinLayer";
@@ -50,6 +57,133 @@ interface ImageViewerModalProps {
   onPermanentError?: () => void;
 }
 
+const MIN_ZOOM_SCALE = 1;
+const DOUBLE_TAP_ZOOM_SCALE = 2.5;
+const MAX_ZOOM_SCALE = 4;
+
+function ZoomableImageSurface({
+  active,
+  enabled,
+  height,
+  onZoomChange,
+  resetKey,
+  visible,
+  width,
+  zoomed,
+  children,
+}: {
+  active: boolean;
+  enabled: boolean;
+  height: number;
+  onZoomChange: (zoomed: boolean) => void;
+  resetKey: string;
+  visible: boolean;
+  width: number;
+  zoomed: boolean;
+  children: React.ReactNode;
+}) {
+  const scale = useSharedValue(MIN_ZOOM_SCALE);
+  const startScale = useSharedValue(MIN_ZOOM_SCALE);
+  const translateX = useSharedValue(0);
+  const translateY = useSharedValue(0);
+  const startTranslateX = useSharedValue(0);
+  const startTranslateY = useSharedValue(0);
+  const onZoomChangeRef = useRef(onZoomChange);
+
+  useEffect(() => {
+    onZoomChangeRef.current = onZoomChange;
+  }, [onZoomChange]);
+
+  const reportZoom = useCallback((zoomed: boolean) => onZoomChangeRef.current(zoomed), []);
+
+  const resetZoom = useCallback((animated: boolean) => {
+    scale.value = animated ? withTiming(MIN_ZOOM_SCALE) : MIN_ZOOM_SCALE;
+    translateX.value = animated ? withTiming(0) : 0;
+    translateY.value = animated ? withTiming(0) : 0;
+    startScale.value = MIN_ZOOM_SCALE;
+    startTranslateX.value = 0;
+    startTranslateY.value = 0;
+    reportZoom(false);
+  }, [reportZoom, scale, startScale, startTranslateX, startTranslateY, translateX, translateY]);
+
+  useEffect(() => {
+    resetZoom(false);
+  }, [active, enabled, resetKey, resetZoom, visible]);
+
+  const pinchGesture = useMemo(() => Gesture.Pinch()
+    .enabled(enabled && active && visible)
+    .onBegin(() => {
+      startScale.value = scale.value;
+    })
+    .onUpdate((event) => {
+      scale.value = Math.max(MIN_ZOOM_SCALE, Math.min(MAX_ZOOM_SCALE, startScale.value * event.scale));
+    })
+    .onEnd(() => {
+      if (scale.value <= 1.03) {
+        scale.value = withTiming(MIN_ZOOM_SCALE);
+        translateX.value = withTiming(0);
+        translateY.value = withTiming(0);
+        runOnJS(reportZoom)(false);
+        return;
+      }
+      const maxX = ((scale.value - 1) * width) / 2;
+      const maxY = ((scale.value - 1) * height) / 2;
+      translateX.value = withTiming(Math.max(-maxX, Math.min(maxX, translateX.value)));
+      translateY.value = withTiming(Math.max(-maxY, Math.min(maxY, translateY.value)));
+      runOnJS(reportZoom)(true);
+    }), [active, enabled, height, reportZoom, scale, startScale, translateX, translateY, visible, width]);
+
+  const panGesture = useMemo(() => Gesture.Pan()
+    .enabled(enabled && active && visible && zoomed)
+    .minPointers(1)
+    .onBegin(() => {
+      startTranslateX.value = translateX.value;
+      startTranslateY.value = translateY.value;
+    })
+    .onUpdate((event) => {
+      if (scale.value <= MIN_ZOOM_SCALE) return;
+      const maxX = ((scale.value - 1) * width) / 2;
+      const maxY = ((scale.value - 1) * height) / 2;
+      translateX.value = Math.max(-maxX, Math.min(maxX, startTranslateX.value + event.translationX));
+      translateY.value = Math.max(-maxY, Math.min(maxY, startTranslateY.value + event.translationY));
+    }), [active, enabled, height, scale, startTranslateX, startTranslateY, translateX, translateY, visible, width, zoomed]);
+
+  const doubleTapGesture = useMemo(() => Gesture.Tap()
+    .enabled(enabled && active && visible)
+    .numberOfTaps(2)
+    .maxDuration(280)
+    .onEnd((_event, success) => {
+      if (!success) return;
+      if (scale.value > 1.03) {
+        scale.value = withTiming(MIN_ZOOM_SCALE);
+        translateX.value = withTiming(0);
+        translateY.value = withTiming(0);
+        runOnJS(reportZoom)(false);
+        return;
+      }
+      scale.value = withTiming(DOUBLE_TAP_ZOOM_SCALE);
+      runOnJS(reportZoom)(true);
+    }), [active, enabled, reportZoom, scale, translateX, translateY, visible]);
+
+  const composedGesture = useMemo(
+    () => Gesture.Race(doubleTapGesture, Gesture.Simultaneous(pinchGesture, panGesture)),
+    [doubleTapGesture, panGesture, pinchGesture],
+  );
+  const animatedStyle = useAnimatedStyle(() => ({
+    transform: [
+      { translateX: translateX.value },
+      { translateY: translateY.value },
+      { scale: scale.value },
+    ],
+  }));
+
+  return (
+    <GestureDetector gesture={composedGesture}>
+      <Reanimated.View style={[styles.zoomSurface, animatedStyle]}>{children}</Reanimated.View>
+    </GestureDetector>
+  );
+}
+
 function ImagePage({
   source,
   pageWidth,
@@ -61,6 +195,10 @@ function ImagePage({
   onDraftPin,
   onBackdropPress,
   onPermanentError,
+  active,
+  visible,
+  zoomed,
+  onZoomChange,
 }: {
   source: CoverlyImageSource;
   pageWidth: number;
@@ -72,6 +210,10 @@ function ImagePage({
   onDraftPin: (pin: NormalizedPin) => void;
   onBackdropPress: () => void;
   onPermanentError?: () => void;
+  active: boolean;
+  visible: boolean;
+  zoomed: boolean;
+  onZoomChange: (zoomed: boolean) => void;
 }) {
   const [imgSize, setImgSize] = useState<{ w: number; h: number } | null>(null);
   const [loading, setLoading] = useState(true);
@@ -99,6 +241,16 @@ function ImagePage({
   return (
     <Pressable accessibilityRole="button" accessibilityLabel="Close image viewer" onPress={onBackdropPress} style={[styles.page, { width: pageWidth }]}>
       <Pressable onPress={(event) => event.stopPropagation()} style={[styles.imageCard, { width: cardWidth, height: cardHeight }]}>
+        <ZoomableImageSurface
+          active={active}
+          enabled={!editingPin}
+          height={cardHeight}
+          onZoomChange={onZoomChange}
+          resetKey={source.cacheKey ?? source.uri}
+          visible={visible}
+          width={cardWidth}
+          zoomed={zoomed}
+        >
         {error ? (
           <View style={styles.errorState}>
             <Feather name="image" size={44} color="#94A3B8" />
@@ -144,6 +296,7 @@ function ImagePage({
             <ItemPinMarker size="lg" color={pinColor} />
           </View>
         ) : null}
+        </ZoomableImageSurface>
       </Pressable>
     </Pressable>
   );
@@ -174,6 +327,7 @@ export function ImageViewerModal({
   const [savingPin, setSavingPin] = useState(false);
   const [pinError, setPinError] = useState<string | null>(null);
   const [reduceMotion, setReduceMotion] = useState(false);
+  const [zoomedIndex, setZoomedIndex] = useState<number | null>(null);
   const progress = useRef(new Animated.Value(0)).current;
   const flatListRef = useRef<FlatList<CoverlyImageSource>>(null);
   const prefetchedImageRefs = useRef(new Map<string, Awaited<ReturnType<typeof Image.loadAsync>>>());
@@ -199,9 +353,14 @@ export function ImageViewerModal({
     setCurrentIndex(safeInitial);
     setPinState(createViewerPinState(pin));
     setPinError(null);
+    setZoomedIndex(null);
     progress.setValue(reduceMotion ? 1 : 0);
     if (!reduceMotion) Animated.timing(progress, { toValue: 1, duration: 220, useNativeDriver: true }).start();
   }, [pin?.x, pin?.y, progress, reduceMotion, safeInitial, visible]);
+
+  useEffect(() => {
+    if (!visible) setZoomedIndex(null);
+  }, [visible]);
 
   useEffect(() => {
     if (!visible) return;
@@ -259,7 +418,7 @@ export function ImageViewerModal({
   };
 
   const scrollToIndex = (index: number) => {
-    if (editingPin) return;
+    if (editingPin || zoomedIndex !== null) return;
     const target = Math.max(0, Math.min(index, imageSources.length - 1));
     flatListRef.current?.scrollToIndex({ index: target, animated: true });
     setCurrentIndex(target);
@@ -299,11 +458,14 @@ export function ImageViewerModal({
             data={imageSources}
             horizontal
             pagingEnabled
-            scrollEnabled={!editingPin && imageSources.length > 1}
+            scrollEnabled={!editingPin && zoomedIndex === null && imageSources.length > 1}
             showsHorizontalScrollIndicator={false}
             initialScrollIndex={safeInitial}
             getItemLayout={(_, index) => ({ length: width, offset: width * index, index })}
-            onMomentumScrollEnd={(event) => setCurrentIndex(Math.round(event.nativeEvent.contentOffset.x / width))}
+            onMomentumScrollEnd={(event) => {
+              setCurrentIndex(Math.round(event.nativeEvent.contentOffset.x / width));
+              setZoomedIndex(null);
+            }}
             keyExtractor={(source, index) => `${source.cacheKey ?? source.uri}:${index}`}
             renderItem={({ item, index }) => (
               <ImagePage
@@ -317,6 +479,10 @@ export function ImageViewerModal({
                 onDraftPin={(nextPin) => setPinState((current) => updateViewerPinDraft(current, nextPin))}
                 onBackdropPress={close}
                 onPermanentError={onPermanentError}
+                active={index === currentIndex}
+                visible={visible}
+                zoomed={zoomedIndex === index}
+                onZoomChange={(zoomed) => setZoomedIndex(zoomed ? index : null)}
               />
             )}
           />
@@ -333,7 +499,10 @@ export function ImageViewerModal({
                 </Pressable>
               </>
             ) : canEditPin ? (
-              <Pressable accessibilityRole="button" accessibilityLabel="Move item pin" onPress={() => setPinState((current) => beginViewerPinEdit(current))} style={[styles.movePin, { backgroundColor: colors.card, borderColor: colors.border }]}>
+              <Pressable accessibilityRole="button" accessibilityLabel="Move item pin" onPress={() => {
+                setZoomedIndex(null);
+                setPinState((current) => beginViewerPinEdit(current));
+              }} style={[styles.movePin, { backgroundColor: colors.card, borderColor: colors.border }]}>
                 <Feather name="move" size={16} color={colors.primary} />
                 <Text style={[styles.actionText, { color: colors.primary }]}>Move pin</Text>
               </Pressable>
@@ -357,6 +526,7 @@ const styles = StyleSheet.create({
   page: { flex: 1, alignItems: "center", justifyContent: "center", paddingHorizontal: 16 },
   gallery: { flex: 1 },
   imageCard: { borderRadius: 22, overflow: "hidden", backgroundColor: "rgba(248,250,252,0.96)", shadowColor: "#0F172A", shadowOpacity: 0.24, shadowRadius: 22, shadowOffset: { width: 0, height: 12 }, elevation: 10 },
+  zoomSurface: { flex: 1, overflow: "hidden" },
   loading: { ...StyleSheet.absoluteFillObject, alignItems: "center", justifyContent: "center" },
   errorState: { flex: 1, alignItems: "center", justifyContent: "center", gap: 10 },
   errorText: { color: "#64748B", fontSize: 14, fontFamily: "Inter_500Medium" },

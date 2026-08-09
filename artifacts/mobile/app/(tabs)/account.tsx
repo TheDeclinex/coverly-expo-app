@@ -26,6 +26,7 @@ import {
 import {
   usageWarningLevel,
 } from "@/lib/usage-allowances-model";
+import { openCoverlyStoreReview } from "@/lib/review-prompt";
 
 export default function AccountScreen() {
   const colors = useColors();
@@ -103,6 +104,13 @@ export default function AccountScreen() {
     const result = await restorePurchases();
     Alert.alert(result.ok ? "Purchases restored" : "Restore complete", result.message);
   };
+
+  const rateCoverly = async () => {
+    const opened = await openCoverlyStoreReview();
+    if (!opened) {
+      Alert.alert("Unable to open the store", "Please try again later.");
+    }
+  };
   return (
     <>
       <Stack.Screen options={{ title: "Account" }} />
@@ -168,6 +176,13 @@ export default function AccountScreen() {
             tone="teal"
             badgeCount={feedbackUnread.data?.userUnreadCount}
             onPress={() => router.push("/feedback" as Href)}
+          />
+          <AccountRow
+            icon="star"
+            title="Rate Coverly"
+            subtitle="Rate or review Coverly in the app store"
+            tone="lavender"
+            onPress={() => void rateCoverly()}
             last
           />
         </AccountSection>
