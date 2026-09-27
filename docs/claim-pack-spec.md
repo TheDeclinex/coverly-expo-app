@@ -9,6 +9,7 @@ It should turn Coverly inventory data into a clear document that can be shared w
 ## User goal
 
 The user should be able to:
+
 1. Select a property.
 2. Select rooms/items to include.
 3. Generate a claim-ready PDF.
@@ -41,6 +42,7 @@ Claim pack should include:
 ## Selection flow
 
 User should be able to select:
+
 - Entire property.
 - Specific rooms.
 - Specific items.
@@ -49,20 +51,28 @@ Default should probably include all documented items, with simple room-level des
 
 ## Monetisation
 
-Direction:
-- Included for subscribers.
-- One-off purchase available to free users.
+Approved ownership direction:
+
+- Included with verified Coverly ownership, independently of AI fair-use balance.
+- Legacy paid subscribers and explicit tester/admin access remain compatible.
+- Free users have no default export capability; one-off purchasing is deferred.
+- The ownership foundation exposes this capability only. Enforcement in the PDF
+  function and purchase UI is a later batch; existing token tables are retained.
+
+See `billing-and-entitlements.md` for the canonical access contract and rollout boundaries.
 
 ## UX copy direction
 
 Avoid overpromising claim outcomes.
 
 Good wording:
+
 - “Claim-ready evidence pack”
 - “Organised inventory export”
 - “Helpful for insurer conversations”
 
 Avoid:
+
 - “Guaranteed claim approval”
 - “Insurer-approved” unless validated.
 

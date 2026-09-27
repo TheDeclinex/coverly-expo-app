@@ -1,13 +1,19 @@
-export type PropertyAccessClass = "free" | "plus" | "family" | "full_access" | "unknown";
+export type PropertyAccessClass =
+  | "free"
+  | "owner"
+  | "plus"
+  | "family"
+  | "full_access"
+  | "unknown";
 export type PropertyAllowanceState = "loading" | "ready" | "unavailable";
 
 export type PropertyAllowance = {
   state: PropertyAllowanceState;
   accessClass: PropertyAccessClass;
   propertyCount: number;
-  propertyLimit: 1 | null;
+  propertyLimit: number | null;
   canCreateProperty: boolean;
-  requiredPlan: "coverly_family" | null;
+  requiredPlan: string | null;
   blockReason: "property_limit_reached" | "entitlement_unavailable" | null;
 };
 
@@ -20,14 +26,25 @@ export type PropertyAllowanceRpcRow = {
   block_reason?: unknown;
 };
 
-const accessClasses = new Set<PropertyAccessClass>(["free", "plus", "family", "full_access"]);
+const accessClasses = new Set<PropertyAccessClass>([
+  "free",
+  "owner",
+  "plus",
+  "family",
+  "full_access",
+]);
 
 export function getPropertyAllowance(
   accessClass: PropertyAccessClass,
   propertyCount: number,
   state: PropertyAllowanceState = "ready",
 ): PropertyAllowance {
-  const safeCount = Number.isFinite(propertyCount) && propertyCount >= 0 ? Math.floor(propertyCount) : 0;
+  // Legacy local helper retained for compatibility. RPC parsing below must never
+  // use this plan-based fallback; only the server defines production limits.
+  const safeCount =
+    Number.isFinite(propertyCount) && propertyCount >= 0
+      ? Math.floor(propertyCount)
+      : 0;
 
   if (state !== "ready" || accessClass === "unknown") {
     return {
@@ -54,15 +71,49 @@ export function getPropertyAllowance(
   };
 }
 
-export function parsePropertyAllowance(row: PropertyAllowanceRpcRow | null | undefined): PropertyAllowance {
-  const accessClass = typeof row?.access_class === "string" && accessClasses.has(row.access_class as PropertyAccessClass)
-    ? row.access_class as PropertyAccessClass
-    : "unknown";
-  const propertyCount = typeof row?.property_count === "number" ? row.property_count : 0;
-  return getPropertyAllowance(accessClass, propertyCount, accessClass === "unknown" ? "unavailable" : "ready");
+export function parsePropertyAllowance(
+  row: PropertyAllowanceRpcRow | null | undefined,
+): PropertyAllowance {
+  const accessClass =
+    typeof row?.access_class === "string" &&
+    accessClasses.has(row.access_class as PropertyAccessClass)
+      ? (row.access_class as PropertyAccessClass)
+      : "unknown";
+  const count = row?.property_count;
+  const limit = row?.property_limit;
+  const validCount =
+    typeof count === "number" && Number.isSafeInteger(count) && count >= 0;
+  const validLimit =
+    limit === null ||
+    (typeof limit === "number" && Number.isSafeInteger(limit) && limit >= 0);
+  if (
+    accessClass === "unknown" ||
+    !validCount ||
+    !validLimit ||
+    typeof row?.can_create_property !== "boolean"
+  ) {
+    return unavailablePropertyAllowance("unavailable");
+  }
+  // Respect explicit server denials and fail closed on contradictory responses.
+  const canCreateProperty =
+    row.can_create_property && (limit === null || count < limit);
+  return {
+    state: "ready",
+    accessClass,
+    propertyCount: count,
+    propertyLimit: limit,
+    canCreateProperty,
+    requiredPlan:
+      !canCreateProperty && typeof row.required_plan === "string"
+        ? row.required_plan
+        : null,
+    blockReason: canCreateProperty ? null : "property_limit_reached",
+  };
 }
 
-export function unavailablePropertyAllowance(state: Extract<PropertyAllowanceState, "loading" | "unavailable">) {
+export function unavailablePropertyAllowance(
+  state: Extract<PropertyAllowanceState, "loading" | "unavailable">,
+) {
   return getPropertyAllowance("unknown", 0, state);
 }
 
@@ -74,13 +125,19 @@ export type PropertyAllowanceCopy = {
   secondaryCta: string;
 };
 
-export function propertyAllowanceCopy(allowance: PropertyAllowance): PropertyAllowanceCopy {
+export function propertyAllowanceCopy(
+  allowance: PropertyAllowance,
+): PropertyAllowanceCopy {
   if (allowance.blockReason === "entitlement_unavailable") {
     return {
-      title: allowance.state === "loading" ? "Checking your plan" : "We couldn't check your plan",
-      body: allowance.state === "loading"
-        ? "This will only take a moment."
-        : "Check your connection and try again. Nothing has changed.",
+      title:
+        allowance.state === "loading"
+          ? "Checking your plan"
+          : "We couldn't check your plan",
+      body:
+        allowance.state === "loading"
+          ? "This will only take a moment."
+          : "Check your connection and try again. Nothing has changed.",
       benefit: "",
       primaryCta: allowance.state === "loading" ? "Please wait" : "Try again",
       secondaryCta: "Continue with current property",
