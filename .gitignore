@@ -56,6 +56,9 @@ reference/
 .env.local
 .env.*.local
 
+# Supabase CLI linked-project metadata and version caches (local only)
+/supabase/.temp/
+
 # Local package/cache folders
 .pnpm-store/
 node_modules/
