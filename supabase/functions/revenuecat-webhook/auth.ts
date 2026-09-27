@@ -3,7 +3,6 @@ const SIGNATURE_TOLERANCE_SECONDS = 300;
 export type RevenueCatWebhookAuthConfig = {
   bearerSecret: string;
   signingSecret: string;
-  allowInsecure?: boolean;
 };
 
 export type RevenueCatWebhookHeaders = {
@@ -44,8 +43,8 @@ export async function authorizeRevenueCatWebhook(
   rawBody: string,
   config: RevenueCatWebhookAuthConfig,
 ) {
-  if (!config.bearerSecret && !config.signingSecret) return config.allowInsecure ? true : "server_not_configured";
-  if (config.bearerSecret && headers.authorization !== `Bearer ${config.bearerSecret}`) return "unauthorized";
+  if (!config.bearerSecret && !config.signingSecret) return "server_not_configured";
+  if (config.bearerSecret && !constantTimeEqual(headers.authorization ?? "", `Bearer ${config.bearerSecret}`)) return "unauthorized";
   if (config.signingSecret) {
     const ok = await verifyRevenueCatSignature(rawBody, headers.signature, config.signingSecret);
     if (!ok) return "invalid_signature";

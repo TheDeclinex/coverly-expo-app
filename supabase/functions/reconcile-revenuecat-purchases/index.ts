@@ -1,3 +1,3 @@
 import { serveRevenueCat } from "../_shared/revenuecat-runtime.ts";
 
-serveRevenueCat("webhook");
+serveRevenueCat("reconcile");

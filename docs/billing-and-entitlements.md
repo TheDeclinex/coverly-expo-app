@@ -33,14 +33,10 @@ verification timestamps in chronological order, verification not in the future,
 and no revocation timestamp. Incomplete rows resolve as `unverified`, without
 paid fallback. A `revoked` row requires a revocation timestamp.
 
-**This batch does not implement a verification writer.** The future reconciler
-must verify the RevenueCat customer belongs to the Auth user, the product and
-entitlement match, and the event environment belongs to the intended project.
-The resolver trusts a complete server-written projection; it does not call
-RevenueCat or independently prove those attributions. Sandbox attribution is
-retained for QA, not permission to accept sandbox purchases in production.
-The future writer must also enforce event ordering/idempotency and populate the
-verification/update/event fields atomically. Do not seed production ownership
+Batch 2 adds the verification writer described below, in source only. The resolver
+trusts a complete server-written projection; it does not call RevenueCat itself.
+Sandbox attribution is retained for a separate QA environment. The writer rejects
+sandbox data when configured for production. Do not seed production ownership
 from legacy plans or expose projection writes to the app.
 
 ### Canonical access contract
@@ -160,7 +156,7 @@ migration; preserve ownership/revocation records rather than dropping them.
 Done looks like now: tested durable storage and a canonical access contract,
 compatible property enforcement and server-limit parsing, with no remote changes.
 Do not change paywall, onboarding, sign-in, store products or pricing in this batch.
-Later batches handle RevenueCat reconciliation, secure AI usage accounting,
+Later batches handle deployment validation, secure AI usage accounting,
 mobile ownership state, claim enforcement, one-time paywall and store setup.
 
 ## Existing purchase integration (transitional reference)
@@ -294,3 +290,168 @@ Financial model should account for:
 - Web purchase flow uses Stripe.
 - Supabase reflects entitlement state.
 - Gating is enforced before paid features run expensive backend/AI calls.
+
+## Batch 2: canonical RevenueCat reconciliation (source only)
+
+`20260927232224_revenuecat_ownership_reconciliation.sql` is an additive forward
+migration after the ownership foundation. No historical migrations are changed.
+It adds event leases/attempt counts, projection expiry and attribution, private
+per-user sync leases, and an append-only verification history. Service-only RPCs
+claim, reconcile and finalize work. Client grants remain absent. The existing
+access resolver also checks a known finite expiry; null expiry remains durable.
+The migration and both functions are deliberately **not deployed**.
+
+### Audit and shared model
+
+The starting implementation matched the audit: canonical API errors could fall
+back to webhook assertions for positive events, transfers targeted only the first
+destination, a missing profile was terminally ignored, processing had no lease,
+and an environment flag could disable webhook authentication. Those processing
+paths are replaced; the existing parser, authorization/signature utility and
+canonical Plus/Family selection logic are retained. Old processing tests have
+been replaced by handler and real SQL tests for the new failure semantics.
+The mobile layer still configures/logs in RevenueCat with the Supabase user UUID.
+
+RevenueCat is the store-purchase source of truth. Both functions use
+`_shared/revenuecat-reconciliation.ts` and the server-only v1 subscriber lookup.
+Webhooks only trigger that lookup; their entitlement and product assertions never
+write access. The canonical model carries the requested UUID, original customer
+identity, owned/product/acquisition/expiry state, environment, project/app
+attribution where available, request timestamp, reason, and validated legacy
+state. It accepts `coverly_owned` with explicit null expiry, independently of
+renewals, activeSubscriptions or package type. Unknown entitlements cannot grant
+ownership. Recognized but malformed/unmapped purchases fail closed.
+
+Entitlement purchase timestamps are matched to canonical subscription or
+non-subscription transactions. The matching transaction must explicitly have the
+configured `is_sandbox` value. Ambiguous receipts fail rather than borrowing an
+old production receipt. Refund timestamps and expired ownership revoke access;
+canonical absence revokes a previous owner but leaves a never-owner at `none`.
+Acquisition/product attribution is retained on removal. Private verification
+history preserves previous snapshots. Nothing removes inventory or evidence.
+
+### Authenticated recovery and identity
+
+`POST /functions/v1/reconcile-revenuecat-purchases` accepts an empty body or `{}`
+and a Supabase bearer access token. The function validates the token with
+`auth.getUser`, derives the UUID server-side, and looks up that exact UUID.
+Any body fields (including user ID, CustomerInfo and owns_coverly) are rejected.
+Success returns `{ok: true, access: <version-1 access capabilities>}`. Native
+purchase/Restore Purchases, reinstall recovery and support refresh will call it
+in a later mobile batch. No mobile integration or purchase UX changes are made.
+
+V1 does not enumerate aliases. An exact requested UUID response may have an
+anonymous RevenueCat original identity; that association is trusted only from
+the authenticated server lookup, never from webhook aliases or subscriber
+attributes. A different UUID/custom original identity is rejected conservatively.
+Historical cross-UUID aliases require support investigation and future verified
+alias handling; this batch does not merge identities. Store restore/transfer
+behavior and anonymous-to-UUID linking must be exercised in isolated QA before
+owner sales. The API key must belong to Coverly's RevenueCat project.
+
+### Transfers, ordering and recovery
+
+An authenticated, app/environment-validated TRANSFER reconciles the union of all
+valid source and destination UUIDs (maximum 20). Anonymous/malformed identifiers
+are never used as database targets. Every UUID must have a profile and pass its
+own canonical lookup; the event arrays are triggers, not purchase proof. All
+participants are leased before lookups, and all projections/history plus the
+processed event status commit atomically. A failed lookup or missing profile
+leaves both sides unchanged and retryable, preventing a partially applied transfer.
+
+Event claims last 120 seconds. Failed events can be retried immediately; expired
+processing claims can be reclaimed with a new token, including old rows without
+lease metadata. Terminal duplicates do no work. Duplicates still processing
+return 503 so a concurrent delivery cannot acknowledge away a crashed worker.
+Per-user leases also last 120 seconds and are acquired in sorted UUID order.
+Only the current event and user lease tokens can apply state. Late workers cannot
+finalize/release newer work. Canonical request timestamps must strictly increase;
+older/equal snapshots fail retryably. Webhook timestamps never determine access.
+
+Lookups time out after five seconds per identity; canonical snapshots older than
+120 seconds or more than 30 seconds in the future are rejected. API failures,
+including 404, do not grant or revoke. Existing verified lifetime ownership has
+no outage TTL. Known finite expiry still applies. Error responses are 503 with
+`retryable: true` and `Retry-After: 120`; missing/invalid auth is 401, malformed or
+misattributed requests are 400, absent required settings are 500. Missing profiles
+fail with `profile_not_found` and can recover after profile creation. No background
+retry scheduler is added: recovery uses RevenueCat redelivery or authenticated
+reconciliation. Operations must monitor failed/stale ledger rows and replay after
+fixing configuration; transient failures are never marked processed.
+
+### Required future configuration and environment isolation
+
+Set these server-only values independently in the future QA and production
+projects. Empty placeholders in `.env.example` are intentional, not live values:
+
+| Setting | Requirement |
+| --- | --- |
+| `REVENUECAT_SECRET_API_KEY` | Secret v1 API credential scoped to the intended Coverly RevenueCat project; never expose to Expo. |
+| `REVENUECAT_PROJECT_ID` | Expected project, recorded and compared whenever the payload returns a project ID. |
+| `REVENUECAT_ALLOWED_APP_IDS` | Comma-separated allowlist of actual Coverly RevenueCat app IDs. Webhook app ID is required. |
+| `REVENUECAT_EXPECTED_ENVIRONMENT` | Exactly `production` or `sandbox`; use sandbox only in an isolated QA Supabase project. |
+| `REVENUECAT_OWNED_PRODUCT_IDS` | Allowlisted future one-time products attached to `coverly_owned`; no products configured by this batch. |
+| `REVENUECAT_PLUS_ENTITLEMENT_IDS`, `REVENUECAT_FAMILY_ENTITLEMENT_IDS` | Preserve actual transitional mappings; cannot overlap each other or `coverly_owned`. |
+| `REVENUECAT_PLUS_PRODUCT_IDS`, `REVENUECAT_FAMILY_PRODUCT_IDS` | Required allowlists for the existing subscriptions, including platform variants. |
+| `REVENUECAT_WEBHOOK_AUTHORIZATION` | Strong shared secret used as `Authorization: Bearer <secret>`. Required unless using the existing signing mechanism. |
+| `REVENUECAT_WEBHOOK_SIGNING_SECRET` | Optional existing HMAC integration. If set, a valid timestamped signature is also required; do not assume RevenueCat emits it without that integration. |
+| `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` | Matching backend environment only. |
+
+There is no insecure webhook escape hatch. Every required mapping must be
+configured before either function runs. Canonical app/project fields are checked
+where returned; v1 generally omits them, so key scope and product allowlists are
+mandatory operational prerequisites, not proof supplied by a webhook.
+A wrong webhook app/project/environment is rejected before claiming an event.
+Canonical transaction environment is checked again, including on reconciliation.
+A projection cannot switch environments. Do not mix sandbox and production users
+in the same backend; the foundation resolver intentionally supports either for QA.
+
+Reference contracts: [RevenueCat v1 Customer Info](https://www.revenuecat.com/docs/api-v1/customer-info-model)
+and [webhook examples](https://www.revenuecat.com/docs/integrations/webhooks/sample-events).
+
+### Transitional compatibility and boundaries
+
+Canonical Plus/Family state still updates the released clients' native profile
+fields and shared subscription fields. Cancellation/billing-issue status is taken
+from canonical subscription data; access stays active until expiry/grace ends.
+A Stripe-only profile is not newly marked native-expired just because reconciliation
+finds no native entitlement. Existing native profiles still receive removal.
+Stripe and native subscription projections remain coupled through shared profile
+fields and can overwrite one another's legacy display/plan fields; full provider
+separation is deferred. Neither can erase the separate durable ownership row.
+An owner remains owner after Stripe changes, subject to explicit overrides and
+verified RevenueCat revocation. Legacy subscriptions are never backfilled as owners.
+
+Do not change: mobile purchase/paywall/restore/account UI, store pricing/products,
+AI quota values or accounting, authentication/onboarding, inventory/evidence RLS,
+app version, deployments, builds or release settings. Done looks like: canonical
+webhook and authenticated refresh agree on ownership, duplicate/failed/stale work
+is recoverable, both transfer sides change atomically, and all local checks pass.
+
+### Local verification and later QA
+
+No tests call real RevenueCat or remote Supabase. Handler tests inject mock fetch;
+the database suite uses in-memory PGlite with actual relevant migrations and
+service/auth roles, including handler-to-SQL integration. Run from repository root:
+
+```powershell
+node --experimental-strip-types --test supabase/functions/revenuecat-webhook/model.test.ts supabase/functions/_shared/revenuecat-reconciliation.test.ts
+$env:COVERLY_PGLITE_MODULE = '<absolute local PGlite dist/index.js>'
+node --experimental-strip-types --test supabase/tests/ownership-access.local.test.ts
+node node_modules/typescript/bin/tsc -p artifacts/mobile/tsconfig.json --noEmit --incremental false
+npx deno check --no-lock supabase/functions/revenuecat-webhook/index.ts supabase/functions/reconcile-revenuecat-purchases/index.ts
+```
+
+Run the full existing mobile `lib/__tests__/*.test.ts` suite from `artifacts/mobile`
+with Node's strip-types runner. No app runtime dependency was added. PGlite/Deno
+are isolated developer validation tools. PGlite serializes queries on one backend:
+lease token/expiry/rollback interleavings are tested, but true multi-connection
+contention and real store receipts still require isolated PostgreSQL/store QA.
+Before any separate deployment, validate native product/entitlement mappings,
+project credential scope, missing-profile retry, sandbox rejection, transfer and
+refund receipts on both stores. Preview existing Account/Upgrade/Restore flows in
+a development build for regression only; Expo Go cannot execute native purchases.
+No new reconciliation button exists yet. Review migration before deploying to QA,
+then test webhook retry behavior before any separately approved production rollout.
+The local CLI remains linked to **PROD `jqijavrugjidqzbbgpag`**: this batch authorizes
+no remote mutation, linking, secret configuration, Edge deployment or store action.

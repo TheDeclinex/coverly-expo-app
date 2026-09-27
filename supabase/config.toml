@@ -78,6 +78,10 @@ verify_jwt = true
 [functions.revenuecat-webhook]
 verify_jwt = false
 
+[functions.reconcile-revenuecat-purchases]
+# Validates the bearer session with Auth.getUser inside the handler.
+verify_jwt = false
+
 [functions.replacement-search-refine]
 verify_jwt = true
 

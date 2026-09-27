@@ -4,6 +4,13 @@ import { readFileSync } from "node:fs";
 import { isAbsolute } from "node:path";
 import { after, before, test } from "node:test";
 import { pathToFileURL } from "node:url";
+import {
+  canonicalState,
+  reconciliationHandler,
+  webhookHandler,
+  type Config,
+  type Store,
+} from "../functions/_shared/revenuecat-reconciliation.ts";
 
 const modulePath = process.env.COVERLY_PGLITE_MODULE;
 assert.ok(
@@ -103,6 +110,9 @@ before(async () => {
     "ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO anon, authenticated, service_role",
   );
   await db.exec(migration);
+  await db.exec(
+    readMigration("20260927232224_revenuecat_ownership_reconciliation.sql"),
+  );
 });
 after(async () => {
   await db.close();
@@ -723,4 +733,433 @@ test("owners do not inherit the existing legacy AI bypass and inventory stays av
       "UPDATE public.app_settings SET free_ai_scan_monthly_limit = 10, free_replacement_pricing_monthly_limit = 5",
     );
   }
+});
+
+// Batch 2: execute the production RPCs against the same foundation fixture.
+const rcConfig: Config = {
+  secret: "fixture",
+  environment: "production",
+  projectId: "fixture-project",
+  appIds: ["fixture-app"],
+  ownedProductIds: ["lifetime"],
+  plusEntitlementIds: ["Coverly Plus"],
+  familyEntitlementIds: ["Coverly Family"],
+  plusProductIds: ["plus"],
+  familyProductIds: ["family"],
+};
+function rcPayload(id: string, hasOwner = true, timestamp = Date.now()) {
+  return {
+    request_date_ms: timestamp,
+    subscriber: {
+      original_app_user_id: id,
+      entitlements: hasOwner
+        ? {
+            coverly_owned: {
+              product_identifier: "lifetime",
+              purchase_date: "2026-01-01T00:00:00Z",
+              expires_date: null,
+            },
+          }
+        : {},
+      subscriptions: {},
+      non_subscriptions: {
+        lifetime: [
+          { purchase_date: "2026-01-01T00:00:00Z", is_sandbox: false },
+        ],
+      },
+    },
+  };
+}
+async function rpc(name: string, args: Record<string, unknown>) {
+  assert.match(name, /^revenuecat_[a-z_]+$/);
+  const keys = Object.keys(args);
+  const params = keys.map((key, i) => `${key} => $${i + 1}`).join(",");
+  const values = Object.values(args).map((value) =>
+    value &&
+    typeof value === "object" &&
+    !(Array.isArray(value) && typeof value[0] === "string")
+      ? JSON.stringify(value)
+      : value,
+  );
+  return (await db.query(`SELECT public.${name}(${params}) AS result`, values))
+    .rows[0].result;
+}
+const dbStore: Store = { rpc, authenticate: async (token) => token };
+const begin = (ids: string[]) =>
+  rpc("revenuecat_begin_sync", { p_user_ids: ids });
+const apply = (
+  token: string,
+  states: unknown[],
+  eventId: string | null = null,
+  eventLease: string | null = null,
+) =>
+  rpc("revenuecat_apply_sync", {
+    p_token: token,
+    p_states: states,
+    p_event_id: eventId,
+    p_event_lease: eventLease,
+  });
+function rcEvent(id: string, userId: string) {
+  return {
+    id,
+    type: "NON_RENEWING_PURCHASE",
+    appUserId: userId,
+    originalAppUserId: userId,
+    environment: "PRODUCTION",
+    entitlementIds: ["coverly_owned"],
+    transferredFrom: [],
+    transferredTo: [],
+    appId: "fixture-app",
+  };
+}
+const claim = (id: string, userId: string) =>
+  rpc("revenuecat_claim_event", { p_event: rcEvent(id, userId) });
+
+test("Batch 2: real SQL grants lifetime ownership, records history, and revokes without deleting inventory", async () => {
+  const id = await user();
+  await asUser(id, createProperty);
+  await apply(await begin([id]), [canonicalState(rcPayload(id), id, rcConfig)]);
+  assert.equal((await access(id)).owns_coverly, true);
+  const last = (
+    await db.query(
+      "SELECT revenuecat_request_date_ms FROM public.user_ownership WHERE user_id=$1",
+      [id],
+    )
+  ).rows[0].revenuecat_request_date_ms;
+  await apply(await begin([id]), [
+    canonicalState(rcPayload(id, false, Number(last) + 1), id, rcConfig),
+  ]);
+  const state = await access(id);
+  assert.equal(state.ownership_status, "revoked");
+  assert.equal(state.property_count, 1);
+  const row = (
+    await db.query("SELECT * FROM public.user_ownership WHERE user_id=$1", [id])
+  ).rows[0];
+  assert.equal(row.revenuecat_product_id, "lifetime");
+  assert.ok(row.acquired_at);
+  assert.ok(row.revoked_at);
+  assert.equal(
+    (
+      await db.query(
+        "SELECT count(*)::int AS n FROM private.revenuecat_verifications WHERE user_id=$1",
+        [id],
+      )
+    ).rows[0].n,
+    2,
+  );
+});
+
+test("Batch 2: known finite expiry denies owner capabilities without waiting for webhook", async () => {
+  const id = await user();
+  await owned(id);
+  await db.query(
+    "UPDATE public.user_ownership SET expires_at=now()-interval '1 second' WHERE user_id=$1",
+    [id],
+  );
+  assert.equal((await access(id)).owns_coverly, false);
+});
+
+test("Batch 2: active duplicates cannot claim; failed and stale processing claims recover with a new token", async () => {
+  const id = await user();
+  const eventId = randomUUID();
+  const first = await claim(eventId, id);
+  assert.ok(first.token);
+  assert.equal((await claim(eventId, id)).token, null);
+  await rpc("revenuecat_finish_event", {
+    p_event_id: eventId,
+    p_token: first.token,
+    p_status: "failed",
+    p_error: "canonical_unavailable",
+  });
+  const retry = await claim(eventId, id);
+  assert.notEqual(retry.token, first.token);
+  await db.query(
+    "UPDATE public.revenuecat_webhook_events SET lease_expires_at=now()-interval '1 second' WHERE event_id=$1",
+    [eventId],
+  );
+  const recovered = await claim(eventId, id);
+  assert.notEqual(recovered.token, retry.token);
+  await rpc("revenuecat_finish_event", {
+    p_event_id: eventId,
+    p_token: retry.token,
+    p_status: "failed",
+    p_error: "late_worker",
+  });
+  assert.equal(
+    (
+      await db.query(
+        "SELECT status,attempt_count FROM public.revenuecat_webhook_events WHERE event_id=$1",
+        [eventId],
+      )
+    ).rows[0].status,
+    "processing",
+  );
+  await apply(
+    await begin([id]),
+    [canonicalState(rcPayload(id), id, rcConfig)],
+    eventId,
+    recovered.token,
+  );
+  assert.deepEqual(await claim(eventId, id), {
+    token: null,
+    status: "processed",
+  });
+});
+
+test("Batch 2: sync leases exclude overlapping work, recover stale workers and fence late writes", async () => {
+  const id = await user();
+  const oldToken = await begin([id]);
+  await assert.rejects(begin([id]), /reconciliation_busy/);
+  await db.query(
+    "UPDATE private.revenuecat_sync_leases SET expires_at=now()-interval '1 second' WHERE user_id=$1",
+    [id],
+  );
+  const newToken = await begin([id]);
+  await assert.rejects(
+    apply(oldToken, [canonicalState(rcPayload(id), id, rcConfig)]),
+    /lease_membership_mismatch|sync_lease_lost/,
+  );
+  await rpc("revenuecat_release_sync", { p_token: oldToken });
+  await apply(newToken, [canonicalState(rcPayload(id), id, rcConfig)]);
+  assert.equal((await access(id)).owns_coverly, true);
+});
+
+test("Batch 2: older canonical response cannot regress newer verification", async () => {
+  const id = await user();
+  const timestamp = Date.now();
+  await apply(await begin([id]), [
+    canonicalState(rcPayload(id, true, timestamp), id, rcConfig),
+  ]);
+  const token = await begin([id]);
+  await assert.rejects(
+    apply(token, [
+      canonicalState(rcPayload(id, false, timestamp - 1), id, rcConfig),
+    ]),
+    /stale_canonical_state/,
+  );
+  assert.equal((await access(id)).owns_coverly, true);
+  await rpc("revenuecat_release_sync", { p_token: token });
+});
+
+test("Batch 2: atomic transfer revokes source and grants destination, rollback protects all participants", async () => {
+  const source = await user();
+  const destination = await user();
+  await owned(source);
+  let token = await begin([source, destination]);
+  const states = [
+    canonicalState(rcPayload(source, false), source, rcConfig),
+    canonicalState(rcPayload(destination), destination, rcConfig),
+  ];
+  const badStates = states.map((s) =>
+    s.user_id === destination ? { ...s, acquired_at: "invalid-date" } : s,
+  );
+  await assert.rejects(apply(token, badStates));
+  assert.equal((await access(source)).owns_coverly, true);
+  assert.equal((await access(destination)).owns_coverly, false);
+  await apply(token, states);
+  assert.equal((await access(source)).ownership_status, "revoked");
+  assert.equal((await access(destination)).owns_coverly, true);
+});
+
+test("Batch 2: missing profiles are recoverable without partial leases or grants", async () => {
+  const existing = await user();
+  const missing = randomUUID();
+  await db.query("INSERT INTO auth.users(id) VALUES($1)", [missing]);
+  await assert.rejects(begin([existing, missing]), /profile_not_found/);
+  assert.equal(
+    (
+      await db.query(
+        "SELECT count(*)::int AS n FROM private.revenuecat_sync_leases WHERE user_id=$1",
+        [existing],
+      )
+    ).rows[0].n,
+    0,
+  );
+  await db.query(
+    "INSERT INTO public.user_profiles(id,email) VALUES($1,'fixture@example.test')",
+    [missing],
+  );
+  const token = await begin([missing]);
+  await apply(token, [canonicalState(rcPayload(missing), missing, rcConfig)]);
+  assert.equal((await access(missing)).owns_coverly, true);
+});
+
+test("Batch 2: authenticated clients cannot use reconciliation RPCs or read private history", async () => {
+  const id = await user();
+  await asUser(id, async () => {
+    for (const sql of [
+      "SELECT public.revenuecat_claim_event('{}')",
+      "SELECT public.revenuecat_finish_event('x',gen_random_uuid(),'failed','x')",
+      `SELECT public.revenuecat_begin_sync(ARRAY['${id}'::uuid])`,
+      "SELECT public.revenuecat_release_sync(gen_random_uuid())",
+      "SELECT public.revenuecat_apply_sync(gen_random_uuid(),'[]',NULL,NULL)",
+      "SELECT * FROM private.revenuecat_verifications",
+    ])
+      await assert.rejects(db.exec(sql), /permission denied/);
+  });
+  await db.exec("SET ROLE service_role");
+  try {
+    const token = await begin([id]);
+    await apply(token, [canonicalState(rcPayload(id), id, rcConfig)]);
+  } finally {
+    await db.exec("RESET ROLE");
+  }
+  assert.equal((await access(id)).owns_coverly, true);
+});
+
+test("Batch 2: shared Stripe/legacy profile mutations cannot erase verified ownership", async () => {
+  const id = await user({
+    subscription_plan: "coverly_family",
+    subscription_status: "active",
+  });
+  await apply(await begin([id]), [canonicalState(rcPayload(id), id, rcConfig)]);
+  await db.query(
+    "UPDATE public.user_profiles SET subscription_plan='free',subscription_status='expired',revenuecat_status='expired' WHERE id=$1",
+    [id],
+  );
+  assert.equal((await access(id)).owns_coverly, true);
+  assert.equal((await access(id)).effective_plan, "coverly_owned");
+});
+
+test("Batch 2: real authenticated handler, canonical lookup and SQL work end to end", async () => {
+  const id = await user();
+  const req = new Request("https://fixture/reconcile", {
+    method: "POST",
+    headers: { authorization: `Bearer ${id}` },
+    body: "{}",
+  });
+  const response = await reconciliationHandler(
+    req,
+    rcConfig,
+    dbStore,
+    async () => Response.json(rcPayload(id)),
+  );
+  assert.equal(response.status, 200);
+  assert.equal((await response.json()).access.owns_coverly, true);
+});
+
+test("Batch 2: delayed webhook consults current state, duplicate does not refetch", async () => {
+  const id = await user();
+  const eventId = randomUUID();
+  let lookups = 0;
+  const req = () =>
+    new Request("https://fixture/webhook", {
+      method: "POST",
+      headers: { authorization: "Bearer fixture" },
+      body: JSON.stringify({
+        event: {
+          id: eventId,
+          type: "EXPIRATION",
+          event_timestamp_ms: 1,
+          app_user_id: id,
+          app_id: "fixture-app",
+          environment: "PRODUCTION",
+        },
+      }),
+    });
+  const fetchMock: typeof fetch = async () => {
+    lookups++;
+    return Response.json(rcPayload(id));
+  };
+  assert.equal(
+    (
+      await webhookHandler(
+        req(),
+        rcConfig,
+        dbStore,
+        { bearerSecret: "fixture", signingSecret: "" },
+        fetchMock,
+      )
+    ).status,
+    200,
+  );
+  assert.equal((await access(id)).owns_coverly, true);
+  assert.equal(
+    (
+      await webhookHandler(
+        req(),
+        rcConfig,
+        dbStore,
+        { bearerSecret: "fixture", signingSecret: "" },
+        fetchMock,
+      )
+    ).status,
+    200,
+  );
+  assert.equal(lookups, 1);
+});
+
+test("Batch 2: expired event worker cannot apply even with a live user lease", async () => {
+  const id = await user();
+  const eventId = randomUUID();
+  const first = await claim(eventId, id);
+  const token = await begin([id]);
+  await db.query(
+    "UPDATE public.revenuecat_webhook_events SET lease_expires_at=now()-interval '1 second' WHERE event_id=$1",
+    [eventId],
+  );
+  await claim(eventId, id);
+  await assert.rejects(
+    apply(
+      token,
+      [canonicalState(rcPayload(id), id, rcConfig)],
+      eventId,
+      first.token,
+    ),
+    /event_lease_lost/,
+  );
+  assert.equal((await access(id)).owns_coverly, false);
+  await rpc("revenuecat_release_sync", { p_token: token });
+});
+
+test("Batch 2: canonical legacy plans persist, ownership wins, and Stripe-only absence is harmless", async () => {
+  for (const [entitlement, product, plan] of [
+    ["Coverly Plus", "plus", "coverly_plus"],
+    ["Coverly Family", "family", "coverly_family"],
+  ]) {
+    const id = await user();
+    const payload: any = rcPayload(id, false);
+    payload.subscriber.entitlements[entitlement] = {
+      product_identifier: product,
+      purchase_date: "2026-01-01T00:00:00Z",
+      expires_date: null,
+    };
+    payload.subscriber.non_subscriptions[product] = [
+      { purchase_date: "2026-01-01T00:00:00Z", is_sandbox: false },
+    ];
+    await apply(await begin([id]), [canonicalState(payload, id, rcConfig)]);
+    assert.equal((await access(id)).effective_plan, plan);
+    assert.equal((await access(id)).owns_coverly, false);
+    payload.request_date_ms++;
+    payload.subscriber.entitlements.coverly_owned =
+      rcPayload(id).subscriber.entitlements.coverly_owned;
+    await apply(await begin([id]), [canonicalState(payload, id, rcConfig)]);
+    assert.equal((await access(id)).effective_plan, "coverly_owned");
+    assert.equal(
+      (
+        await db.query(
+          "SELECT subscription_plan FROM public.user_profiles WHERE id=$1",
+          [id],
+        )
+      ).rows[0].subscription_plan,
+      plan,
+    );
+  }
+  const stripeUser = await user({
+    subscription_plan: "coverly_plus",
+    subscription_status: "active",
+  });
+  await apply(await begin([stripeUser]), [
+    canonicalState(rcPayload(stripeUser, false), stripeUser, rcConfig),
+  ]);
+  assert.equal((await access(stripeUser)).effective_plan, "coverly_plus");
+  assert.equal(
+    (
+      await db.query(
+        "SELECT revenuecat_status FROM public.user_profiles WHERE id=$1",
+        [stripeUser],
+      )
+    ).rows[0].revenuecat_status,
+    null,
+  );
 });
