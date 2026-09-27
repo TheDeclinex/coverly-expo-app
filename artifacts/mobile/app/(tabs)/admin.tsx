@@ -2,7 +2,7 @@ import { Feather } from "@expo/vector-icons";
 import { useQuery } from "@tanstack/react-query";
 import { Redirect, Stack, router, type Href } from "expo-router";
 import React from "react";
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { AccountRow, AccountSection } from "@/components/AccountMenu";
@@ -20,6 +20,7 @@ import {
   type AdminAnalyticsMetricTone,
 } from "@/lib/admin-analytics-model";
 import { adminMetricLabel } from "@/lib/admin-model";
+import { registerThisAdminDevice, sendAdminNotificationTest } from "@/lib/admin-notifications";
 import { loadAdminOverview, loadAdminUsageAnalytics } from "@/lib/admin-service";
 
 function environmentLabel(value: string | undefined): string {
@@ -55,6 +56,7 @@ export default function AdminScreen() {
   const insets = useSafeAreaInsets();
   const { session } = useAuth();
   const { isAdmin, isLoading } = useAccountProfile();
+  const [notificationAction, setNotificationAction] = React.useState<"register" | "test" | null>(null);
 
   const overviewQuery = useQuery({
     queryKey: ["admin-overview", session?.user.id],
@@ -80,6 +82,21 @@ export default function AdminScreen() {
   const environment = environmentLabel(process.env.EXPO_PUBLIC_APP_ENV);
   const openMetric = (metric: AdminAnalyticsMetricKey) => {
     router.push({ pathname: "/(tabs)/admin-analytics/[metric]", params: { metric } } as Href);
+  };
+  const runNotificationAction = async (action: "register" | "test") => {
+    if (notificationAction) return;
+    setNotificationAction(action);
+    try {
+      const result = action === "register" ? await registerThisAdminDevice() : await sendAdminNotificationTest();
+      Alert.alert(action === "register" ? "Device registered" : "Test sent", result.message);
+    } catch (error) {
+      Alert.alert(
+        action === "register" ? "Could not register device" : "Could not send test",
+        error instanceof Error ? error.message : "Please try again.",
+      );
+    } finally {
+      setNotificationAction(null);
+    }
   };
 
   return (
@@ -221,6 +238,26 @@ export default function AdminScreen() {
           <AccountRow icon="database" title="Supabase session" value={session ? "Connected" : "Unavailable"} tone="greyBlue" />
           <AccountRow icon="activity" title="Edge Functions" value="Not checked" tone="greyBlue" />
           <AccountRow icon="toggle-left" title="Feature flags" value="Not available" tone="greyBlue" last />
+        </AccountSection>
+
+        <AccountSection title="Founder notifications">
+          <AccountRow
+            icon="bell"
+            title="Register this phone"
+            subtitle="Admin-only signup alerts; asks permission only when tapped"
+            value={notificationAction === "register" ? "Registering" : undefined}
+            tone="greyBlue"
+            onPress={notificationAction ? undefined : () => void runNotificationAction("register")}
+          />
+          <AccountRow
+            icon="send"
+            title="Send test notification"
+            subtitle="Uses the registered admin device token"
+            value={notificationAction === "test" ? "Sending" : undefined}
+            tone="greyBlue"
+            onPress={notificationAction ? undefined : () => void runNotificationAction("test")}
+            last
+          />
         </AccountSection>
       </ScrollView>
     </>

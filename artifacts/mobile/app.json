@@ -3,7 +3,7 @@
     "owner": "coverly",
     "name": "Coverly",
     "slug": "coverly",
-    "version": "1.0.1",
+    "version": "1.0.2",
     "orientation": "portrait",
     "icon": "./assets/brand/coverly-app-icon-1024.png",
     "scheme": "coverly",
@@ -79,6 +79,7 @@
       "expo-router",
       "expo-font",
       "expo-web-browser",
+      "expo-notifications",
       [
         "expo-splash-screen",
         {

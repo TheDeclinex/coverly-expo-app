@@ -86,3 +86,9 @@ verify_jwt = false
 
 [functions.replacement-refinement-v2]
 verify_jwt = true
+
+[functions.send-admin-notification]
+# Database webhooks authenticate with ADMIN_NOTIFICATION_WEBHOOK_SECRET. Admin
+# device registration is authenticated again inside the function with the
+# caller's Supabase access token and server-side app_role check.
+verify_jwt = false
