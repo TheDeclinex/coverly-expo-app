@@ -230,7 +230,7 @@ test("screen contract preserves old results, separates refined billing retry, an
   const screen = readFileSync(fileURLToPath(new URL("../../app/(tabs)/replacement-pricing/[id].tsx", import.meta.url).href), "utf8");
   const sheet = readFileSync(fileURLToPath(new URL("../../components/ReplacementSearchRefinementSheet.tsx", import.meta.url).href), "utf8");
   const transport = readFileSync(fileURLToPath(new URL("../replacement-pricing.ts", import.meta.url).href), "utf8");
-  const edge = readFileSync(fileURLToPath(new URL("../../../../supabase/functions/replacement-price-search/index.ts", import.meta.url).href), "utf8");
+  const edge = readFileSync(fileURLToPath(new URL("../../../../supabase/functions/replacement-price-search/handler.ts", import.meta.url).href), "utf8");
   assert.match(screen, /results \? \(/);
   assert.match(screen, /opacity: refinedSearching \? 0\.56/);
   assert.match(screen, /Try again/);
@@ -248,13 +248,13 @@ test("screen contract preserves old results, separates refined billing retry, an
   assert.match(screen, /automaticTransportRetry: Boolean\(isRefined\)/);
   assert.match(edge, /isAuthoritativeReplacementPriceRangeActive\(body\.refinement\?\.version/);
   assert.match(edge, /results = rangeActive[\s\S]*: results\.slice\(0, num\)/);
-  const reserveIndex = edge.indexOf("usageReservation = await reserveUsage");
+  const reserveIndex = edge.indexOf("await usage.reserve");
   for (const validation of ["SEARCH_TERM_REQUIRED", "INVALID_PRICE_RANGE", "MISSING_IDEMPOTENCY_KEY", "ITEM_CONTEXT_REQUIRED", "INVALID_PROPERTY_MARKET"]) {
     assert.ok(edge.indexOf(validation) >= 0 && edge.indexOf(validation) < reserveIndex, validation);
   }
-  assert.match(edge, /reserveUsage/);
-  assert.match(edge, /commitUsage/);
-  assert.match(edge, /refundUsage/);
+  assert.match(edge, /usage\.reserve/);
+  assert.match(edge, /usage\.settle\('committed'/);
+  assert.match(edge, /usage\.settle\('refunded'/);
   assert.equal((sheet.match(/<Modal\b/g) ?? []).length, 1);
   assert.doesNotMatch(sheet, /VoiceInputSheet/);
   assert.match(sheet, /Searches retailers again using your refined criteria/);

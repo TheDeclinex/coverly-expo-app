@@ -92,14 +92,12 @@ adapters remain VOLATILE so counts refresh after locking and during multi-row
 inserts. The mobile allowance parser reads actual server limits and denials;
 malformed or contradictory responses fail closed for creation only.
 
-Ownership never means unlimited AI. `ai_requires_metering` is true for ordinary
-Free, owner and legacy access; override policies are explicit. The existing
-ledger still bypasses legacy Plus/Family as before; that transitional behavior
-is **not** a new owner grant. Owner string adapters return `coverly_owned`, which
-does not enter that legacy bypass. Until the secure ledger batch consumes the
-new policy class, owners conservatively use existing configurable Free counters.
-No owner quota or new production quota is chosen here. This foundation must not
-be presented as the completed owner AI allowance implementation.
+Ownership never means unlimited AI. Batch 3 now consumes the canonical policy
+class in the trusted usage ledger, counts owner usage and enforces configurable
+owner allowances. Transitional Plus/Family and explicit overrides retain their
+documented bypass but are also counted. Provisional owner safety defaults are
+not commercial commitments. See [fair-use accounting](fair-use-accounting.md)
+for the settings, execution protocol, provider coverage and rollout requirements.
 
 Claim export is a capability only in this batch. Enforcement in
 `generate-claim-pack` and claim purchase UI is deferred. Existing claim-token
@@ -156,7 +154,7 @@ migration; preserve ownership/revocation records rather than dropping them.
 Done looks like now: tested durable storage and a canonical access contract,
 compatible property enforcement and server-limit parsing, with no remote changes.
 Do not change paywall, onboarding, sign-in, store products or pricing in this batch.
-Later batches handle deployment validation, secure AI usage accounting,
+Later batches handle deployment validation, remaining provider metering,
 mobile ownership state, claim enforcement, one-time paywall and store setup.
 
 ## Existing purchase integration (transitional reference)

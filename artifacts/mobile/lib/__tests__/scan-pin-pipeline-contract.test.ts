@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import test from "node:test";
 
-const edge = readFileSync(resolve(process.cwd(), "../../supabase/functions/scan-room-photo/index.ts"), "utf8");
+const edge = readFileSync(resolve(process.cwd(), "../../supabase/functions/scan-room-photo/handler.ts"), "utf8");
 const scan = readFileSync(resolve(process.cwd(), "app/(tabs)/scan.tsx"), "utf8");
 const service = readFileSync(resolve(process.cwd(), "lib/scan-service.ts"), "utf8");
 

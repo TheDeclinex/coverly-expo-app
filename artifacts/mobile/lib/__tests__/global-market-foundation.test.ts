@@ -113,9 +113,9 @@ test("manual deployment guide includes preflight, RPC, and rollout checks", () =
 });
 
 test("pricing Edge Functions use authoritative property markets and preserve the scan model", () => {
-  const scan = source("supabase/functions/scan-room-photo/index.ts");
+  const scan = source("supabase/functions/scan-room-photo/handler.ts");
   const model = source("supabase/functions/scan-room-photo/scan-model.ts");
-  const search = source("supabase/functions/replacement-price-search/index.ts");
+  const search = source("supabase/functions/replacement-price-search/handler.ts");
   assert.match(scan, /from\('inventory_files'\).*country_code,currency_code/);
   assert.match(scan, /unitEstimatedPrice = null/);
   assert.doesNotMatch(scan, /unitEstimatedPrice = 1/);

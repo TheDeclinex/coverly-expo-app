@@ -75,12 +75,12 @@ test("replacement cards use search currency fallback without weakening foreign l
 });
 
 test("Edge price paths use strict finite helpers and preserve metering code", () => {
-  const scan = source("supabase/functions/scan-room-photo/index.ts");
-  const search = source("supabase/functions/replacement-price-search/index.ts");
+  const scan = source("supabase/functions/scan-room-photo/handler.ts");
+  const search = source("supabase/functions/replacement-price-search/handler.ts");
   assert.match(scan, /finitePositiveScanEstimate/);
   assert.doesNotMatch(scan, /\bisNaN\(/);
   assert.match(search, /parseProviderPrice\(r\.price\)/);
-  assert.match(search, /reserveUsage/);
-  assert.match(search, /commitUsage/);
-  assert.match(search, /refundUsage/);
+  assert.match(search, /usage\.reserve/);
+  assert.match(search, /usage\.settle\('committed'/);
+  assert.match(search, /usage\.settle\('refunded'/);
 });
