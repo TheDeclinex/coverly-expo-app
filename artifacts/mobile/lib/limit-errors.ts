@@ -61,6 +61,8 @@ function aiScanBody(usage?: UsageLimitDetails): string {
 
 export function normalizeLimitError(input: LimitErrorInput): NormalizedLimitError | null {
   const code = input.errorCode ?? (isRecord(input.responseBody) && typeof input.responseBody.errorCode === "string" ? input.responseBody.errorCode : null);
+  // Owner exhaustion is a retry/reset condition, never a subscription upsell.
+  if (code === "OWNER_FAIR_USE_EXHAUSTED" || (isRecord(input.responseBody) && input.responseBody.code === "OWNER_FAIR_USE_EXHAUSTED")) return null;
   const usage = extractUsageLimitDetails(input.responseBody);
 
   if (code === "REPLACEMENT_PRICING_LIMIT_REACHED") {

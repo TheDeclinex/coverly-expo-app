@@ -190,17 +190,20 @@ export async function loadOffering(): Promise<BillingResult<PurchasesOffering | 
   }
 }
 
-export async function loadCustomerInfo(): Promise<BillingResult<CustomerInfo>> {
-  try {
-    const { Purchases } = await sdk();
-    const info = await Purchases.getCustomerInfo();
-    billingDiagnostic("customer info loaded", { hasActiveEntitlement: hasActiveRevenueCatEntitlement(info, revenueCatEntitlementConfig) });
-    return { ok: true, value: info };
-  }
-  catch (error) {
-    billingDiagnostic("customer info failed", { message: error instanceof Error ? error.message : "unknown" });
-    return { ok: false, error: "Could not refresh purchases. Check your connection and try again." };
-  }
+export async function loadCustomerInfo(expectedUserId: string): Promise<BillingResult<CustomerInfo>> {
+  return serialiseIdentityOperation(async () => {
+    if (configuredUserId !== expectedUserId) return { ok: false, error: "Your purchase account changed." };
+    try {
+      const { Purchases } = await sdk();
+      const info = await Purchases.getCustomerInfo();
+      billingDiagnostic("customer info loaded", { hasActiveEntitlement: hasActiveRevenueCatEntitlement(info, revenueCatEntitlementConfig) });
+      return { ok: true, value: info };
+    }
+    catch (error) {
+      billingDiagnostic("customer info failed", { message: error instanceof Error ? error.message : "unknown" });
+      return { ok: false, error: "Could not refresh purchases. Check your connection and try again." };
+    }
+  });
 }
 
 export async function addCustomerInfoListener(listener: CustomerInfoUpdateListener): Promise<BillingResult<() => void>> {
@@ -214,38 +217,44 @@ export async function addCustomerInfoListener(listener: CustomerInfoUpdateListen
   }
 }
 
-export async function buyPackage(pkg: PurchasesPackage): Promise<BillingResult<CustomerInfo>> {
-  try {
-    const { Purchases } = await sdk();
-    pricingDiagnostic("purchase package selected", pkg);
-    const result = await Purchases.purchasePackage(pkg);
-    return { ok: true, value: result.customerInfo };
-  }
-  catch (error) {
-    const value = error as { code?: string; userCancelled?: boolean | null; message?: string };
-    const { PURCHASES_ERROR_CODE } = await sdk().catch(() => ({ PURCHASES_ERROR_CODE: null }));
-    const cancelled = value.userCancelled === true || value.code === PURCHASES_ERROR_CODE?.PURCHASE_CANCELLED_ERROR;
-    billingDiagnostic("purchase failed", {
-      cancelled,
-      code: value.code ?? null,
-      message: value.message ?? "unknown",
-    });
-    return {
-      ok: false,
-      cancelled,
-      error: cancelled
-        ? "Purchase cancelled."
-        : "Purchase could not be completed. Check your connection and try again.",
-    };
-  }
+export async function buyPackage(pkg: PurchasesPackage, expectedUserId: string): Promise<BillingResult<CustomerInfo>> {
+  return serialiseIdentityOperation(async () => {
+    if (configuredUserId !== expectedUserId) return { ok: false, error: "Your purchase account changed. Please sign in again." };
+    try {
+      const { Purchases } = await sdk();
+      pricingDiagnostic("purchase package selected", pkg);
+      const result = await Purchases.purchasePackage(pkg);
+      return { ok: true, value: result.customerInfo };
+    }
+    catch (error) {
+      const value = error as { code?: string; userCancelled?: boolean | null; message?: string };
+      const { PURCHASES_ERROR_CODE } = await sdk().catch(() => ({ PURCHASES_ERROR_CODE: null }));
+      const cancelled = value.userCancelled === true || value.code === PURCHASES_ERROR_CODE?.PURCHASE_CANCELLED_ERROR;
+      billingDiagnostic("purchase failed", {
+        cancelled,
+        code: value.code ?? null,
+        message: value.message ?? "unknown",
+      });
+      return {
+        ok: false,
+        cancelled,
+        error: cancelled
+          ? "Purchase cancelled."
+          : "Purchase could not be completed. Check your connection and try again.",
+      };
+    }
+  });
 }
 
-export async function restoreBilling(): Promise<BillingResult<CustomerInfo>> {
-  try { const { Purchases } = await sdk(); return { ok: true, value: await Purchases.restorePurchases() }; }
-  catch (error) {
-    billingDiagnostic("restore failed", { message: error instanceof Error ? error.message : "unknown" });
-    return { ok: false, error: "Purchases could not be restored. Check your connection and try again." };
-  }
+export async function restoreBilling(expectedUserId: string): Promise<BillingResult<CustomerInfo>> {
+  return serialiseIdentityOperation(async () => {
+    if (configuredUserId !== expectedUserId) return { ok: false, error: "Your purchase account changed. Please sign in again." };
+    try { const { Purchases } = await sdk(); return { ok: true, value: await Purchases.restorePurchases() }; }
+    catch (error) {
+      billingDiagnostic("restore failed", { message: error instanceof Error ? error.message : "unknown" });
+      return { ok: false, error: "Purchases could not be restored. Check your connection and try again." };
+    }
+  });
 }
 
 export function resolveCustomerPlan(customerInfo: CustomerInfo | null): RevenueCatPlanState {

@@ -1,3 +1,4 @@
+import { accessPlanLabel, type AccessPlan } from "@/lib/access-capabilities";
 import { Feather } from "@expo/vector-icons";
 import { useQuery } from "@tanstack/react-query";
 import Constants from "expo-constants";
@@ -36,7 +37,7 @@ export default function AccountScreen() {
   const feedbackUnread = useFeedbackUnread();
   const [legalDocument, setLegalDocument] = React.useState<CoverlyLegalDocument | null>(null);
   const {
-    effectivePlan,
+    effectivePlan, accessClass, retryReconciliation,
     purchaseLoading,
     restorePurchases,
     error: billingError,
@@ -51,7 +52,7 @@ export default function AccountScreen() {
 
   const email = profile?.email ?? session?.user.email ?? "Email unavailable";
   const displayName = profile?.fullName ?? null;
-  const entitlementPlanLabel = effectivePlan === "coverly_family" ? "Family" : effectivePlan === "coverly_plus" ? "Plus" : "Free";
+  const entitlementPlanLabel = accessPlanLabel(effectivePlan, accessClass ?? undefined);
   const planLabel = isLoading && effectivePlan === "free"
     ? "Loading…"
     : entitlementPlanLabel;
@@ -102,7 +103,7 @@ export default function AccountScreen() {
 
   const restore = async () => {
     const result = await restorePurchases();
-    Alert.alert(result.ok ? "Purchases restored" : "Restore complete", result.message);
+    Alert.alert(result.pending ? "Confirming access" : result.ok ? "Purchases restored" : "Restore complete", result.message, result.pending ? [{ text: "Later" }, { text: "Retry verification", onPress: () => { void retryReconciliation().then((next) => Alert.alert("Access verification", next.message)); } }] : undefined);
   };
 
   const rateCoverly = async () => {
@@ -267,7 +268,7 @@ function PlanUsageSection({
   onRestore,
 }: {
   planLabel: string;
-  effectivePlan: "free" | "coverly_plus" | "coverly_family";
+  effectivePlan: AccessPlan;
   allowances: UsageAllowance[];
   isLoading: boolean;
   isError: boolean;
@@ -280,7 +281,7 @@ function PlanUsageSection({
   const colors = useColors();
   const rows = allowances.filter((row) => row.feature === "ai_scan" || row.feature === "replacement_pricing");
   const resetAt = rows[0]?.resetAt ?? null;
-  const included = effectivePlan !== "free" || isAdmin || (rows.length > 0 && rows.every((row) => !row.isLimited));
+  const included = rows.length > 0 && rows.every((row) => !row.isLimited);
   const planName = planLabel.startsWith("Loading") ? planLabel : `Coverly ${planLabel}`;
 
   return (
@@ -291,7 +292,7 @@ function PlanUsageSection({
           <Text style={[styles.planDescription, { color: colors.mutedForeground }]}>
             {included
               ? "AI scans and replacement pricing included. Fair use applies."
-              : "Monthly AI scans and price searches are included up to your Free plan limits."}
+              : "Monthly AI scans and price searches are included up to your plan limits."}
           </Text>
         </View>
 
@@ -311,7 +312,7 @@ function PlanUsageSection({
         ) : (
           <View style={styles.usageRows}>
             {rows.map((row) => {
-              const limited = !included && row.isLimited;
+              const limited = row.isLimited;
               const warning = limited ? usageWarningLevel(row) : "none";
               const tone = warning === "empty" ? colors.destructive : warning === "low" ? colors.warning : colors.foreground;
               return (

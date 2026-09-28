@@ -1,4 +1,7 @@
-export type CoverlyBillingPlan = "free" | "coverly_plus" | "coverly_family";
+import type { AccessPlan } from "./access-capabilities";
+
+// Transitional public name; ownership remains distinct from legacy subscriptions.
+export type CoverlyBillingPlan = AccessPlan;
 
 export type RevenueCatEntitlementLike = {
   identifier?: string | null;
@@ -18,7 +21,7 @@ export type RevenueCatEntitlementConfig = {
 };
 
 export type RevenueCatPlanState = {
-  plan: Exclude<CoverlyBillingPlan, "free"> | null;
+  plan: "coverly_plus" | "coverly_family" | null;
   entitlementId: string | null;
   subscriptionStatus: "active" | "trialing" | null;
   subscriptionPeriodEnd: string | null;

@@ -1,3 +1,4 @@
+import { accessPlanLabel, type AccessPlan } from "@/lib/access-capabilities";
 import { Feather } from "@expo/vector-icons";
 import { Stack, router, useLocalSearchParams } from "expo-router";
 import * as WebBrowser from "expo-web-browser";
@@ -165,7 +166,7 @@ function PlanCard({
   packages: readonly UpgradeDisplayPackage<PurchasesPackage>[];
   selectedPeriod: UpgradeBillingPeriod | null;
   colors: AppColors;
-  effectivePlan: "free" | "coverly_plus" | "coverly_family";
+  effectivePlan: AccessPlan;
   activeSubscriptions: readonly string[] | null | undefined;
   purchaseLoading: boolean;
   isRefreshing: boolean;
@@ -253,7 +254,7 @@ export default function UpgradeScreen() {
   const insets = useSafeAreaInsets();
   const {
     effectivePlan, offering, customerInfo, error, purchaseLoading, isRefreshing,
-    purchasePackage, restorePurchases, gatesEnabled,
+    purchasePackage, restorePurchases, retryReconciliation, gatesEnabled,
   } = useEntitlements();
   const { allowance: propertyAllowance } = usePropertyAllowance();
   const packages = offering?.availablePackages ?? emptyPackages;
@@ -312,9 +313,9 @@ export default function UpgradeScreen() {
         });
       }
       Alert.alert(
-        result.ok ? "You're covered" : "Purchase unavailable",
+        result.pending ? "Purchase successful — confirming access" : result.ok ? "You're covered" : "Purchase unavailable",
         result.message,
-        result.ok ? [{ text: "Done", onPress: () => router.back() }] : undefined,
+        result.pending ? [{ text: "Later" }, { text: "Retry verification", onPress: () => { void retryReconciliation().then((next) => Alert.alert("Access verification", next.message)); } }] : result.ok ? [{ text: "Done", onPress: () => router.back() }] : undefined,
       );
     } finally {
       purchaseActionLockRef.current = false;
@@ -327,7 +328,7 @@ export default function UpgradeScreen() {
     try {
       const result = await restorePurchases();
       if (result.ok) void trackEvent("purchase_restored", { source_screen: sourceScreen });
-      Alert.alert(result.ok ? "Purchases restored" : "Restore complete", result.message);
+      Alert.alert(result.pending ? "Confirming access" : result.ok ? "Purchases restored" : "Restore complete", result.message, result.pending ? [{ text: "Later" }, { text: "Retry verification", onPress: () => { void retryReconciliation().then((next) => Alert.alert("Access verification", next.message)); } }] : undefined);
     } finally {
       purchaseActionLockRef.current = false;
     }
@@ -342,9 +343,7 @@ export default function UpgradeScreen() {
     catch { Alert.alert(`Unable to open ${document.title.toLowerCase()}`, "Please try again later."); }
   };
 
-  const currentPlanLabel = effectivePlan === "free"
-    ? "Free"
-    : effectivePlan === "coverly_family" ? "Coverly Family" : "Coverly Plus";
+  const currentPlanLabel = effectivePlan === "free" ? "Free" : `Coverly ${accessPlanLabel(effectivePlan)}`;
 
   return <>
     <Stack.Screen options={{ headerShown: true, title: "Choose your plan", presentation: "modal" }} />

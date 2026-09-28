@@ -3,7 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useAuth } from "@/context/AuthContext";
 import { supabase } from "@/lib/supabase";
 
-export type AccountPlan = "Free" | "Plus" | "Family" | "Tester";
+export type AccountPlan = "Free" | "Owner" | "Plus" | "Family" | "Tester" | "Admin";
 
 export interface AccountProfile {
   id: string | null;
@@ -51,6 +51,8 @@ function safeProfileDiagnostic(row: ProfileRpcRow | null) {
 function normalisePlan(value: string | null | undefined): AccountPlan | null {
   if (!value) return null;
   const plan = value.trim().toLowerCase().replace(/[ -]+/g, "_");
+  if (plan === "coverly_owned") return "Owner";
+  if (plan === "admin") return "Admin";
   if (plan === "free") return "Free";
   if (plan === "tester") return "Tester";
   if (plan === "family" || plan === "coverly_family") return "Family";
@@ -80,6 +82,7 @@ export function useAccountProfile() {
       }
 
       const row = (Array.isArray(data) ? data[0] : data) as ProfileRpcRow | null;
+      if (row?.id && row.id !== session?.user.id) throw new Error("Profile account changed");
       safeProfileDiagnostic(row ?? null);
 
       // The RPC itself succeeded, but this account has no explicit profile row.
@@ -97,10 +100,9 @@ export function useAccountProfile() {
         };
       }
 
-      // Production returns effective_plan="admin" for administrators. That is
-      // an access role, not a purchasable plan, so continue to the subscription
-      // and base-plan fields until a recognized billing plan is found.
-      const resolvedPlan = [row.effective_plan, row.subscription_plan, row.plan, row.tier]
+      // Profile labels are display-only. A canonical effective_plan never falls
+      // through to stale paid strings; access comes from EntitlementsContext.
+      const resolvedPlan = (row.effective_plan != null ? [row.effective_plan] : [row.subscription_plan, row.plan, row.tier])
         .map(normalisePlan)
         .find((value): value is AccountPlan => value !== null);
 

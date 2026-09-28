@@ -457,3 +457,118 @@ No new reconciliation button exists yet. Review migration before deploying to QA
 then test webhook retry behavior before any separately approved production rollout.
 The local CLI remains linked to **PROD `jqijavrugjidqzbbgpag`**: this batch authorizes
 no remote mutation, linking, secret configuration, Edge deployment or store action.
+
+## Batch 5: mobile canonical ownership and purchase recovery
+
+Source-only integration; no migration, offering/product/configuration changes or deployment.
+
+Purchase/Restore → RevenueCat SDK → authenticated `reconcile-revenuecat-purchases`
+→ canonical server access → `EntitlementsContext` and capabilities.
+
+### Authority and mobile model
+
+`get_my_access_capabilities()` and the reconciliation response are the only access
+sources. The typed version-1 parser exposes Free, owner, legacy Plus/Family,
+admin/tester/support override, explicit ownership status/verification, numeric
+property limit, claim export, inventory/evidence capabilities and AI policy.
+Malformed contracts fail closed on first load. A temporary error retains only
+previously verified same-session capabilities, marked unavailable.
+
+RevenueCat CustomerInfo supplies store metadata and change notifications. It does
+not grant access. Profile plan fields are display adapters, never fallback access.
+A revoked canonical owner cannot be resurrected by old paid profile strings or an
+active SDK entitlement. Overrides remain server-defined; ownership is never
+represented as Plus. The legacy `isPaid`, `isPlus`, `isFamily` and
+`isSubscriptionSyncPending` names remain compatibility adapters, not the authority
+for claim export. Subscription dates are metadata only.
+
+| Audited area | Batch 5 behavior |
+| --- | --- |
+| `billing.ts` | Existing offerings/products retained; configure/login/logout and purchase/restore/customer reads serialize; store operations validate expected identity |
+| `billing-entitlements.ts` | Existing Plus/Family SDK parsing retained for metadata; public plan type also represents owner/admin |
+| `EntitlementsContext.tsx` | Canonical controller replaces paid-profile/SDK merge and six-second profile polling |
+| `useAccountProfile.ts` | Owner/Admin display labels; explicit effective plan never falls through to stale paid fields; row identity checked |
+| Account / Upgrade | Small owner-label and recovery-alert compatibility corrections; original monthly/annual offerings remain |
+| Usage | Bounded server owner allowances, reset times and bypass flags retained; owner rows no longer hidden as unlimited; owner exhaustion cannot map to Plus upsell |
+| Property creation | Existing `usePropertyAllowance` and `get_my_property_allowance` retain numeric server limits; generic gate also uses canonical numeric limit |
+| Claim export | Existing claim screen consumes `canExportClaimPack`, now directly mapped from `can_export_claim_pack`; server remains authoritative |
+| Deletion | Store-subscription management uses legacy plan adapters, not generic paid ownership |
+
+### Requests, recovery and account isolation
+
+The client captures the authenticated session token and binds it to a temporary
+Supabase client with persistence/refresh disabled. Reconciliation sends `{}`;
+there are no user/customer IDs, receipts or client ownership assertions. The server
+authenticates and looks up RevenueCat. The client checks current session identity
+before and after requests. No server credentials are exposed.
+
+Each account session receives a fresh controller, even A → B → A. Old controllers
+cannot publish results or invalidate the new account's caches. UI store data is
+also tagged by controller. Logout/account change removes account-specific profile,
+property and usage caches. Delayed RevenueCat listener data is only a hint to
+reconcile the current authenticated account; it never populates access/UI data.
+Serialized SDK identity operations prevent a purchase running across SDK login.
+
+The controller serializes access reads/reconciliation, suppresses concurrent
+purchase/restore attempts and separates cancellation, store failure, account change,
+authentication recovery, verified access, pending verification and nothing found.
+A successful store transaction remains successful if reconciliation is unavailable.
+It displays “Purchase successful — confirming access”; retry invokes reconciliation
+only. Another Buy action while pending also retries verification without buying.
+The existing alerts offer Retry verification, and Restore is a recovery route after
+an app restart. Pending transaction state is deliberately memory-only: it is not
+payment proof and cannot confer offline ownership.
+
+Restore never tests `activeSubscriptions`: canonical ownership yields
+`owner_restored`, canonical legacy access yields `legacy_restored`, verified absence
+yields `nothing_found`; network/auth failures are separate. No configured mobile
+`coverly_owned` entitlement ID is required for this state-layer integration.
+
+### Refresh and offline policy
+
+- Startup/login/account change: cheap canonical read first, then one best-effort
+  authenticated reconciliation, independently of native store availability.
+- Foreground: canonical refresh; automatic reconciliation at most once per five
+  minutes per account controller, including failed attempts. No navigation/render
+  reconciliation.
+- Material active-entitlement change: deduplicated SDK fingerprint triggers
+  reconciliation; repeated identical SDK data does nothing. Concurrent automatic
+  refreshes coalesce. SDK request timestamps are outside the fingerprint.
+- Purchase, restore and explicit recovery bypass the automatic cooldown and queue
+  a fresh reconciliation after any older access operation.
+- Successful canonical updates invalidate only that user's profile/property/usage
+  queries. Server allowances remain the source of AI limits and reset timestamps.
+
+Previously verified capabilities survive temporary network failure in memory for
+the same session, with verification marked unavailable. They are not persisted as
+permanent purchase verification. A cold offline start cannot prove ownership;
+manual inventory/evidence code and existing data access remain unchanged. Provider
+and claim calls still enforce server access/accounting and may fail gracefully
+while offline. Returning online/foreground, restore or explicit retry recovers.
+
+### Deployment dependency and deferred work
+
+This mobile code requires Batches 1–4's coordinated backend deployment (including
+`get_my_access_capabilities` and authenticated reconciliation) before release.
+Missing functions/configuration produce unavailable verification, not fabricated
+paid access. No backend changes are added here. Existing subscription CustomerInfo
+and offerings remain supported through canonical legacy resolution.
+
+Batch 6 still owns the one-time paywall, final copy/pricing, lifetime product and
+store configuration. No final owner quotas are chosen. Native sandbox purchase,
+account-switch and cross-device smoke testing remains a release prerequisite once
+an authorized non-production environment exists; automated tests here mock all
+store/provider calls. No native build is needed or produced by this batch.
+
+Validation: run the full `lib/__tests__/*.test.ts` suite from `artifacts/mobile`
+using Node's TypeScript stripping, mobile `tsc --noEmit --incremental false`, and
+ownership-access local/PGlite plus RevenueCat reconciliation/webhook model tests.
+New tests cover canonical classes, malformed contracts, purchase/recovery/restore,
+account fencing, SDK identity ordering, offline retention, throttled refresh and
+bounded owner usage. `git diff --check` is required before commit.
+
+Batch 5 validation completed: 578 mobile tests passed (45 new), 67 affected
+backend contract tests passed with mocked providers/in-memory PGlite, mobile
+TypeScript passed, and `git diff --check` passed. No live provider, RevenueCat or
+remote Supabase test calls occurred. Native device/store smoke testing is deferred
+until a separately authorized non-production test environment is available.

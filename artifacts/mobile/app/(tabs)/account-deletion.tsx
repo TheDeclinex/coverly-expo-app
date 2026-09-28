@@ -20,13 +20,13 @@ export default function AccountDeletionScreen() {
   const insets = useSafeAreaInsets();
   const pathname = usePathname();
   const { session } = useAuth();
-  const { customerInfo, isPaid } = useEntitlements();
+  const { customerInfo, isPlus, isFamily } = useEntitlements();
   const [confirmed, setConfirmed] = React.useState(false);
   const [isSubmitting, setIsSubmitting] = React.useState(false);
   const [submitted, setSubmitted] = React.useState(false);
   const [inlineError, setInlineError] = React.useState<string | null>(null);
   const submissionLockRef = React.useRef(false);
-  const managementUrl = isPaid && (Platform.OS === "ios" || Platform.OS === "android")
+  const managementUrl = (isPlus || isFamily) && (Platform.OS === "ios" || Platform.OS === "android")
     ? customerInfo?.managementURL ?? null
     : null;
   const canSubmit = canSubmitAccountDeletion(confirmed, isSubmitting);
