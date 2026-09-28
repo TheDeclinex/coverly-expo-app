@@ -56,8 +56,11 @@ Approved ownership direction:
 - Included with verified Coverly ownership, independently of AI fair-use balance.
 - Legacy paid subscribers and explicit tester/admin access remain compatible.
 - Free users have no default export capability; one-off purchasing is deferred.
-- The ownership foundation exposes this capability only. Enforcement in the PDF
-  function and purchase UI is a later batch; existing token tables are retained.
+- Batch 4 enforces canonical export capability in the PDF function. Claim tokens
+  remain dormant history and cannot grant access; Free one-off purchase is deferred.
+
+See [provider and claim controls](provider-and-claim-controls.md) for trusted
+admission, duplicate/retry behavior, owned-storage restrictions and QA prerequisites.
 
 See `billing-and-entitlements.md` for the canonical access contract and rollout boundaries.
 
@@ -82,4 +85,4 @@ Avoid:
 - PDF has room/item structure.
 - Photos and values are included.
 - User can export/share it.
-- Access respects subscription or one-off purchase entitlement.
+- Access respects canonical ownership, compatible legacy paid or explicit overrides.

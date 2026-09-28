@@ -23,7 +23,7 @@ export interface UpcProduct {
 export type ParsedUpcPayload =
   | { kind: "found"; product: UpcProduct; resultCount: number }
   | { kind: "not-found"; resultCount: 0 }
-  | { kind: "malformed"; resultCount: null; reason: string }
+  | { kind: "malformed"; resultCount: number | null; reason: string }
   | { kind: "rejected"; resultCount: number; reason: string };
 
 export function classifyBarcodeKind(value: string): BarcodeKind {

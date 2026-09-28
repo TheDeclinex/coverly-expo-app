@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 
 const testDir = dirname(fileURLToPath(import.meta.url));
 const source = readFileSync(
-  resolve(testDir, "../../../../supabase/functions/generate-claim-pack/index.ts"),
+  resolve(testDir, "../../../../supabase/functions/generate-claim-pack/handler.ts"),
   "utf8",
 );
 

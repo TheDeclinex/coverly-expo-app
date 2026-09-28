@@ -1,5 +1,9 @@
 # Fair-use accounting — Batch 3, source only
 
+Batch 4 now protects the remaining routes. See the current
+[provider inventory and claim controls](provider-and-claim-controls.md); the
+deferred-route table below records the Batch 3 checkpoint.
+
 Ownership is not unlimited AI. This batch protects the active `scan-room-photo`
 and `replacement-price-search` routes while preserving their recognition prompts,
 model selection, quantity/pin processing, search queries, result ranking and

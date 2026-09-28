@@ -46,6 +46,7 @@ export async function improveReplacementRefinementWithAi(
       functionUrl: `${debugSupabaseUrl.replace(/\/$/, "")}/functions/v1/${FUNCTION_NAME}`,
       anonKey,
       body: {
+        usageIdempotencyKey: typeof crypto !== "undefined" && typeof crypto.randomUUID === "function" ? crypto.randomUUID() : `refine-${Date.now()}-${Math.random().toString(36).slice(2)}`,
         itemId,
         draft: {
           searchTerm: draft.searchTerm,

@@ -88,7 +88,7 @@ test("only genuine auth failures use session-expired copy", () => {
 test("AI client and Edge entrypoint match the working explicit bearer-token contract", () => {
   const client = readFileSync(fileURLToPath(new URL("../replacement-refinement-ai.ts", import.meta.url).href), "utf8");
   const transport = readFileSync(fileURLToPath(new URL("../replacement-refinement-transport.ts", import.meta.url).href), "utf8");
-  const edge = readFileSync(fileURLToPath(new URL("../../../../supabase/functions/replacement-refinement-v2/index.ts", import.meta.url).href), "utf8");
+  const edge = readFileSync(fileURLToPath(new URL("../../../../supabase/functions/replacement-refinement-v2/handler.ts", import.meta.url).href), "utf8");
   assert.match(client, /getSession: \(\) => supabase\.auth\.getSession\(\)/);
   assert.doesNotMatch(client, /supabase\.functions\.invoke/);
   assert.match(transport, /apikey: options\.anonKey/);

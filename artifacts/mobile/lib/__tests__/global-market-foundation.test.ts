@@ -149,7 +149,7 @@ test("replacement search entry points and refined searches are not support-tier 
 });
 
 test("new claim packs preserve currency metadata and mixed-currency subtotals", () => {
-  const claims = source("supabase/functions/generate-claim-pack/index.ts");
+  const claims = source("supabase/functions/generate-claim-pack/handler.ts");
   const builder = source("artifacts/mobile/app/(tabs)/claim-pack/[fileId].tsx");
   const history = source("artifacts/mobile/app/(tabs)/claim-packs.tsx");
   assert.match(claims, /country_code: property\.country_code/);

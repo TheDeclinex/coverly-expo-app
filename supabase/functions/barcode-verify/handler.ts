@@ -1,0 +1,374 @@
+/**
+ * Supabase Edge Function: barcode-verify
+ * v26.2.1 — fix: client.auth.getUser(jwt) to avoid "Auth session missing!" error
+ *
+ * Two-step barcode verification:
+ *   1. Optional: GPT-4o vision to extract barcode/model from an image (if no barcode supplied)
+ *   2. UPCitemdb lookup for the barcode value
+ * API keys stay server-side in OPENAI_API_KEY and UPCITEMDB_KEY secrets.
+ *
+ * Deploy (JWT verification ENABLED — authenticated Coverly users only):
+ *   npx supabase functions deploy barcode-verify
+ *
+ * Set secrets:
+ *   supabase secrets set OPENAI_API_KEY=sk-...
+ *   supabase secrets set UPCITEMDB_KEY=<key>   (optional — uses free trial endpoint if absent)
+ *
+ * Auth: Supabase platform verifies the Bearer JWT before the handler runs.
+ * Handler also validates the token server-side as defense-in-depth.
+ */
+
+import {
+  classifyBarcodeKind,
+  classifyUpcHttpFailure,
+  normalizeBarcodeForLookup,
+  parseUpcSuccessPayload,
+  type UpcProduct,
+} from './model.ts';
+
+import type { createClient as ClientFactory } from 'https://esm.sh/@supabase/supabase-js@2.39.3';
+import { protectedRoute, type Environment, type RouteContext } from '../_shared/provider-controls.ts';
+
+export function rawHandler(createClient:typeof ClientFactory, env:Environment, fetch:typeof globalThis.fetch, context:RouteContext) {
+const EDGE_VERSION = 'v26.3.0';
+const SUPABASE_URL = env('SUPABASE_URL') ?? '';
+const SUPABASE_ANON_KEY = env('SUPABASE_ANON_KEY') ?? '';
+
+// ── CORS ─────────────────────────────────────────────────────────────────────
+// Wildcard — mirrors scan-room-photo (proven working). JWT is the real gate.
+// Known live origins:
+//   https://app.coverly.nz    — live app
+//   https://cloud.uibakery.io — UIBakery builder + deployed host
+const CORS_HEADERS = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+  'Access-Control-Allow-Methods': 'POST, OPTIONS',
+};
+
+function jsonResponse(body: unknown, status = 200, _origin: string | null = null): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
+  });
+}
+
+const OPENAI_CHAT_URL = 'https://api.openai.com/v1/chat/completions';
+const UPCITEMDB_TRIAL_URL = 'https://api.upcitemdb.com/prod/trial/lookup';
+const UPCITEMDB_PAID_URL = 'https://api.upcitemdb.com/prod/v1/lookup';
+
+// Max image payload: ~5 MB base64 ≈ ~3.75 MB raw
+const MAX_IMAGE_BASE64_LEN = 6_700_000;
+// Barcode sanity: UPC/EAN/model numbers are short
+const MAX_BARCODE_LEN = 200;
+
+interface BarcodeVerifyRequest {
+  barcode?: string;
+  barcodeFormat?: string;
+  imageBase64?: string;
+  itemName?: string;
+  category?: string;
+  itemId?: string;
+}
+
+interface BarcodeExtractResult {
+  found: boolean;
+  type: 'barcode' | 'model_number' | 'serial_number' | 'qr_code' | 'none';
+  value: string | null;
+  confidence: number;
+  brand: string | null;
+  product_name: string | null;
+}
+
+const GPT_BARCODE_SYSTEM = `You are a product label reader specialised in extracting model numbers and barcodes from appliance rating plates, packaging, and stickers. The image may be upside-down or at an angle — read all text regardless of orientation. Return ONLY a raw JSON object, no markdown, no explanation.`;
+
+const GPT_BARCODE_USER = `Examine every line of text in this image carefully, including upside-down or rotated text.
+
+Extraction priority (highest first):
+1. Any line whose label is a synonym of 'model' (Model, Model No, Type, Item No, Part No, Cat No, Product No, Ref No, Art No, etc.)
+2. A UPC or EAN barcode number (8–14 digits, usually under a barcode graphic).
+3. Any other alphanumeric product/part number that looks like a model code.
+4. A QR code — ONLY if you can clearly read the encoded text content.
+
+Do NOT return serial numbers, approval numbers, voltage/frequency specs, or pure numeric serial/batch codes.
+
+Return a JSON object with EXACTLY these fields:
+- found: true if any identifier was found, false if none
+- type: "barcode" | "model_number" | "serial_number" | "qr_code" | "none"
+- value: the exact text of the best identifier (null if not found)
+- confidence: 0–1 confidence you read it correctly
+- brand: brand name if visible (null if not visible)
+- product_name: product name or description from the label (null if not visible)`;
+
+async function extractBarcodeFromImage(imageBase64: string, openAiKey: string): Promise<BarcodeExtractResult | null> {
+  const body = {
+    model: 'gpt-4o',
+    max_completion_tokens: 500,
+    messages: [
+      { role: 'system', content: GPT_BARCODE_SYSTEM },
+      {
+        role: 'user',
+        content: [
+          { type: 'text', text: GPT_BARCODE_USER },
+          { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${imageBase64}`, detail: 'high' } },
+        ],
+      },
+    ],
+  };
+
+  const res = await fetch(OPENAI_CHAT_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${openAiKey}` },
+    body: JSON.stringify(body),
+  });
+
+  if (!res.ok) return null;
+
+  const json = await res.json() as any;
+  const content = json?.choices?.[0]?.message?.content ?? '';
+  try {
+    const clean = content.replace(/^```(?:json)?\s*/m, '').replace(/\s*```\s*$/m, '').trim();
+    return JSON.parse(clean) as BarcodeExtractResult;
+  } catch {
+    return null;
+  }
+}
+
+type UpcLookupResult =
+  | { kind: 'found'; product: UpcProduct }
+  | { kind: 'not-found' }
+  | { kind: 'invalid' }
+  | { kind: 'authentication' }
+  | { kind: 'rate-limit' }
+  | { kind: 'network'; message: string }
+  | { kind: 'malformed'; message: string }
+  | { kind: 'parse'; message: string }
+  | { kind: 'provider'; message: string };
+
+async function lookupUpc(
+  barcode: string,
+  diagnostics: Record<string, unknown>,
+  upcKey?: string,
+): Promise<UpcLookupResult> {
+  const endpoint = upcKey ? UPCITEMDB_PAID_URL : UPCITEMDB_TRIAL_URL;
+  diagnostics.providerPlan = upcKey ? 'paid' : 'trial';
+  const url = `${endpoint}?upc=${encodeURIComponent(barcode)}`;
+  const headers: Record<string, string> = {
+    'Accept': 'application/json',
+    'Content-Type': 'application/json',
+  };
+  if (upcKey) {
+    headers['key_type'] = '3scale';
+    headers['user_key'] = upcKey;
+  }
+
+  let res: Response;
+  try {
+    res = await fetch(url, { headers });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    diagnostics.providerRequestOutcome = 'network-failure';
+    return { kind: 'network', message };
+  }
+
+  diagnostics.providerHttpStatus = res.status;
+  diagnostics.providerRateLimitRemaining = res.headers.get('x-ratelimit-remaining');
+  diagnostics.providerRateLimitReset = res.headers.get('x-ratelimit-reset');
+
+  const responseText = await res.text();
+  let payload: unknown = null;
+  try {
+    payload = responseText ? JSON.parse(responseText) : null;
+  } catch {
+    diagnostics.providerResponseCode = null;
+    diagnostics.providerResultCount = null;
+    diagnostics.coverlyParseOutcome = 'provider-response-malformed';
+    return { kind: 'malformed', message: 'UPCitemdb returned a non-JSON response' };
+  }
+
+  const providerCode = payload && typeof payload === 'object' &&
+      typeof (payload as Record<string, unknown>).code === 'string'
+    ? (payload as Record<string, unknown>).code as string
+    : null;
+  diagnostics.providerResponseCode = providerCode;
+
+  if (!res.ok) {
+    diagnostics.providerResultCount = res.status === 404 ? 0 : null;
+    diagnostics.coverlyParseOutcome = 'not-attempted';
+    const failureKind = classifyUpcHttpFailure(res.status, providerCode);
+    if (failureKind !== 'provider') return { kind: failureKind };
+    return { kind: 'provider', message: `UPCitemdb returned HTTP ${res.status}` };
+  }
+
+  try {
+    const parsed = parseUpcSuccessPayload(payload);
+    diagnostics.providerResultCount = parsed.resultCount;
+    diagnostics.coverlyParseOutcome = parsed.kind;
+    if (parsed.kind === 'found') return { kind: 'found', product: parsed.product };
+    if (parsed.kind === 'not-found') return { kind: 'not-found' };
+    if (parsed.kind === 'malformed') return { kind: 'malformed', message: parsed.reason };
+    return { kind: 'parse', message: parsed.reason };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    diagnostics.providerResultCount = null;
+    diagnostics.coverlyParseOutcome = 'failed';
+    return { kind: 'parse', message };
+  }
+}
+
+function logBarcodeLookup(outcome: string, diagnostics: Record<string, unknown>): void {
+  console.info('[barcode-verify] lookup', JSON.stringify({ outcome, ...diagnostics }));
+}
+
+// ── Main handler ──────────────────────────────────────────────────────────────
+return async (req: Request) => {
+  const origin = req.headers.get('origin');
+
+  if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS_HEADERS });
+  if (req.method !== 'POST') {
+    return jsonResponse({ success: false, errorCode: 'METHOD_NOT_ALLOWED', error: 'POST only' }, 405, origin);
+  }
+
+  // ── JWT guard (layer 2)
+  const authHeader = req.headers.get('Authorization') ?? '';
+  if (!authHeader.startsWith('Bearer ')) {
+    return jsonResponse({ success: false, errorCode: 'UNAUTHORIZED', error: 'Missing auth token' }, 401, origin);
+  }
+  const jwt = authHeader.slice(7);
+
+  let userId: string | null = null;
+  try {
+    const client = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+      global: { headers: { Authorization: `Bearer ${jwt}` } },
+    });
+    const { data, error } = await client.auth.getUser(jwt);
+    if (error || !data.user) {
+      return jsonResponse({ success: false, errorCode: 'UNAUTHORIZED', error: 'Invalid or expired session' }, 401, origin);
+    }
+    userId = data.user.id;
+  } catch {
+    return jsonResponse({ success: false, errorCode: 'UNAUTHORIZED', error: 'Auth check failed' }, 401, origin);
+  }
+
+  const openAiKey = env('OPENAI_API_KEY');
+  const upcKey = env('UPCITEMDB_KEY');
+
+  let body: BarcodeVerifyRequest;
+  try {
+    body = await req.json() as BarcodeVerifyRequest;
+  } catch {
+    return jsonResponse({ success: false, errorCode: 'BAD_REQUEST', error: 'Invalid JSON body' }, 400, origin);
+  }
+
+  if (!body.barcode && !body.imageBase64) {
+    return jsonResponse({ success: false, errorCode: 'BAD_REQUEST', error: 'Either barcode or imageBase64 is required' }, 400, origin);
+  }
+
+  // ── Input validation
+  if (body.barcode !== undefined && typeof body.barcode !== 'string') {
+    return jsonResponse({ success: false, errorCode: 'BAD_REQUEST', error: 'barcode must be a string' }, 400, origin);
+  }
+  if (body.barcode && body.barcode.length > MAX_BARCODE_LEN) {
+    return jsonResponse({ success: false, errorCode: 'BAD_REQUEST', error: 'barcode value too long' }, 400, origin);
+  }
+  if (body.imageBase64) {
+    if (body.imageBase64.length > MAX_IMAGE_BASE64_LEN) {
+      return jsonResponse({ success: false, errorCode: 'PAYLOAD_TOO_LARGE', error: 'Image payload exceeds 5 MB limit' }, 413, origin);
+    }
+    if (!/^[A-Za-z0-9+/=]+$/.test(body.imageBase64.slice(0, 100))) {
+      return jsonResponse({ success: false, errorCode: 'BAD_REQUEST', error: 'imageBase64 contains invalid characters' }, 400, origin);
+    }
+    if (!openAiKey) {
+      return jsonResponse({ success: false, errorCode: 'MISSING_API_KEY', error: 'OPENAI_API_KEY secret not configured' }, 500, origin);
+    }
+  }
+
+  const diagnostics: Record<string, unknown> = {
+    edgeVersion: EDGE_VERSION,
+    userId,
+    requestOrigin: origin,
+    rawScannedBarcode: body.barcode ?? null,
+    detectedBarcodeFormat: body.barcodeFormat ?? null,
+  };
+
+  try {
+    let barcodeValue = body.barcode?.trim() ?? null;
+    let extractResult: BarcodeExtractResult | null = null;
+
+    // ── Step 1: GPT vision (only if no barcode supplied)
+    if (!barcodeValue && body.imageBase64) {
+      diagnostics.gptExtractionUsed = true;
+      extractResult = await extractBarcodeFromImage(body.imageBase64, openAiKey!);
+      diagnostics.gptExtractResult = extractResult
+        ? { found: extractResult.found, type: extractResult.type, confidence: extractResult.confidence }
+        : null;
+
+      if (extractResult?.found && extractResult.value && extractResult.confidence >= 0.5) {
+        barcodeValue = extractResult.value;
+      } else {
+        return jsonResponse({
+          success: false, errorCode: 'BARCODE_NOT_FOUND',
+          error: 'Could not read a barcode or model number from the image',
+          extraction: extractResult, diagnostics,
+        }, 200, origin);
+      }
+    }
+
+    // ── Step 2: Model numbers / QR codes — skip UPC lookup, return synthetic product
+    const isModelOrQr = extractResult?.type === 'model_number' || extractResult?.type === 'qr_code';
+    if (isModelOrQr) {
+      diagnostics.upcLookupSkipped = true;
+      return jsonResponse({
+        success: true, barcode: barcodeValue, barcodeType: extractResult?.type ?? 'model_number',
+        productName: extractResult?.product_name ?? undefined, brand: extractResult?.brand ?? undefined,
+        matchedProduct: null, confidence: extractResult?.confidence ?? 0.8,
+        source: 'gpt_vision', diagnostics,
+      }, 200, origin);
+    }
+
+    // ── Step 3: UPCitemdb lookup
+    const normalizedBarcode = barcodeValue ? normalizeBarcodeForLookup(barcodeValue) : null;
+    diagnostics.normalizedBarcode = normalizedBarcode;
+    diagnostics.normalizedBarcodeKind = normalizedBarcode ? classifyBarcodeKind(normalizedBarcode) : 'unsupported';
+    diagnostics.upcLookupBarcode = normalizedBarcode;
+    const lookup = normalizedBarcode
+      ? await lookupUpc(normalizedBarcode, diagnostics, upcKey)
+      : { kind: 'invalid' } as const;
+    diagnostics.upcFound = lookup.kind === 'found';
+
+    if (lookup.kind !== 'found') {
+      const failure = {
+        'not-found': ['PRODUCT_NOT_FOUND', `Barcode ${barcodeValue} not found in product database`],
+        invalid: ['INVALID_BARCODE', 'UPCitemdb rejected the barcode value'],
+        authentication: ['PROVIDER_AUTH_ERROR', 'UPCitemdb authentication failed'],
+        'rate-limit': ['PROVIDER_RATE_LIMIT', 'UPCitemdb rate limit reached'],
+        network: ['UPSTREAM_NETWORK_ERROR', 'Could not reach UPCitemdb'],
+        malformed: ['MALFORMED_PROVIDER_RESPONSE', 'UPCitemdb returned an invalid response'],
+        parse: ['LOCAL_PARSE_ERROR', 'Coverly could not parse the UPCitemdb product result'],
+        provider: ['UPSTREAM_ERROR', 'UPCitemdb could not complete the request'],
+      }[lookup.kind];
+      logBarcodeLookup(failure[0], diagnostics);
+      return jsonResponse({
+        success: false, errorCode: failure[0],
+        error: failure[1],
+        barcode: barcodeValue, extraction: extractResult, diagnostics,
+      }, 200, origin);
+    }
+    const product = lookup.product;
+    logBarcodeLookup('MATCHED', diagnostics);
+
+    return jsonResponse({
+      success: true, barcode: barcodeValue,
+      barcodeType: body.barcodeFormat ?? extractResult?.type ?? classifyBarcodeKind(normalizedBarcode!),
+      productName: product.title, brand: product.brand, matchedProduct: product,
+      confidence: extractResult?.confidence ?? 1.0,
+      source: extractResult ? 'gpt_vision' : 'supplied',
+      diagnostics,
+    }, 200, origin);
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    logBarcodeLookup('INTERNAL_ERROR', diagnostics);
+    return jsonResponse({ success: false, errorCode: 'INTERNAL_ERROR', error: msg, diagnostics }, 500, origin);
+  }
+};
+}
+export function createHandler(createClient:typeof ClientFactory, env:Environment, fetcher:typeof fetch=globalThis.fetch) { return protectedRoute('barcode-verify',rawHandler,createClient,env,fetcher); }

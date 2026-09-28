@@ -1,5 +1,9 @@
 # Billing and access
 
+Batch 4 adds remaining provider controls and authoritative claim export enforcement.
+See [provider and claim controls](provider-and-claim-controls.md) for the complete
+source-only Batches 1–4 rollout and current provider inventory.
+
 ## Ownership foundation (code only)
 
 Coverly is moving to a free download with a one-time unlock represented by the
