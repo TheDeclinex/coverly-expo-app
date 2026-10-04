@@ -39,6 +39,7 @@ export function PropertyAllowanceModal({
           return;
         }
         onDismiss();
+        if (copy.action !== "purchase") return;
         router.push({ pathname: "/upgrade", params: { feature: "property" } });
       }}
       onSecondary={onDismiss}

@@ -107,7 +107,7 @@ function safeClaimPackExportError(error: unknown): string {
         return "Claim pack generation reached Coverly, but your session was rejected. Please sign in again, then try generating your claim pack PDF.";
       }
       if (/entitlement|payment|required|subscription|plan|402|claim.pack.*limit/i.test(message)) {
-        return "Claim pack generation reached Coverly, but PDF export needs paid access. You can keep editing this draft or view plan options.";
+        return "Claim pack generation reached Coverly, but PDF export is included when you own Coverly. You can keep editing this draft or explore Coverly ownership.";
       }
       return "Claim pack generation reached Coverly but could not finish. Your draft is still saved; please try the export again.";
     }
@@ -122,7 +122,7 @@ function safeClaimPackExportError(error: unknown): string {
     return "Select at least one item before generating your claim pack PDF.";
   }
   if (/entitlement|payment|required|subscription|plan|402|claim.pack.*limit/i.test(message)) {
-    return "Claim pack PDF export is included with paid access. You can keep editing this draft, or view plan options when you are ready to export.";
+    return "Claim pack PDF export is included with Coverly ownership. You can keep editing this draft, or explore Coverly ownership when you are ready to export.";
   }
   if (error instanceof ClaimPackExportError && error.diagnostics.errorCode === "NETWORK_UNAVAILABLE") {
     return message;
@@ -598,7 +598,7 @@ export default function ClaimPackDraftScreen() {
       return;
     }
     if (!canExportClaimPack) {
-      const message = "Claim pack PDF export is included with paid access. You can keep editing this draft, or view plan options when you are ready to export.";
+      const message = "Claim pack PDF export is included with Coverly ownership. You can keep editing this draft, or explore Coverly ownership when you are ready to export.";
       logClaimPackPdfDiagnostic("claim_pack_generate_prepare_failed", {
         ...claimPackPdfDiagnostics,
         errorCode: "CLAIM_PACK_EXPORT_NOT_ENTITLED",
@@ -607,7 +607,7 @@ export default function ClaimPackDraftScreen() {
       setGenerateError(message);
       Alert.alert("Claim pack export", message, [
         { text: "Not now", style: "cancel" },
-        { text: "View plan options", onPress: () => router.push({ pathname: "/upgrade", params: { feature: "claim_pack" } } as Href) },
+        { text: "Own Coverly", onPress: () => router.push({ pathname: "/upgrade", params: { feature: "claim_pack" } } as Href) },
       ]);
       claimPackGenerationInFlightRef.current = false;
       return;

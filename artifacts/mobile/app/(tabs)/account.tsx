@@ -27,6 +27,8 @@ import {
 import {
   usageWarningLevel,
 } from "@/lib/usage-allowances-model";
+import { trackEvent } from "@/lib/analytics";
+import { ownershipOutcome } from "@/lib/upgrade-model";
 import { openCoverlyStoreReview } from "@/lib/review-prompt";
 
 export default function AccountScreen() {
@@ -37,7 +39,7 @@ export default function AccountScreen() {
   const feedbackUnread = useFeedbackUnread();
   const [legalDocument, setLegalDocument] = React.useState<CoverlyLegalDocument | null>(null);
   const {
-    effectivePlan, accessClass, retryReconciliation,
+    effectivePlan, accessClass, ownsCoverly, propertyLimit, retryReconciliation,
     purchaseLoading,
     restorePurchases,
     error: billingError,
@@ -52,7 +54,7 @@ export default function AccountScreen() {
 
   const email = profile?.email ?? session?.user.email ?? "Email unavailable";
   const displayName = profile?.fullName ?? null;
-  const entitlementPlanLabel = accessPlanLabel(effectivePlan, accessClass ?? undefined);
+  const entitlementPlanLabel = ownsCoverly ? "Owned" : accessClass === "legacy_plus" || accessClass === "legacy_family" ? `Legacy ${accessPlanLabel(effectivePlan)}` : accessPlanLabel(effectivePlan, accessClass ?? undefined);
   const planLabel = isLoading && effectivePlan === "free"
     ? "Loading…"
     : entitlementPlanLabel;
@@ -101,9 +103,16 @@ export default function AccountScreen() {
     ]);
   };
 
+  const restoreIdentity = React.useRef(retryReconciliation);
+  restoreIdentity.current = retryReconciliation;
   const restore = async () => {
+    if (purchaseLoading) return;
+    const account = retryReconciliation;
+    void trackEvent("ownership_flow", { ownership_action: "restore_started", source_screen: "account" });
     const result = await restorePurchases();
-    Alert.alert(result.pending ? "Confirming access" : result.ok ? "Purchases restored" : "Restore complete", result.message, result.pending ? [{ text: "Later" }, { text: "Retry verification", onPress: () => { void retryReconciliation().then((next) => Alert.alert("Access verification", next.message)); } }] : undefined);
+    if (restoreIdentity.current !== account) return;
+    void trackEvent("ownership_flow", { ownership_action: !result.ok && !result.pending && result.outcome !== "nothing_found" ? "restore_failed" : ownershipOutcome(result), source_screen: "account" });
+    Alert.alert(result.pending ? "Confirming access" : result.ok ? "Purchases restored" : "Restore complete", result.message, result.pending ? [{ text: "Later" }, { text: "Retry verification", onPress: () => { void retryReconciliation().then((next) => { if (restoreIdentity.current === account) Alert.alert("Access verification", next.message); }); } }] : undefined);
   };
 
   const rateCoverly = async () => {
@@ -152,6 +161,8 @@ export default function AccountScreen() {
         <PlanUsageSection
           planLabel={planLabel}
           effectivePlan={effectivePlan}
+          ownsCoverly={ownsCoverly}
+          propertyLimit={propertyLimit}
           allowances={usageQuery.data ?? []}
           isLoading={usageQuery.isLoading}
           isError={usageQuery.isError}
@@ -258,6 +269,7 @@ function formatResetDate(value: string | null): string {
 function PlanUsageSection({
   planLabel,
   effectivePlan,
+  ownsCoverly, propertyLimit,
   allowances,
   isLoading,
   isError,
@@ -269,6 +281,8 @@ function PlanUsageSection({
 }: {
   planLabel: string;
   effectivePlan: AccessPlan;
+  ownsCoverly: boolean;
+  propertyLimit: number | null | undefined;
   allowances: UsageAllowance[];
   isLoading: boolean;
   isError: boolean;
@@ -282,26 +296,27 @@ function PlanUsageSection({
   const rows = allowances.filter((row) => row.feature === "ai_scan" || row.feature === "replacement_pricing");
   const resetAt = rows[0]?.resetAt ?? null;
   const included = rows.length > 0 && rows.every((row) => !row.isLimited);
-  const planName = planLabel.startsWith("Loading") ? planLabel : `Coverly ${planLabel}`;
+  const planName = planLabel.startsWith("Loading") ? planLabel : `Coverly — ${planLabel}`;
 
   return (
-    <AccountSection title="Plan & usage">
+    <AccountSection title="Coverly access">
       <View style={[styles.planUsageContent, { backgroundColor: "#F6FCFA" }]}>
         <View style={styles.planSummary}>
           <Text style={[styles.planName, { color: colors.foreground }]}>{planName}</Text>
           <Text style={[styles.planDescription, { color: colors.mutedForeground }]}>
-            {included
+            {ownsCoverly || included || effectivePlan !== "free"
               ? "AI scans and replacement pricing included. Fair use applies."
-              : "Monthly AI scans and price searches are included up to your plan limits."}
+              : "Try AI assistance with Free, and keep managing your inventory manually."}
           </Text>
         </View>
 
+        {ownsCoverly && propertyLimit != null ? <Text style={[styles.planDescription, { color: colors.mutedForeground }]}>Up to {propertyLimit} properties · Claim-ready PDF export included</Text> : null}
         <Pressable accessibilityRole="button" onPress={onManagePlan} style={({ pressed }) => [styles.manageRow, { borderColor: colors.border, opacity: pressed ? 0.72 : 1 }]}>
-          <Text style={[styles.manageText, { color: colors.foreground }]}>{effectivePlan === "free" ? "Upgrade plan" : "Manage plan"}</Text>
+          <Text style={[styles.manageText, { color: colors.foreground }]}>{ownsCoverly ? "Ownership details" : effectivePlan === "free" ? "Own Coverly" : "Access details"}</Text>
           <Feather name="chevron-right" size={17} color={colors.mutedForeground} />
         </Pressable>
 
-        <Text style={[styles.usageHeading, { color: colors.mutedForeground }]}>Usage this month</Text>
+        <Text style={[styles.usageHeading, { color: colors.mutedForeground }]}>AI assistance</Text>
         {isLoading ? (
           <View style={styles.usageLoading}>
             <ActivityIndicator size="small" color={colors.primary} />
@@ -319,26 +334,27 @@ function PlanUsageSection({
                 <View key={row.feature} style={styles.compactUsageRow}>
                   <Text style={[styles.usageRowTitle, { color: colors.foreground }]}>{row.feature === "ai_scan" ? "AI scans" : "Price searches"}</Text>
                   <Text style={[styles.usageValue, { color: limited ? tone : colors.primary }]}>
-                    {limited ? `${row.usedUnits} / ${row.limitUnits} used · ${row.remainingUnits ?? 0} left` : "Included"}
+                    {ownsCoverly ? warning === "empty" ? "Allowance used" : "Included" : limited ? `${row.usedUnits} / ${row.limitUnits} used · ${row.remainingUnits ?? 0} left` : "Included"}
                   </Text>
                 </View>
               );
             })}
-            {!included ? <Text style={[styles.usageReset, { color: colors.mutedForeground }]}>Resets {formatResetDate(resetAt)}</Text> : null}
+            {ownsCoverly && rows.some((row) => row.remainingUnits === 0) ? <Text style={[styles.usageReset, { color: colors.mutedForeground }]}>You’ve used this month’s included AI assistance. It refreshes {formatResetDate(resetAt)}. Manual inventory tools remain available.</Text> : null}
+            {!included && !ownsCoverly ? <Text style={[styles.usageReset, { color: colors.mutedForeground }]}>Resets {formatResetDate(resetAt)}</Text> : null}
           </View>
         )}
 
         {billingUnavailable ? <Text style={[styles.billingUnavailable, { color: colors.warning }]}>Store services are currently unavailable.</Text> : null}
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel="Restore purchases"
+          accessibilityLabel="Restore Purchases"
           accessibilityHint="Restore a previous App Store or Google Play purchase."
           disabled={purchaseLoading}
           onPress={onRestore}
           style={({ pressed }) => [styles.restoreAction, { opacity: purchaseLoading ? 0.55 : pressed ? 0.72 : 1 }]}
         >
           {purchaseLoading ? <ActivityIndicator size="small" color={colors.primary} /> : null}
-          <Text style={[styles.restoreText, { color: colors.primary }]}>{purchaseLoading ? "Restoring purchases…" : "Restore purchases"}</Text>
+          <Text style={[styles.restoreText, { color: colors.primary }]}>{purchaseLoading ? "Restoring purchases…" : "Restore Purchases"}</Text>
         </Pressable>
         <Text style={[styles.restoreHelper, { color: colors.mutedForeground }]}>Restore a previous App Store or Google Play purchase.</Text>
       </View>

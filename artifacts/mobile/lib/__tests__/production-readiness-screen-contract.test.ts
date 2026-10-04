@@ -21,7 +21,8 @@ test("dedicated deletion screen preserves the required confirmation, submission,
   assert.match(deletionSource, /if \(!canSubmit \|\| submissionLockRef\.current\) return/);
   assert.match(deletionSource, /Deletion request submitted/);
   assert.match(deletionSource, /Please try again/);
-  assert.match(deletionSource, /does not cancel an Apple App Store or Google Play subscription/);
+  assert.match(deletionSource, /deletionPurchaseCopy\(legacy\)/);
+  assert.match(deletionSource, /accessClass === "legacy_plus"/);
   assert.match(deletionSource, />Cancel</);
 });
 
@@ -29,16 +30,12 @@ test("dedicated deletion screen does not expose generic feedback or attachment c
   assert.doesNotMatch(deletionSource, /ChipGroup|ImagePicker|Attach screenshot|priorityOptions|categoryOptions|typeOptions/);
 });
 
-test("upgrade screen keeps restore, current-package protection, and an authoritative comparison", () => {
-  assert.match(upgradeSource, /Restore purchases/);
-  assert.match(upgradeSource, /Current subscription/);
+test("ownership screen keeps restore, canonical access protection and one explicit product", () => {
+  assert.match(upgradeSource, /Restore Purchases/);
   assert.match(upgradeSource, /purchaseActionLockRef\.current/);
-  assert.match(upgradeSource, />Compare plans</);
-  assert.doesNotMatch(upgradeSource, /Only Coverly Family enables multiple properties\./);
-  assert.doesNotMatch(upgradeSource, /Your Plus plan includes one property\./);
-  assert.match(upgradeSource, /propertyAllowance\.accessClass === "full_access"/);
-  assert.match(upgradeSource, /onChoose\(selectedPackage\.pkg\)/);
-  assert.match(upgradeSource, /Choose \$\{content\.name\}/);
-  assert.match(upgradeSource, /Best value/);
-  assert.doesNotMatch(upgradeSource, /invit|collaborat|shared access|household members/i);
+  assert.match(upgradeSource, /ownershipScreenState/);
+  assert.match(upgradeSource, /selectOwnershipPackage/);
+  assert.match(upgradeSource, /state !== "available"/);
+  assert.match(upgradeSource, /Retry confirmation/);
+  assert.doesNotMatch(upgradeSource, /Current subscription|Compare plans|Best value|Choose plan|activeSubscriptions/);
 });

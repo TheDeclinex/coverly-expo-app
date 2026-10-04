@@ -1,150 +1,83 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-
-import {
-  buildPlanComparison,
-  buildUpgradePackages,
-  calculateAnnualSavings,
-  defaultBillingPeriod,
-  isCurrentPackage,
-  isCurrentPlan,
-  packageDisplayPrice,
-  selectedUpgradePackage,
-  upgradePackageHasPrice,
-  upgradePurchaseDisabled,
-  type UpgradePackageLike,
-} from "../upgrade-model.ts";
-
-function pkg(identifier: string, packageType: string, price: number, priceString: string): UpgradePackageLike {
-  return {
-    identifier,
-    packageType,
-    product: {
-      identifier: `${identifier}.product`,
-      title: identifier.includes("family") ? "Coverly Family" : "Coverly Plus",
-      description: "Subscription",
-      price,
-      priceString,
-    },
-  };
-}
-
-test("keeps RevenueCat's localised price string as the displayed source", () => {
-  assert.equal(packageDisplayPrice(pkg("plus-monthly", "MONTHLY", 9.99, "NZ$9.99")), "NZ$9.99");
-  assert.equal(packageDisplayPrice(pkg("plus-monthly", "MONTHLY", 9.99, "  €6,99  ")), "€6,99");
-  assert.equal(packageDisplayPrice(pkg("plus-monthly", "MONTHLY", 9.99, "")), "Price unavailable");
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+import { selectOwnershipPackage, ownershipScreenState, ownershipOutcome, deletionPurchaseCopy, FAIR_USE_COPY, type OwnershipPackage } from "../upgrade-model.ts";
+import type { AccessCapabilities } from "../access-capabilities.ts";
+import { propertyAllowanceCopy, parsePropertyAllowance } from "../property-allowance.ts";
+import { normalizeLimitError } from "../limit-errors.ts";
+import { OWNERSHIP_ACTIONS, sanitizeEventProperties } from "../analytics-core.ts";
+// Fictional test fixtures, not live mappings or commercial prices.
+const mapping = { productId: "fixture.owned", packageId: "fixture-ownership" };
+const pkg: OwnershipPackage = { identifier: mapping.packageId, packageType: "LIFETIME", product: { identifier: mapping.productId, price: 42.35, priceString: "42,35 €", subscriptionPeriod: null, productCategory: "NON_SUBSCRIPTION" } };
+const access = (kind: string) => ({ ownsCoverly: kind === "owner", accessClass: kind, effectivePlan: kind === "owner" ? "coverly_owned" : kind === "free" ? "free" : "coverly_plus" }) as AccessCapabilities;
+const base = { access: access("free"), verification: "verified" as const, pending: false, busy: false, productAvailable: true };
+test("exact one-time package passes localized price through", () => {
+  assert.equal(selectOwnershipPackage([pkg], mapping), pkg);
+  assert.equal(selectOwnershipPackage([pkg], mapping)?.product.priceString, "42,35 €");
+});
+for (const kind of ["MONTHLY", "ANNUAL", "WEEKLY", "CUSTOM", "UNKNOWN"]) test(`reject ${kind} even with configured identifiers`, () => assert.equal(selectOwnershipPackage([{ ...pkg, packageType: kind }], mapping), null));
+for (const id of ["plus.monthly", "plus.annual", "family", "arbitrary.owned"]) test(`reject unconfigured ${id}`, () => assert.equal(selectOwnershipPackage([{ ...pkg, product: { ...pkg.product, identifier: id } }], mapping), null));
+for (const override of [{ priceString: "" }, { price: NaN }, { price: 0 }, { subscriptionPeriod: "P1M" }, { subscriptionPeriod: undefined }, { productCategory: "SUBSCRIPTION" }]) test(`reject malformed ${JSON.stringify(override)}`, () => assert.equal(selectOwnershipPackage([{ ...pkg, product: { ...pkg.product, ...override } }], mapping), null));
+test("missing config/product, malformed and ambiguous packages fail safely", () => {
+  assert.equal(selectOwnershipPackage([pkg], { productId: null, packageId: null }), null);
+  assert.equal(selectOwnershipPackage([], mapping), null);
+  assert.equal(selectOwnershipPackage([pkg, pkg], mapping), null);
+  assert.equal(selectOwnershipPackage([null] as unknown as OwnershipPackage[], mapping), null);
+});
+for (const [kind, expected] of [["owner", "owned"], ["legacy_plus", "legacy"], ["legacy_family", "legacy"], ["tester", "included"], ["admin", "included"], ["override", "included"]]) test(`${kind} cannot buy even if offering is unavailable`, () => assert.equal(ownershipScreenState({ ...base, access: access(kind), productAvailable: false }), expected));
+test("Free, unavailable, loading and unverified screen states", () => {
+  assert.equal(ownershipScreenState(base), "available");
+  assert.equal(ownershipScreenState({ ...base, productAvailable: false }), "unavailable");
+  assert.equal(ownershipScreenState({ ...base, busy: true }), "busy");
+  assert.equal(ownershipScreenState({ ...base, access: null, verification: "loading" }), "checking");
+  assert.equal(ownershipScreenState({ ...base, verification: "unavailable" }), "verification_unavailable");
+});
+test("pending prevents repurchase even with stale legacy access", () => {
+  assert.equal(ownershipScreenState({ ...base, pending: true }), "pending");
+  assert.equal(ownershipScreenState({ ...base, pending: true, access: access("legacy_plus") }), "pending");
+  assert.equal(ownershipScreenState({ ...base, pending: true, access: access("owner") }), "owned");
+});
+for (const [outcome, event] of [["cancelled", "purchase_cancelled"], ["failed", "purchase_failed"], ["confirmed", "ownership_confirmed"], ["owner_restored", "restore_succeeded"], ["legacy_restored", "restore_succeeded"], ["nothing_found", "restore_nothing_found"]] as const) test(`outcome ${outcome}`, () => assert.equal(ownershipOutcome({ ok: outcome === "confirmed", cancelled: outcome === "cancelled", outcome, message: "fixture" }), event));
+test("pending verification is not failed analytics", () => assert.equal(ownershipOutcome({ ok: true, pending: true, outcome: "pending", message: "fixture" }), "verification_pending"));
+test("property limit offers Free ownership and owner continuation", () => {
+  const free = propertyAllowanceCopy(parsePropertyAllowance({ access_class: "free", property_count: 1, property_limit: 1, can_create_property: false }));
+  const owner = propertyAllowanceCopy(parsePropertyAllowance({ access_class: "owner", property_count: 5, property_limit: 5, can_create_property: false }));
+  assert.equal(free.action, "purchase"); assert.match(free.body, /5 properties/);
+  assert.equal(owner.action, "dismiss"); assert.match(owner.body, /5 properties/); assert.doesNotMatch(owner.primaryCta, /Own|Buy|Upgrade/);
+});
+test("owner exhaustion gives reset and manual path, Free gives ownership CTA", () => {
+  const owner = normalizeLimitError({ errorCode: "OWNER_FAIR_USE_EXHAUSTED", feature: "ai_scan", resetAt: "2026-10-01T00:00:00Z" });
+  assert.equal(owner?.primaryAction, "dismiss"); assert.match(owner!.body, /refreshes on/); assert.match(owner!.secondaryCta, /manually/);
+  assert.doesNotMatch(owner!.body, /Plus|Family|[Uu]pgrade/);
+  assert.equal(normalizeLimitError({ errorCode: "FREE_ALLOWANCE_EXHAUSTED", feature: "ai_scan" })?.primaryCta, "Own Coverly");
+  assert.equal(normalizeLimitError({ errorCode: "AI_SCAN_LIMIT_REACHED", ownsCoverly: true })?.primaryAction, "dismiss");
+});
+test("deletion explains store history for owners and cancellation only for legacy", () => {
+  assert.doesNotMatch(deletionPurchaseCopy(false).body, /subscription|cancel/i);
+  assert.match(deletionPurchaseCopy(false).body, /history remains/);
+  assert.match(deletionPurchaseCopy(false).body, /does not restore deleted inventory/);
+  assert.match(deletionPurchaseCopy(true).body, /does not cancel/);
+});
+test("bounded analytics actions, one-time classification and historical compatibility", () => {
+  for (const action of OWNERSHIP_ACTIONS) assert.deepEqual(sanitizeEventProperties("ownership_flow", { ownership_action: action, plan: "owned", billing_period: "one_time", price: "fixture" }), { ownership_action: action, plan: "owned", billing_period: "one_time" });
+  assert.deepEqual(sanitizeEventProperties("ownership_flow", { ownership_action: "arbitrary-price" }), {});
+  assert.deepEqual(sanitizeEventProperties("purchase_started", { plan: "family", billing_period: "annual" }), { plan: "family", billing_period: "annual" });
+});
+test("Upgrade uses one purchase path and accessible wrapping scroll layout", () => {
+  const screen = readFileSync(resolve(process.cwd(), "app/upgrade.tsx"), "utf8");
+  assert.doesNotMatch(screen, /activeSubscriptions|BillingOption|billingPeriods|savingsPercent|Choose plan|Upgrade to Family/);
+  assert.match(screen, /purchasePackage\(selected!/); assert.match(screen, /state !== "available"/);
+  assert.match(screen, /selected\.product\.priceString/); assert.match(screen, /Retry confirmation/); assert.match(screen, /Restore Purchases/);
+  assert.match(screen, /ScrollView/); assert.match(screen, /accessibilityRole="button"/); assert.doesNotMatch(screen, /numberOfLines|allowFontScaling=\{false\}/);
+  assert.doesNotMatch(FAIR_USE_COPY, /unlimited|\d+ scans|Plus|Family/i);
 });
 
-test("maps all four billing options while preserving the exact package used for display", () => {
-  const plusMonthly = pkg("plus-monthly", "MONTHLY", 9.99, "NZ$9.99");
-  const plusAnnual = pkg("plus-annual", "ANNUAL", 99.99, "NZ$99.99");
-  const familyMonthly = pkg("family-monthly", "MONTHLY", 14.99, "NZ$14.99");
-  const familyAnnual = pkg("family-annual", "ANNUAL", 159.99, "NZ$159.99");
-  const grouped = buildUpgradePackages([familyAnnual, plusAnnual, familyMonthly, plusMonthly]);
-
-  assert.deepEqual(grouped.plus.map(({ period }) => period), ["monthly", "annual"]);
-  assert.deepEqual(grouped.family.map(({ period }) => period), ["monthly", "annual"]);
-  assert.equal(grouped.plus[0]?.pkg, plusMonthly);
-  assert.equal(grouped.plus[1]?.pkg, plusAnnual);
-  assert.equal(grouped.family[0]?.pkg, familyMonthly);
-  assert.equal(grouped.family[1]?.pkg, familyAnnual);
-  assert.equal(grouped.plus[0]?.price, plusMonthly.product.priceString);
-  assert.equal(grouped.family[1]?.price, familyAnnual.product.priceString);
-});
-
-test("defaults each plan to annual and switches to the exact selected RevenueCat package", () => {
-  const plusMonthly = pkg("plus-monthly", "MONTHLY", 9.99, "NZ$9.99");
-  const plusAnnual = pkg("plus-annual", "ANNUAL", 99.99, "NZ$99.99");
-  const familyMonthly = pkg("family-monthly", "MONTHLY", 14.99, "NZ$14.99");
-  const familyAnnual = pkg("family-annual", "ANNUAL", 149.99, "NZ$149.99");
-  const grouped = buildUpgradePackages([plusMonthly, familyAnnual, plusAnnual, familyMonthly]);
-
-  assert.equal(defaultBillingPeriod(grouped.plus), "annual");
-  assert.equal(defaultBillingPeriod(grouped.family), "annual");
-  assert.equal(selectedUpgradePackage(grouped.plus, "monthly")?.pkg, plusMonthly);
-  assert.equal(selectedUpgradePackage(grouped.plus, "annual")?.pkg, plusAnnual);
-  assert.equal(selectedUpgradePackage(grouped.family, "monthly")?.pkg, familyMonthly);
-  assert.equal(selectedUpgradePackage(grouped.family, "annual")?.pkg, familyAnnual);
-});
-
-test("falls back to an available period and treats a missing localised price as unavailable", () => {
-  const monthlyOnly = buildUpgradePackages([
-    pkg("plus-monthly", "MONTHLY", 9.99, "NZ$9.99"),
-  ]).plus;
-  const missingPrice = buildUpgradePackages([
-    pkg("family-annual", "ANNUAL", 149.99, ""),
-  ]).family;
-
-  assert.equal(defaultBillingPeriod(monthlyOnly), "monthly");
-  assert.equal(selectedUpgradePackage(monthlyOnly, "annual"), null);
-  assert.equal(upgradePackageHasPrice(selectedUpgradePackage(monthlyOnly, "monthly")), true);
-  assert.equal(upgradePackageHasPrice(selectedUpgradePackage(missingPrice, "annual")), false);
-  assert.equal(upgradePackageHasPrice(null), false);
-});
-
-test("disables purchase for missing prices, store loading, refresh, and the current package", () => {
-  const available = buildUpgradePackages([
-    pkg("plus-annual", "ANNUAL", 99.99, "NZ$99.99"),
-  ]).plus[0] ?? null;
-  const missingPrice = buildUpgradePackages([
-    pkg("plus-annual", "ANNUAL", 99.99, ""),
-  ]).plus[0] ?? null;
-  const ready = { purchaseLoading: false, isRefreshing: false, currentPackage: false };
-
-  assert.equal(upgradePurchaseDisabled(available, ready), false);
-  assert.equal(upgradePurchaseDisabled(null, ready), true);
-  assert.equal(upgradePurchaseDisabled(missingPrice, ready), true);
-  assert.equal(upgradePurchaseDisabled(available, { ...ready, purchaseLoading: true }), true);
-  assert.equal(upgradePurchaseDisabled(available, { ...ready, isRefreshing: true }), true);
-  assert.equal(upgradePurchaseDisabled(available, { ...ready, currentPackage: true }), true);
-});
-
-test("calculates annual savings only from valid numeric matching prices", () => {
-  assert.equal(calculateAnnualSavings(10, 84), 30);
-  assert.equal(calculateAnnualSavings(10, 120), null);
-  assert.equal(calculateAnnualSavings(Number.NaN, 84), null);
-  assert.equal(calculateAnnualSavings(0, 84), null);
-
-  const grouped = buildUpgradePackages([
-    pkg("plus-monthly", "MONTHLY", 10, "$10.00"),
-    pkg("plus-annual", "ANNUAL", 84, "$84.00"),
-    pkg("family-annual", "ANNUAL", 120, "$120.00"),
-  ]);
-  assert.equal(grouped.plus.find((entry) => entry.period === "annual")?.savingsPercent, 30);
-  assert.equal(grouped.family[0]?.savingsPercent, null);
-
-  const differentCurrencies = [
-    pkg("plus-monthly", "MONTHLY", 10, "$10.00"),
-    pkg("plus-annual", "ANNUAL", 84, "€84.00"),
-  ];
-  differentCurrencies[0].product.currencyCode = "NZD";
-  differentCurrencies[1].product.currencyCode = "EUR";
-  assert.equal(buildUpgradePackages(differentCurrencies).plus[1]?.savingsPercent, null);
-});
-
-test("comparison uses the configured allowance values returned by the existing service", () => {
-  const comparison = buildPlanComparison([
-    {
-      feature: "ai_scan", monthKey: "2026-07", monthStartDate: null, resetAt: null,
-      effectivePlan: "free", entitlementMode: "enforced", isLimited: true,
-      limitUnits: 13, usedUnits: 0, reservedUnits: 0, remainingUnits: 13, wouldBeBlocked: false,
-    },
-    {
-      feature: "replacement_pricing", monthKey: "2026-07", monthStartDate: null, resetAt: null,
-      effectivePlan: "free", entitlementMode: "enforced", isLimited: true,
-      limitUnits: 7, usedUnits: 0, reservedUnits: 0, remainingUnits: 7, wouldBeBlocked: false,
-    },
-  ]);
-
-  assert.equal(comparison.find((row) => row.label === "AI inventory scans")?.free, "13 / month");
-  assert.equal(comparison.find((row) => row.label === "Price searches")?.free, "7 / month");
-  const properties = comparison.find((row) => row.label === "Properties");
-  assert.deepEqual(properties, { label: "Properties", free: "1", plus: "1", family: "Multiple" });
-});
-
-test("identifies current plans and only disables the exact active package", () => {
-  assert.equal(isCurrentPlan("plus", "coverly_plus"), true);
-  assert.equal(isCurrentPlan("family", "coverly_plus"), false);
-  assert.equal(isCurrentPackage("plus.monthly", ["plus.monthly"]), true);
-  assert.equal(isCurrentPackage("plus.annual", ["plus.monthly"]), false);
+test("scan and search owner exhaustion dismisses before any purchase navigation", () => {
+  for (const path of ["app/(tabs)/scan.tsx", "app/(tabs)/replacement-pricing/[id].tsx"]) {
+    const source = readFileSync(resolve(process.cwd(), path), "utf8");
+    const modal = source.slice(source.lastIndexOf("<LimitReachedModal"));
+    assert.match(modal, /if \(limitModal\?\.primaryAction === "dismiss"\) return;\s*router\.push/);
+    assert.match(source, /normalizeLimitError\(\{\s*feature: "(?:ai_scan|replacement_pricing)", ownsCoverly, resetAt: ownerResetAt/);
+  }
 });

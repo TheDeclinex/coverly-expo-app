@@ -1,3 +1,4 @@
+import { loadUsageAllowances } from "@/lib/usage-allowances";
 import { Feather } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { File, Paths } from "expo-file-system";
@@ -721,7 +722,9 @@ export default function ScanScreen() {
     roomName?: string;
   }>();
   const { session } = useAuth();
-  const { enforce } = useEntitlements();
+  const { enforce, ownsCoverly } = useEntitlements();
+  const ownerUsage = useQuery({ queryKey: ["usage-allowances", session?.user.id], queryFn: loadUsageAllowances, enabled: !!session && ownsCoverly, staleTime: 60_000 });
+  const ownerResetAt = ownerUsage.data?.find((row) => row.feature === "ai_scan")?.resetAt;
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const queryClient = useQueryClient();
@@ -1704,6 +1707,7 @@ export default function ScanScreen() {
         }),
       });
       const normalizedLimit = normalizeLimitError({
+        feature: "ai_scan", ownsCoverly, resetAt: ownerResetAt,
         status: result.httpStatus,
         errorCode: result.errorCode ?? (result.httpStatus === 402 ? "AI_SCAN_LIMIT_REACHED" : undefined),
         responseBody: result.responseBody,
@@ -3280,6 +3284,7 @@ export default function ScanScreen() {
         content={limitModal}
         onPrimary={() => {
           returnToScanTypeSelection();
+          if (limitModal?.primaryAction === "dismiss") return;
           router.push({ pathname: "/upgrade", params: { feature: "ai_scan" } } as Href);
         }}
         onSecondary={() => {

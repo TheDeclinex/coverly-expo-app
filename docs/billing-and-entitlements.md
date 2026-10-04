@@ -572,3 +572,137 @@ backend contract tests passed with mocked providers/in-memory PGlite, mobile
 TypeScript passed, and `git diff --check` passed. No live provider, RevenueCat or
 remote Supabase test calls occurred. Native device/store smoke testing is deferred
 until a separately authorized non-production test environment is available.
+
+## Batch 6: one-time ownership purchase experience
+
+The Upgrade route now presents **Try Coverly → Own Coverly**: one product, one
+localized store price, five concise household benefits, and a useful Free option.
+It has no subscription selector or Family upsell. Account, property-limit, claim,
+AI exhaustion and deletion copy follow the same ownership model. Legacy Plus and
+Family remain canonical access classes; they are neither sold here nor converted.
+
+### Configuration and source of truth
+
+The actual RevenueCat/App Store/Google Play one-time products do not exist or
+configure themselves through this code batch. Separate authorized configuration
+and store review are outstanding. No final price or owner quota is chosen.
+
+Before enabling purchases, configure the approved platform product IDs using
+`EXPO_PUBLIC_REVENUECAT_OWNED_IOS_PRODUCT_ID` and
+`EXPO_PUBLIC_REVENUECAT_OWNED_ANDROID_PRODUCT_ID`, plus the exact RevenueCat package
+identifier in `EXPO_PUBLIC_REVENUECAT_OWNED_PACKAGE_ID`. The example leaves all three
+blank. These public identifiers are not credentials. Existing offering selection
+is retained; the selected offering must contain exactly one matching package.
+It must have RevenueCat type `LIFETIME`, a null subscription period, a positive
+finite price, a nonempty localized `priceString`, and (when present) category
+`NON_SUBSCRIPTION`. Ambiguous, malformed, recurring and unrelated packages are
+rejected. There is no legacy-product fallback. The UI displays `priceString`
+without currency conversion or hardcoded retail pricing.
+
+The durable entitlement is `coverly_owned`. Configure its server-side product
+mapping and reconciliation alongside the future approved store setup. Product
+availability never grants access: canonical server capabilities remain authoritative.
+Only verified Free access may begin the explicitly mapped ownership purchase.
+RevenueCat success → authenticated reconciliation → canonical ownership → owned UI.
+Unlike generic legacy recovery, this purchase requires `ownsCoverly` to confirm;
+a stale legacy subscription cannot satisfy the ownership transaction.
+
+### States and recovery
+
+- Free: household benefits, one-time price/Unlock Coverly when available, and
+  Continue with Free. Missing offering/configuration or network failure shows a
+  controlled unavailable/retry state, never another package.
+- Owner: Coverly unlocked and a route back to inventory; no purchase CTA even when
+  offerings fail. Account displays Coverly — Owned and canonical property capacity.
+- Legacy/approved override: existing access continues; no second-product upsell.
+- Store success with unavailable verification: purchase complete, confirming access;
+  Retry confirmation and Restore Purchases are offered. No second transaction is
+  started while pending. Cancellation and genuine transaction failure remain distinct.
+- Restore: canonical owner/legacy success, nothing eligible, and verification pending
+  are distinct. No `activeSubscriptions` ownership test is used.
+
+Batch 5 account-scoped controllers, serialized SDK identity and offline limitations
+remain in force. UI notices and delayed completion analytics are fenced to the current
+controller identity. Account restore alerts also discard a previous account's result.
+Pending state is memory-only; after restart Restore Purchases is the recovery route.
+
+### Fair use, limits and surrounding copy
+
+AI assistance is included subject to periodically refreshing fair-use limits; no
+provisional owner count is promoted as a commercial promise. Account shows Included
+or Allowance used for owners. Exhaustion uses the server reset timestamp where
+available and keeps manual alternatives; it does not send owners to buy again.
+Free property exhaustion explains ownership's five properties. Existing-access
+property exhaustion uses the canonical numeric limit and dismisses/backtracks.
+Claim export uses canonical capability enforcement and ownership wording; a separate
+Free-user claim purchase remains deferred. Deletion explains retained store purchase
+history and conservative account association/recovery, without promising restoration
+of deleted inventory. Cancellation guidance is restricted to actual legacy subscribers.
+
+### Terminology audit
+
+| Surface | Classification | Result |
+| --- | --- | --- |
+| Upgrade, comparison model, price/period selector | Must change now | Single explicit one-time product; old comparison removed |
+| Account, usage, property limits, claim gate | Must change now | Ownership language; owner limits never repurchase |
+| Account deletion | Transitional compatibility | Store-history copy; cancellation only for legacy access |
+| RevenueCat Plus/Family parsers and server policies | Legacy/internal | Retained for released subscribers and historical reconciliation |
+| Historical analytics and migrations | Legacy/internal | Preserved; additive ownership event only |
+| Auth, onboarding and unrelated React subscriptions | Unrelated/out of scope | No authentication or onboarding redesign |
+
+### Analytics and rollout
+
+`ownership_flow` records bounded `ownership_action` values for availability,
+purchase start/completion/cancellation/failure, verification pending/confirmed,
+restore start/success/nothing/failure and confirmation retry. Existing events retain
+historical meaning and accept `owned`/`one_time`; localized prices are not event names.
+Migration `20260929070806_ownership_purchase_analytics.sql` additively expands event
+and property allowlists, preserving history, RLS and grants. Apply it only during a
+separately authorized backend rollout, after earlier analytics migrations and before
+this mobile version emits the new event. Batches 1–4 backend capabilities and Batch 5
+reconciliation dependencies must be available before enabling purchase configuration.
+No Edge Function changes or deployment are part of Batch 6.
+
+### Validation and device review
+
+Mocked actual Upgrade JSX/handlers cover product availability, owners, legacy/override
+access, purchase taps, cancellation/failure/confirmation/pending, restore outcomes,
+and stale-account responses. Model/controller tests cover strict package mapping,
+localized fixture prices, fair-use/property/deletion copy and ownership confirmation.
+In-memory PGlite tests apply analytics migrations and check historical preservation,
+allowed events, rejected malformed payloads, self-only insert and denied client writes.
+No test performs store purchases or remote Supabase/provider calls.
+
+The screen scrolls, has no fixed text heights or truncation, wraps legal links, and
+uses minimum 52-point primary and 44-point secondary targets. Price text can wrap;
+headers, buttons, loading indicators and notices have accessibility semantics.
+Native small-iPhone/Android, large-font and screen-reader review remains a release
+prerequisite in an authorized development environment; mocked JSX is not evidence
+of native layout or store behavior. No build was produced. Pricing, final quotas,
+store configuration, native sandbox purchases and approved fair-use legal content
+remain separate work. Apple/Google login and onboarding are unchanged.
+
+Batch 6 changed-file inventory (repository-relative):
+
+- Mobile configuration: `artifacts/mobile/.env.example`.
+- Screens: `app/upgrade.tsx`, `app/(tabs)/account.tsx`, `account-deletion.tsx`,
+  `index.tsx`, `scan.tsx`, `replacement-pricing/[id].tsx`, `claim-pack/[fileId].tsx`
+  under `artifacts/mobile`.
+- State/components: `context/EntitlementsContext.tsx`,
+  `components/PropertyAllowanceModal.tsx` under `artifacts/mobile`.
+- Mobile libraries: `billing.ts`, `entitlement-controller.ts`, `upgrade-model.ts`,
+  `analytics-core.ts`, `limit-errors.ts`, `property-allowance.ts`,
+  `replacement-pricing.ts` under `artifacts/mobile/lib`.
+- Mobile tests: `upgrade-model.test.ts`, `upgrade-screen.test.ts`,
+  `upgrade-screen-harness.ts`, `ownership-reconciliation.test.ts`,
+  `property-allowance.test.ts`, `analytics-instrumentation-contract.test.ts`,
+  `production-readiness-screen-contract.test.ts` under `artifacts/mobile/lib/__tests__`.
+- Backend source: `supabase/migrations/20260929070806_ownership_purchase_analytics.sql`,
+  `supabase/tests/ownership-analytics.local.test.ts`.
+- Documentation: this billing document.
+
+Batch 6 final validation: 626/626 mobile tests passed, including the owner-limit
+navigation regression; 4/4 in-memory analytics migration/security tests passed;
+mobile TypeScript (`--noEmit --incremental false`) and `git diff --check` passed.
+No tests were skipped. No new dependencies, native builds, real purchases,
+RevenueCat/store configuration changes or remote Supabase deployments occurred.

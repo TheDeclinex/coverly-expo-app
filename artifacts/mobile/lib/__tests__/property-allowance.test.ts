@@ -70,12 +70,13 @@ test("server rows are parsed into the shared allowance shape", () => {
   );
 });
 
-test("Free and Plus receive the same concise Family upgrade copy", () => {
+test("Free can purchase ownership while legacy Plus keeps its existing access", () => {
   const freeCopy = propertyAllowanceCopy(getPropertyAllowance("free", 1));
   const plusCopy = propertyAllowanceCopy(getPropertyAllowance("plus", 1));
-  assert.deepEqual(freeCopy, plusCopy);
+  assert.equal(freeCopy.action, "purchase");
+  assert.equal(plusCopy.action, "dismiss");
   assert.equal(freeCopy.title, "You've reached your property limit");
-  assert.equal(freeCopy.primaryCta, "Upgrade to Family");
+  assert.equal(freeCopy.primaryCta, "Own Coverly");
   assert.equal(freeCopy.secondaryCta, "Continue with current property");
   assert.equal(freeCopy.benefit, "");
 });

@@ -17,12 +17,16 @@ export interface NormalizedLimitError {
   secondaryCta: string;
   dismissCta?: string;
   usage?: UsageLimitDetails;
+  primaryAction?: "purchase" | "dismiss";
 }
 
 type LimitErrorInput = {
   errorCode?: string | null;
   status?: number | null;
   responseBody?: unknown;
+  feature?: LimitFeature;
+  resetAt?: string | null;
+  ownsCoverly?: boolean;
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -61,8 +65,14 @@ function aiScanBody(usage?: UsageLimitDetails): string {
 
 export function normalizeLimitError(input: LimitErrorInput): NormalizedLimitError | null {
   const code = input.errorCode ?? (isRecord(input.responseBody) && typeof input.responseBody.errorCode === "string" ? input.responseBody.errorCode : null);
-  // Owner exhaustion is a retry/reset condition, never a subscription upsell.
-  if (code === "OWNER_FAIR_USE_EXHAUSTED" || (isRecord(input.responseBody) && input.responseBody.code === "OWNER_FAIR_USE_EXHAUSTED")) return null;
+  const ownerExhausted = code === "OWNER_FAIR_USE_EXHAUSTED" || (isRecord(input.responseBody) && input.responseBody.code === "OWNER_FAIR_USE_EXHAUSTED");
+  if (ownerExhausted || (input.ownsCoverly && (input.status === 402 || /LIMIT_REACHED|ALLOWANCE_EXHAUSTED|CREDITS_EXCEEDED/.test(code ?? "")))) {
+    const date = input.resetAt ? new Date(input.resetAt) : null;
+    const reset = date && Number.isFinite(date.getTime()) ? " It refreshes on " + date.toLocaleDateString() + "." : " It refreshes at the next allowance reset.";
+    return { feature: input.feature ?? "replacement_pricing", title: "Your included AI assistance is used for now",
+      body: "You've used this month's included AI assistance." + reset + " Your inventory is unchanged, and manual tools remain available.",
+      benefit: "", primaryCta: "Continue without AI", secondaryCta: input.feature === "ai_scan" ? "Add item manually" : "Back to item", primaryAction: "dismiss" };
+  }
   const usage = extractUsageLimitDetails(input.responseBody);
 
   if (code === "REPLACEMENT_PRICING_LIMIT_REACHED") {
@@ -70,8 +80,8 @@ export function normalizeLimitError(input: LimitErrorInput): NormalizedLimitErro
       feature: "replacement_pricing",
       title: "You've used your free replacement searches",
       body: replacementBody(usage),
-      benefit: "Plus includes ongoing replacement pricing checks, AI scans, and claim-ready exports.",
-      primaryCta: "View plan options",
+      benefit: "Own Coverly with one purchase for AI assistance and claim-ready PDF exports.",
+      primaryCta: "Own Coverly",
       secondaryCta: "Back to item",
       dismissCta: "Not now",
       usage,
@@ -83,8 +93,8 @@ export function normalizeLimitError(input: LimitErrorInput): NormalizedLimitErro
       feature: "ai_scan",
       title: "You've used your free AI scan credits",
       body: aiScanBody(usage),
-      benefit: "Plus includes AI scanning, replacement pricing, and claim-ready exports.",
-      primaryCta: "View plan options",
+      benefit: "Own Coverly with one purchase for AI assistance and claim-ready PDF exports.",
+      primaryCta: "Own Coverly",
       secondaryCta: "Add item manually",
       dismissCta: "Not now",
       usage,
@@ -95,21 +105,21 @@ export function normalizeLimitError(input: LimitErrorInput): NormalizedLimitErro
     return {
       feature: "property",
       title: "You've reached your property limit",
-      body: "Your current plan includes one property.\n\nUpgrade to Coverly Family to add additional properties while continuing to manage your existing property.",
+      body: "Free includes one property. Own Coverly to document up to 5 properties while continuing to manage your existing inventory.",
       benefit: "",
-      primaryCta: "Upgrade to Family",
+      primaryCta: "Own Coverly",
       secondaryCta: "Continue with current property",
       usage,
     };
   }
 
-  if (input.status === 402) {
+  if (input.status === 402 || code === "FREE_ALLOWANCE_EXHAUSTED") {
     return {
-      feature: "replacement_pricing",
+      feature: input.feature ?? "replacement_pricing",
       title: "You've reached this month's free limit",
       body: "You've reached a free monthly limit. Your current item or action was not changed, and manual inventory tools are still available.",
-      benefit: "Plus includes AI scanning, replacement pricing, and claim-ready exports.",
-      primaryCta: "View plan options",
+      benefit: "Own Coverly with one purchase for AI assistance and claim-ready PDF exports.",
+      primaryCta: "Own Coverly",
       secondaryCta: "Not now",
       usage,
     };

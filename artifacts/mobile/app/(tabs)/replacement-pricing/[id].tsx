@@ -1,3 +1,4 @@
+import { loadUsageAllowances } from "@/lib/usage-allowances";
 import { Feather } from "@expo/vector-icons";
 import { Stack, router, useLocalSearchParams, type Href } from "expo-router";
 import * as WebBrowser from "expo-web-browser";
@@ -273,7 +274,9 @@ export default function ReplacementPricingScreen() {
     fileName?: string;
   }>();
   const { session } = useAuth();
-  const { enforce } = useEntitlements();
+  const { enforce, ownsCoverly } = useEntitlements();
+  const ownerUsage = useQuery({ queryKey: ["usage-allowances", session?.user.id], queryFn: loadUsageAllowances, enabled: !!session && ownsCoverly, staleTime: 60_000 });
+  const ownerResetAt = ownerUsage.data?.find((row) => row.feature === "replacement_pricing")?.resetAt;
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const queryClient = useQueryClient();
@@ -521,6 +524,7 @@ export default function ReplacementPricingScreen() {
       }
       const normalizedLimit = searchFailure instanceof ReplacementPriceSearchError
         ? normalizeLimitError({
+            feature: "replacement_pricing", ownsCoverly, resetAt: ownerResetAt,
             status: searchFailure.status,
             errorCode: searchFailure.errorCode,
             responseBody: searchFailure.responseBody,
@@ -544,7 +548,7 @@ export default function ReplacementPricingScreen() {
         refinedAbortController.current = null;
       }
     }
-  }, [item, enforce, propertyMarket, reduceMotion, resultEntrance]);
+  }, [item, enforce, ownsCoverly, ownerResetAt, propertyMarket, reduceMotion, resultEntrance]);
 
   const handleSearch = () => {
     void runSearch(searchQuery);
@@ -1186,6 +1190,7 @@ export default function ReplacementPricingScreen() {
         content={limitModal}
         onPrimary={() => {
           setLimitModal(null);
+          if (limitModal?.primaryAction === "dismiss") return;
           router.push({ pathname: "/upgrade", params: { feature: "replacement_pricing" } } as Href);
         }}
         onSecondary={goBackToItem}

@@ -40,6 +40,11 @@ const revenueCatConfigurationIssue = revenueCatEnvironmentIssue(
 export const billingGatesEnabled =
   billingAppEnvironment === "production"
   || process.env.EXPO_PUBLIC_BILLING_GATES_ENABLED === "true";
+export const ownershipPackageMapping = {
+  productId: envValue(Platform.OS === "ios" ? process.env.EXPO_PUBLIC_REVENUECAT_OWNED_IOS_PRODUCT_ID : Platform.OS === "android" ? process.env.EXPO_PUBLIC_REVENUECAT_OWNED_ANDROID_PRODUCT_ID : undefined),
+  packageId: envValue(process.env.EXPO_PUBLIC_REVENUECAT_OWNED_PACKAGE_ID),
+};
+
 export const revenueCatEntitlementConfig: RevenueCatEntitlementConfig = {
   plusEntitlementId: revenueCatPlusEntitlementId,
   familyEntitlementId: revenueCatFamilyEntitlementId,
@@ -186,7 +191,7 @@ export async function loadOffering(): Promise<BillingResult<PurchasesOffering | 
     return { ok: true, value: offering };
   } catch (error) {
     billingDiagnostic("offering load failed", { message: error instanceof Error ? error.message : "unknown" });
-    return { ok: false, error: "Could not load subscription options. Check your connection and try again." };
+    return { ok: false, error: "Could not load the Coverly purchase. Check your connection and try again." };
   }
 }
 

@@ -1081,7 +1081,7 @@ export default function HomeScreen() {
                 onPress={handleAddProperty}
                 hitSlop={8}
                 accessibilityRole="button"
-                accessibilityLabel={allowance.state === "loading" ? "Checking your plan" : canAddProperty ? "Add property" : "View Family plan"}
+                accessibilityLabel={allowance.state === "loading" ? "Checking your access" : canAddProperty ? "Add property" : "View property allowance"}
                 style={({ pressed }) => [
                   styles.addPropertyAction,
                   {

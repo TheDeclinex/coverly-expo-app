@@ -68,7 +68,7 @@ test("replacement, claim-pack, and purchase flows avoid duplicate starts", () =>
   assert.match(claimPack, /claimPackGenerationInFlightRef\.current\) return/);
   assert.match(claimPack, /trackEvent\("claim_pack_started"/);
   assert.match(upgrade, /purchaseActionLockRef\.current\) return/);
-  assert.match(upgrade, /paywallTrackedRef\.current\) return/);
+  assert.match(upgrade, /paywallTrackedRef\.current === retryReconciliation\) return/);
   assert.match(
     upgrade,
     /RevenueCat webhook[\s\S]*authoritative billing record/,

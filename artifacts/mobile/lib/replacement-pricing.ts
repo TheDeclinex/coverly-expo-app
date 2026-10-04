@@ -173,7 +173,7 @@ function messageForFailure(
   response: ReplacementPriceSearchFailure | null,
 ): string {
   if (status === 402 && response?.errorCode === "REPLACEMENT_PRICING_LIMIT_REACHED") {
-    return response.error || "Your Free monthly replacement price lookups have been used. Upgrade to continue searching.";
+    return response.error || "Your Free monthly replacement price lookups have been used. Own Coverly for ongoing AI assistance, or enter a value manually.";
   }
 
   return response?.error || response?.errorCode || `Replacement price search failed (${status}).`;

@@ -68,9 +68,11 @@ type ClaimPackProperties = {
   failure_category?: AnalyticsFailureCategory;
 };
 
+export const OWNERSHIP_ACTIONS = ["paywall_viewed", "product_available", "product_unavailable", "purchase_started", "purchase_completed", "purchase_cancelled", "purchase_failed", "verification_pending", "ownership_confirmed", "restore_started", "restore_succeeded", "restore_nothing_found", "restore_failed", "confirmation_started"] as const;
+export type OwnershipAction = typeof OWNERSHIP_ACTIONS[number];
 type BillingProperties = {
-  plan?: "plus" | "family";
-  billing_period?: "monthly" | "annual";
+  plan?: "plus" | "family" | "owned";
+  billing_period?: "monthly" | "annual" | "one_time";
   product_identifier?: string;
   source_screen?: AnalyticsSourceScreen;
   failure_category?: AnalyticsFailureCategory;
@@ -84,6 +86,7 @@ type ReviewProperties = {
 };
 
 export interface AnalyticsEventProperties {
+  ownership_flow: BillingProperties & { ownership_action: OwnershipAction };
   app_opened: AppActivityProperties;
   app_foregrounded: AppActivityProperties;
   property_created: InventoryProperties;
@@ -144,6 +147,7 @@ export interface AnalyticsClientDependencies {
 }
 
 const EVENT_PROPERTY_KEYS: Record<AnalyticsEventName, readonly string[]> = {
+  ownership_flow: ["ownership_action", "plan", "billing_period", "product_identifier", "source_screen", "failure_category"],
   app_opened: ["is_first_open", "authenticated"],
   app_foregrounded: ["authenticated"],
   property_created: ["property_count"],
@@ -265,13 +269,14 @@ const SOURCE_SCREENS = new Set<AnalyticsSourceScreen>([
 ]);
 
 function allowedStringValue(key: string, value: string): boolean {
+  if (key === "ownership_action") return (OWNERSHIP_ACTIONS as readonly string[]).includes(value);
   if (key === "entry_method") return value === "manual";
   if (key === "scan_mode") return SCAN_MODES.has(value as AnalyticsScanMode);
   if (key === "failure_category")
     return FAILURE_CATEGORIES.has(value as AnalyticsFailureCategory);
-  if (key === "plan") return value === "plus" || value === "family";
+  if (key === "plan") return value === "plus" || value === "family" || value === "owned";
   if (key === "billing_period")
-    return value === "monthly" || value === "annual";
+    return value === "monthly" || value === "annual" || value === "one_time";
   if (key === "source_screen")
     return SOURCE_SCREENS.has(value as AnalyticsSourceScreen);
   if (key === "delivery_method")

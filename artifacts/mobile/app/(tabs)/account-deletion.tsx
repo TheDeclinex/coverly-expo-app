@@ -1,3 +1,4 @@
+import { deletionPurchaseCopy } from "@/lib/upgrade-model";
 import { Feather } from "@expo/vector-icons";
 import { Stack, router, usePathname } from "expo-router";
 import React from "react";
@@ -20,13 +21,15 @@ export default function AccountDeletionScreen() {
   const insets = useSafeAreaInsets();
   const pathname = usePathname();
   const { session } = useAuth();
-  const { customerInfo, isPlus, isFamily } = useEntitlements();
+  const { customerInfo, accessClass } = useEntitlements();
   const [confirmed, setConfirmed] = React.useState(false);
   const [isSubmitting, setIsSubmitting] = React.useState(false);
   const [submitted, setSubmitted] = React.useState(false);
   const [inlineError, setInlineError] = React.useState<string | null>(null);
   const submissionLockRef = React.useRef(false);
-  const managementUrl = (isPlus || isFamily) && (Platform.OS === "ios" || Platform.OS === "android")
+  const legacy = accessClass === "legacy_plus" || accessClass === "legacy_family";
+  const purchaseCopy = deletionPurchaseCopy(legacy);
+  const managementUrl = legacy && (Platform.OS === "ios" || Platform.OS === "android")
     ? customerInfo?.managementURL ?? null
     : null;
   const canSubmit = canSubmitAccountDeletion(confirmed, isSubmitting);
@@ -119,8 +122,8 @@ export default function AccountDeletionScreen() {
       <View style={[styles.subscriptionCard, { backgroundColor: `${colors.warning}0D`, borderColor: `${colors.warning}55`, borderRadius: colors.radius }]}>
         <Feather name="alert-triangle" size={20} color={colors.warning} />
         <View style={styles.subscriptionCopy}>
-          <Text style={[styles.cardTitle, { color: colors.foreground }]}>Store subscriptions are separate</Text>
-          <Text style={[styles.helper, { color: colors.mutedForeground }]}>Submitting this request does not cancel an Apple App Store or Google Play subscription. If you have one, cancel it separately through your store subscription settings.</Text>
+          <Text style={[styles.cardTitle, { color: colors.foreground }]}>{purchaseCopy.title}</Text>
+          <Text style={[styles.helper, { color: colors.mutedForeground }]}>{purchaseCopy.body}</Text>
           {managementUrl ? <Pressable
             accessibilityRole="link"
             accessibilityLabel="Manage store subscription"

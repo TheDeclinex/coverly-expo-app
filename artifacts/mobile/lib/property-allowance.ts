@@ -123,6 +123,7 @@ export type PropertyAllowanceCopy = {
   benefit: string;
   primaryCta: string;
   secondaryCta: string;
+  action: "purchase" | "dismiss" | "retry";
 };
 
 export function propertyAllowanceCopy(
@@ -132,8 +133,8 @@ export function propertyAllowanceCopy(
     return {
       title:
         allowance.state === "loading"
-          ? "Checking your plan"
-          : "We couldn't check your plan",
+          ? "Checking your access"
+          : "We couldn't check your access",
       body:
         allowance.state === "loading"
           ? "This will only take a moment."
@@ -141,14 +142,18 @@ export function propertyAllowanceCopy(
       benefit: "",
       primaryCta: allowance.state === "loading" ? "Please wait" : "Try again",
       secondaryCta: "Continue with current property",
+      action: "retry",
     };
   }
 
+  const free = allowance.accessClass === "free";
   return {
     title: "You've reached your property limit",
-    body: "Your current plan includes one property.\n\nUpgrade to Coverly Family to add additional properties while continuing to manage your existing property.",
+    body: free ? "Free includes one property. Own Coverly with one purchase to document up to 5 properties. You can keep managing your existing inventory."
+      : `Your current access includes ${allowance.propertyLimit ?? "your existing"} ${allowance.propertyLimit === 1 ? "property" : "properties"}. Keep managing your existing inventory; another purchase is not needed.`,
     benefit: "",
-    primaryCta: "Upgrade to Family",
+    primaryCta: free ? "Own Coverly" : "Back to my properties",
     secondaryCta: "Continue with current property",
+    action: free ? "purchase" : "dismiss",
   };
 }

@@ -63,6 +63,7 @@ export class EntitlementController {
   private queue: Promise<unknown> = Promise.resolve();
   private automatic: Promise<void> | null = null;
   private lastAutomatic = -Infinity;
+  private requireOwnership = false;
   private fingerprint: string | null = null;
   private state: EntitlementState = {
     access: null,
@@ -166,7 +167,7 @@ export class EntitlementController {
       };
     if (
       this.state.verification === "unavailable" ||
-      (this.state.pending === "purchase" && !eligible(this.state.access))
+      (this.state.pending === "purchase" && (!eligible(this.state.access) || (this.requireOwnership && !this.state.access?.ownsCoverly)))
     )
       return {
         ok: kind === "purchase",
@@ -209,6 +210,7 @@ export class EntitlementController {
   async transact(
     kind: "purchase" | "restore",
     store: () => Promise<StoreResult>,
+    requireOwnership = false,
   ): Promise<RecoveryResult> {
     if (!this.deps.isCurrent()) return changedAccount();
     if (this.state.purchasing)
@@ -219,6 +221,7 @@ export class EntitlementController {
       };
     // Once the store has succeeded, another Buy action only retries verification.
     if (this.state.pending) return this.retry();
+    this.requireOwnership = requireOwnership;
     this.update({ purchasing: true, error: null });
     try {
       const transaction = await store();

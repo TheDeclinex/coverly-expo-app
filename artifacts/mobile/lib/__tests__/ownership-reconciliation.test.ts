@@ -411,11 +411,23 @@ test("bounded owner allowance and exhaustion never produce Plus upsell", () => {
   assert.equal(allowance?.isBypassed, false);
   assert.equal(allowance?.resetAt, row.reset_at);
   assert.equal(
-    normalizeLimitError({ errorCode: "OWNER_FAIR_USE_EXHAUSTED", status: 402 }),
-    null,
+    normalizeLimitError({ errorCode: "OWNER_FAIR_USE_EXHAUSTED", status: 402 })?.primaryAction,
+    "dismiss",
   );
   assert.equal(
     normaliseUsageAllowance({ ...row, policy_class: "free" })?.isLimited,
     true,
   );
+});
+
+test("one-time purchase cannot be confirmed by a stale legacy entitlement", async () => {
+  const h = setup("legacy_plus"); let purchases = 0;
+  const store = async () => { purchases++; return { ok: true as const }; };
+  const first = await h.controller.transact("purchase", store, true);
+  assert.equal(first.ok, true); assert.equal(first.pending, true);
+  const retry = await h.controller.transact("purchase", store, true);
+  assert.equal(retry.pending, true); assert.equal(purchases, 1);
+  h.set("owner");
+  assert.equal((await h.controller.retry()).outcome, "confirmed");
+  assert.equal(purchases, 1);
 });

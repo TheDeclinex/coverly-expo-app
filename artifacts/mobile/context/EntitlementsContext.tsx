@@ -1,3 +1,5 @@
+import { selectOwnershipPackage } from "@/lib/upgrade-model";
+import { ownershipPackageMapping } from "@/lib/billing";
 import { useQueryClient } from "@tanstack/react-query";
 import { router, type Href } from "expo-router";
 import React, {
@@ -75,6 +77,8 @@ type EntitlementsValue = {
   ) => boolean;
   enforce: (feature: GatedFeature, currentPropertyCount?: number) => boolean;
   refreshEntitlements: () => Promise<void>;
+  refreshOffering: () => Promise<void>;
+  pendingOperation: "purchase" | "restore" | null;
   retryReconciliation: () => Promise<RecoveryResult>;
   purchasePackage: (pkg: PurchasesPackage) => Promise<RecoveryResult>;
   restorePurchases: () => Promise<RecoveryResult>;
@@ -195,19 +199,52 @@ export function EntitlementsProvider({
     () => controller.retry(),
     [controller],
   );
+  const refreshOffering = useCallback(async () => {
+    if (!userId) return;
+    const configured = await configureBilling(userId);
+    if (active.current !== controller) return;
+    const result = configured.ok ? await loadOffering() : configured;
+    if (active.current !== controller) return;
+    setStore((previous) => ({
+      owner: controller,
+      offering: result.ok ? (result.value ?? null) : null,
+      customerInfo:
+        previous?.owner === controller ? previous.customerInfo : null,
+      error: result.ok ? null : result.error,
+    }));
+  }, [controller, userId]);
   const purchasePackage = useCallback(
     (pkg: PurchasesPackage) =>
-      controller.transact("purchase", async () => {
-        const result = await buyPackage(pkg, userId);
-        if (result.ok && active.current === controller)
-          setStore((previous) => ({
-            owner: controller,
-            offering: previous?.owner === controller ? previous.offering : null,
-            customerInfo: result.value,
-            error: null,
-          }));
-        return result;
-      }),
+      controller.transact(
+        "purchase",
+        async () => {
+          const snapshot = controller.getSnapshot();
+          if (
+            !selectOwnershipPackage([pkg], ownershipPackageMapping) ||
+            !snapshot.access ||
+            snapshot.access.effectivePlan !== "free" ||
+            snapshot.access.accessClass !== "free" ||
+            snapshot.access.ownsCoverly ||
+            !["verified", "revoked"].includes(snapshot.verification)
+          )
+            return {
+              ok: false as const,
+              error:
+                "A Coverly purchase is not available for this account right now. Refresh access or restore purchases.",
+            };
+          const result = await buyPackage(pkg, userId);
+          if (result.ok && active.current === controller)
+            setStore((previous) => ({
+              owner: controller,
+              offering:
+                previous?.owner === controller ? previous.offering : null,
+              customerInfo: result.value,
+              error: null,
+            }));
+          return result;
+        },
+        true,
+      ),
     [controller, userId],
   );
   const restorePurchases = useCallback(
@@ -293,6 +330,8 @@ export function EntitlementsProvider({
     shouldShowUpgradeFor,
     enforce,
     refreshEntitlements,
+    refreshOffering,
+    pendingOperation: state.pending,
     retryReconciliation,
     purchasePackage,
     restorePurchases,
